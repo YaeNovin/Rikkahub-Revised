@@ -60,11 +60,14 @@ class ResponseApiRequestMessageTest {
         return api.buildRequestBody(providerSetting, listOf(UIMessage.user("hello")), params, stream)
     }
 
-    private fun createReasoningParams(reasoningLevel: ReasoningLevel = ReasoningLevel.OFF): TextGenerationParams {
+    private fun createReasoningParams(
+        reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
+        modelId: String = "test-model",
+    ): TextGenerationParams {
         return TextGenerationParams(
             model = Model(
-                modelId = "test-model",
-                displayName = "test-model",
+                modelId = modelId,
+                displayName = modelId,
                 abilities = listOf(ModelAbility.REASONING)
             ),
             reasoningLevel = reasoningLevel
@@ -367,6 +370,43 @@ class ResponseApiRequestMessageTest {
         val reasoning = requestBody["reasoning"]?.jsonObject
         assertTrue("reasoning should exist", reasoning != null)
         assertEquals("low", reasoning!!["effort"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `response api caps max effort by provider`() {
+        val openAi = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1"),
+            params = createReasoningParams(
+                reasoningLevel = ReasoningLevel.MAX,
+                modelId = "gpt-5.2-codex",
+            ),
+        )
+        val volc = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(
+                baseUrl = "https://ark.cn-beijing.volces.com/api/v3"
+            ),
+            params = createReasoningParams(reasoningLevel = ReasoningLevel.MAX),
+        )
+        val olderOpenAi = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1"),
+            params = createReasoningParams(
+                reasoningLevel = ReasoningLevel.MAX,
+                modelId = "gpt-5",
+            ),
+        )
+
+        assertEquals(
+            "xhigh",
+            openAi["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
+        )
+        assertEquals(
+            "high",
+            volc["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
+        )
+        assertEquals(
+            "high",
+            olderOpenAi["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
+        )
     }
 
     @Test

@@ -45,7 +45,7 @@ android {
         applicationId = "me.rerere.rikkahub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 178
+        versionCode = 179
         versionName = releaseVersionName
         buildConfigField("String", "SOURCE_REPOSITORY_URL", sourceRepositoryUrl.asBuildConfigString())
         buildConfigField("String", "SOURCE_LICENSE_URL", sourceLicenseUrl.asBuildConfigString())

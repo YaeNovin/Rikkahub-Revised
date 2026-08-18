@@ -29,6 +29,8 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.cappedBudget
+import me.rerere.ai.core.cappedEffort
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -271,7 +273,7 @@ class ChatCompletionsAPI(
                             when (level) {
                                 ReasoningLevel.OFF -> put("effort", "none")
                                 ReasoningLevel.AUTO -> put("enabled", true)
-                                else -> put("effort", level.effort)
+                                else -> put("effort", level.cappedEffort(ReasoningLevel.XHIGH)!!)
                             }
                         })
                     }
@@ -280,7 +282,9 @@ class ChatCompletionsAPI(
                         // 阿里云百炼
                         // https://bailian.console.aliyun.com/console?tab=doc#/doc/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2870973.html&renderType=iframe
                         put("enable_thinking", level.isEnabled)
-                        if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
+                        level.cappedBudget(ReasoningLevel.MAX.budgetTokens)?.let {
+                            put("thinking_budget", it)
+                        }
                     }
 
                     "ark.cn-beijing.volces.com" -> {
@@ -363,7 +367,8 @@ class ChatCompletionsAPI(
                         if (level.isEnabled && level != ReasoningLevel.AUTO) {
                             val effort = when (level) {
                                 ReasoningLevel.MEDIUM -> "high"
-                                ReasoningLevel.XHIGH -> "max"
+                                ReasoningLevel.XHIGH,
+                                ReasoningLevel.MAX -> "max"
                                 else -> level.effort
                             }
                             put("reasoning_effort", effort)
@@ -374,7 +379,8 @@ class ChatCompletionsAPI(
                         if ("deepseek-v4" in params.model.modelId.lowercase()) {
                             if (level != ReasoningLevel.AUTO) {
                                 val effort = when (level) {
-                                    ReasoningLevel.XHIGH -> "max"
+                                    ReasoningLevel.XHIGH,
+                                    ReasoningLevel.MAX -> "max"
                                     ReasoningLevel.OFF -> "none"
                                     else -> "high"
                                 }
@@ -382,14 +388,21 @@ class ChatCompletionsAPI(
                             }
                         } else {
                             if (level != ReasoningLevel.AUTO) {
-                                put("reasoning_effort", if (level.effort == "none") "low" else level.effort)
+                                put(
+                                    "reasoning_effort",
+                                    if (level == ReasoningLevel.OFF) {
+                                        "low"
+                                    } else {
+                                        level.cappedEffort(ReasoningLevel.HIGH)!!
+                                    }
+                                )
                             }
                         }
                     }
 
                     "opencode.ai" -> {
                         if (level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", level.effort)
+                            put("reasoning_effort", level.cappedEffort(ReasoningLevel.XHIGH)!!)
                         }
                     }
 
@@ -397,7 +410,14 @@ class ChatCompletionsAPI(
                         // OpenAI 官方
                         // 文档中，completions API 只支持 "low", "medium", "high"
                         if (level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", if (level.effort == "none") "low" else level.effort)
+                            put(
+                                "reasoning_effort",
+                                if (level == ReasoningLevel.OFF) {
+                                    "low"
+                                } else {
+                                    level.cappedEffort(ReasoningLevel.HIGH)!!
+                                }
+                            )
                         }
                     }
                 }

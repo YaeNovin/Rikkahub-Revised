@@ -19,7 +19,9 @@ enum class ReasoningLevel(
     @SerialName("high")
     HIGH(8_000, "high"),
     @SerialName("xhigh")
-    XHIGH(16_000, "xhigh");
+    XHIGH(16_000, "xhigh"),
+    @SerialName("max")
+    MAX(32_000, "max");
 
     val isEnabled: Boolean
         get() = this != OFF
@@ -29,4 +31,26 @@ enum class ReasoningLevel(
             return entries.minByOrNull { kotlin.math.abs(it.budgetTokens - (budgetTokens ?: AUTO.budgetTokens)) } ?: AUTO
         }
     }
+}
+
+private val ENABLED_REASONING_LEVELS = listOf(
+    ReasoningLevel.LOW,
+    ReasoningLevel.MEDIUM,
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH,
+    ReasoningLevel.MAX,
+)
+
+internal fun ReasoningLevel.cappedEffort(maximum: ReasoningLevel): String? {
+    if (this == ReasoningLevel.AUTO) return null
+    if (this == ReasoningLevel.OFF) return ReasoningLevel.OFF.effort
+
+    val requestedIndex = ENABLED_REASONING_LEVELS.indexOf(this).coerceAtLeast(0)
+    val maximumIndex = ENABLED_REASONING_LEVELS.indexOf(maximum).coerceAtLeast(0)
+    return ENABLED_REASONING_LEVELS[minOf(requestedIndex, maximumIndex)].effort
+}
+
+internal fun ReasoningLevel.cappedBudget(maximumTokens: Int): Int? = when (this) {
+    ReasoningLevel.AUTO -> null
+    else -> budgetTokens.coerceAtMost(maximumTokens)
 }

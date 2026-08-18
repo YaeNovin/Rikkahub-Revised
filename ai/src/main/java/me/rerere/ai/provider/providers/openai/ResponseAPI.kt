@@ -24,6 +24,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.cappedEffort
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
@@ -208,6 +209,10 @@ class ResponseAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
+        val maximumReasoningEffort = resolveResponseMaximumReasoningEffort(
+            host = host,
+            modelId = params.model.modelId,
+        )
         return buildJsonObject {
             put("model", params.model.modelId)
             put("stream", stream)
@@ -238,7 +243,7 @@ class ResponseAPI(
                         put("summary", "auto")
                     }
                     if (level != ReasoningLevel.AUTO) {
-                        put("effort", level.effort)
+                        put("effort", level.cappedEffort(maximumReasoningEffort)!!)
                     }
                 })
                 if (capabilities.supportEncryptedContent) {
@@ -708,16 +713,24 @@ private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
 
 internal data class ResponseProviderCapabilities(
     val supportsReasoningSummary: Boolean = true,
-    val supportEncryptedContent: Boolean = true
+    val supportEncryptedContent: Boolean = true,
 )
 
 internal fun resolveResponseProviderCapabilities(host: String): ResponseProviderCapabilities {
     return when (host) {
         "ark.cn-beijing.volces.com" -> ResponseProviderCapabilities(
             supportsReasoningSummary = false,
-            supportEncryptedContent = false
+            supportEncryptedContent = false,
         )
 
         else -> ResponseProviderCapabilities()
     }
+}
+
+internal fun resolveResponseMaximumReasoningEffort(host: String, modelId: String): ReasoningLevel {
+    if (host != "api.openai.com") return ReasoningLevel.HIGH
+    val normalizedModel = modelId.lowercase()
+    val supportsXHigh = "codex" in normalizedModel ||
+        Regex("gpt-5\\.(?:[2-9]|\\d{2,})").containsMatchIn(normalizedModel)
+    return if (supportsXHigh) ReasoningLevel.XHIGH else ReasoningLevel.HIGH
 }

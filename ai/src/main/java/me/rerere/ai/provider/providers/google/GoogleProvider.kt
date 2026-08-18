@@ -28,6 +28,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.cappedBudget
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.EmbeddingGenerationParams
@@ -475,10 +476,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                 when (params.reasoningLevel) {
                                     ReasoningLevel.LOW -> put("thinkingLevel", "low")
                                     ReasoningLevel.MEDIUM -> put("thinkingLevel", "medium")
-                                    else -> put("thinkingLevel", "high") // HIGH, XHIGH
+                                    else -> put("thinkingLevel", "high") // HIGH, XHIGH, MAX
                                 }
                             } else {
-                                put("thinkingBudget", params.reasoningLevel.budgetTokens)
+                                val maximumBudget = if (isGeminiPro) 32_768 else 24_576
+                                params.reasoningLevel.cappedBudget(maximumBudget)?.let {
+                                    put("thinkingBudget", it)
+                                }
                             }
                         }
                     }

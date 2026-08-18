@@ -20,6 +20,7 @@ import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.repository.FilesRepository
+import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.exportImageFile
 import me.rerere.rikkahub.utils.getActivity
@@ -29,6 +30,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 class FilesManager(
     private val context: Context,
     private val repository: FilesRepository,
+    private val genMediaRepository: GenMediaRepository,
     private val appScope: AppScope,
 ) {
     companion object {
@@ -404,6 +406,59 @@ class FilesManager(
         false
     }
 
+    suspend fun deleteFilesOlderThan(
+        retentionDays: Int,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): FileCleanupResult = withContext(Dispatchers.IO) {
+        val cutoffMillis = retentionCutoffMillis(retentionDays, nowMillis)
+        deleteFilesBefore(cutoffMillis)
+    }
+
+    suspend fun deleteAllChatAndGeneratedFiles(): FileCleanupResult = withContext(Dispatchers.IO) {
+        deleteFilesBefore(Long.MAX_VALUE)
+    }
+
+    private suspend fun deleteFilesBefore(cutoffMillis: Long): FileCleanupResult {
+        var deletedChatFiles = 0
+        var deletedGeneratedImages = 0
+        var failedFiles = 0
+
+        repository.listByFolderBefore(FileFolders.UPLOAD, cutoffMillis).forEach { entity ->
+            val deleted = runCatching {
+                deleteFileIfPresent(getFile(entity)) && repository.deleteById(entity.id) > 0
+            }.getOrDefault(false)
+            if (deleted) {
+                deletedChatFiles++
+            } else {
+                failedFiles += 1
+            }
+        }
+
+        genMediaRepository.getMediaBefore(cutoffMillis).forEach { media ->
+            val file = resolveFileInFolder(
+                filesDir = context.filesDir,
+                folder = GENERATED_IMAGES_FOLDER,
+                relativePath = media.path,
+            )
+            val deleted = runCatching {
+                if (file == null || !deleteFileIfPresent(file)) return@runCatching false
+                genMediaRepository.deleteMedia(media.id)
+                true
+            }.getOrDefault(false)
+            if (deleted) {
+                deletedGeneratedImages++
+            } else {
+                failedFiles += 1
+            }
+        }
+
+        return FileCleanupResult(
+            deletedChatFiles = deletedChatFiles,
+            deletedGeneratedImages = deletedGeneratedImages,
+            failedFiles = failedFiles,
+        )
+    }
+
     private fun createTargetFile(folder: String, displayName: String, mimeType: String?): File {
         val dir = File(context.filesDir, folder)
         if (!dir.exists()) {
@@ -485,6 +540,43 @@ data class SyncResult(
     val inserted: Int,
     val removed: Int,
 )
+
+data class FileCleanupResult(
+    val deletedChatFiles: Int,
+    val deletedGeneratedImages: Int,
+    val failedFiles: Int,
+) {
+    val totalDeleted: Int
+        get() = deletedChatFiles + deletedGeneratedImages
+}
+
+private const val MILLIS_PER_DAY = 24L * 60 * 60 * 1_000
+const val MAX_FILE_RETENTION_DAYS = 36_500
+private const val GENERATED_IMAGES_FOLDER = "images"
+
+internal fun retentionCutoffMillis(retentionDays: Int, nowMillis: Long): Long {
+    require(retentionDays in 1..MAX_FILE_RETENTION_DAYS) {
+        "Retention days must be between 1 and $MAX_FILE_RETENTION_DAYS"
+    }
+    return nowMillis - retentionDays * MILLIS_PER_DAY
+}
+
+internal fun resolveFileInFolder(filesDir: File, folder: String, relativePath: String): File? {
+    val normalizedFolder = folder.trim('/', '\\')
+    val normalizedPath = relativePath.replace('\\', '/').trimStart('/')
+    if (!normalizedPath.startsWith("$normalizedFolder/")) return null
+
+    val canonicalFolder = runCatching { File(filesDir, normalizedFolder).canonicalFile }.getOrNull()
+        ?: return null
+    val candidate = runCatching { File(filesDir, normalizedPath).canonicalFile }.getOrNull()
+        ?: return null
+    return candidate.takeIf {
+        it.path.startsWith("${canonicalFolder.path}${File.separator}")
+    }
+}
+
+private fun deleteFileIfPresent(file: File): Boolean =
+    !file.exists() || runCatching { file.delete() }.getOrDefault(false)
 
 object FileFolders {
     const val UPLOAD = "upload"

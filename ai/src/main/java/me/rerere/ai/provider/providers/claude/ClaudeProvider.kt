@@ -83,6 +83,29 @@ private const val ANTHROPIC_VERSION = "2023-06-01"
 private const val CLAUDE_PAUSE_TURN = "pause_turn"
 private const val MAX_PAUSE_TURN_CONTINUATIONS = 5
 
+internal fun supportsAnthropicMaxEffort(modelId: String): Boolean {
+    val normalized = modelId.lowercase().replace('.', '-').replace('_', '-')
+    val match = Regex("(?:^|-)opus-(\\d+)-(\\d+)(?:-|$)").find(normalized) ?: return false
+    val major = match.groupValues[1].toIntOrNull() ?: return false
+    val minor = match.groupValues[2].toIntOrNull() ?: return false
+    return major > 4 || (major == 4 && minor >= 6)
+}
+
+internal fun resolveAnthropicReasoningEffort(
+    modelId: String,
+    level: ReasoningLevel,
+): String? = when (level) {
+    ReasoningLevel.OFF,
+    ReasoningLevel.AUTO -> null
+
+    ReasoningLevel.LOW -> "low"
+    ReasoningLevel.MEDIUM -> "medium"
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH -> "high"
+
+    ReasoningLevel.MAX -> if (supportsAnthropicMaxEffort(modelId)) "max" else "high"
+}
+
 internal suspend fun generateClaudeWithPauseTurn(
     messages: List<UIMessage>,
     model: Model,
@@ -483,21 +506,39 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         put("thinking", buildJsonObject { put("type", "disabled") })
                     }
 
-                    ReasoningLevel.AUTO -> {
-                        put("thinking", buildJsonObject {
-                            put("type", "adaptive")
-                            put("display", "summarized")
-                        })
-                    }
-
                     else -> {
-                        put("thinking", buildJsonObject {
-                            put("type", "adaptive")
-                            put("display", "summarized")
-                        })
-                        put("output_config", buildJsonObject {
-                            put("effort", params.reasoningLevel.effort)
-                        })
+                        if (providerSetting.baseUrl.contains("api.minimaxi.com", ignoreCase = true)) {
+                            val maxTokens = params.maxTokens ?: 64_000
+                            if (maxTokens > 1_024) {
+                                val requestedBudget = if (params.reasoningLevel == ReasoningLevel.AUTO) {
+                                    ReasoningLevel.HIGH.budgetTokens
+                                } else {
+                                    params.reasoningLevel.budgetTokens
+                                }
+                                put("thinking", buildJsonObject {
+                                    put("type", "enabled")
+                                    put("budget_tokens", requestedBudget.coerceIn(1_024, maxTokens - 1))
+                                })
+                            } else {
+                                put("thinking", buildJsonObject { put("type", "disabled") })
+                            }
+                        } else {
+                            put("thinking", buildJsonObject {
+                                put("type", "adaptive")
+                                put("display", "summarized")
+                            })
+                            if (params.reasoningLevel != ReasoningLevel.AUTO) {
+                                put("output_config", buildJsonObject {
+                                    put(
+                                        "effort",
+                                        resolveAnthropicReasoningEffort(
+                                            modelId = params.model.modelId,
+                                            level = params.reasoningLevel,
+                                        )!!,
+                                    )
+                                })
+                            }
+                        }
                     }
                 }
             }
