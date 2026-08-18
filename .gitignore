@@ -1,0 +1,22 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+/app/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.cursor
+.history
+.kotlin
+/build-*.log
+
+# Android release signing material must stay outside the repository.
+*.jks
+*.keystore
+*.p12
+*.pfx
+/release-signing/

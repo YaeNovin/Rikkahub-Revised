@@ -1,0 +1,28 @@
+Rikkahub Revised - RikkaHub Modified Distribution
+
+Modification notice date: 2026-08-18
+
+This repository contains a modified version of RikkaHub. The development
+baseline is the upstream RikkaHub 2.4.8 release at commit
+8824e0e841f2008b322ca8214a27a978e4b4abaa.
+
+Upstream project: https://github.com/rikkahub/rikkahub
+
+Distribution name: Rikkahub Revised
+Android application ID: me.rerere.rikkahub.revised
+
+The distinct application ID allows this distribution and upstream RikkaHub to
+be installed together. Android stores their app data separately; this
+distribution does not automatically inherit or migrate upstream app data.
+
+The upstream work and this modified distribution are provided under the GNU
+Affero General Public License, version 3 (AGPL-3.0). The complete license text
+is in LICENSE. The modified features and relevant dates are summarized in
+MODIFICATIONS.md.
+
+This modified distribution is not an official upstream RikkaHub release and
+must not be represented as endorsed or supported by the upstream maintainers.
+
+Bundled third-party components remain under their own licenses. Their versions,
+sources, checksums, notices, and packaged license paths are listed in
+THIRD_PARTY_NOTICES.md.
