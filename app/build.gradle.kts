@@ -10,7 +10,7 @@ import java.util.Properties
 // Test builds remain identifiable across installs without changing the release version.
 val buildTimestamp = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
     .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-val releaseVersionName = "2.4.8-revised.2"
+val releaseVersionName = "2.4.8-revised.3"
 val testVersionName = "$releaseVersionName-dev-$buildTimestamp"
 val sourceRepositoryUrl = providers.gradleProperty("rikkahub.sourceRepositoryUrl")
     .getOrElse("https://github.com/YaeNovin/Rikkahub-Revised")
