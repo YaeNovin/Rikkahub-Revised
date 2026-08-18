@@ -53,6 +53,26 @@ class UpdateCheckerTest {
         assertEquals(emptyList<UpdateDownload>(), downloads)
     }
 
+    @Test
+    fun `uses a unique versioned destination for every download attempt`() {
+        val download = UpdateDownload(
+            name = "app-arm64-v8a-release.apk",
+            url =
+                "https://github.com/YaeNovin/Rikkahub-Revised/releases/download/" +
+                    "v2.4.8-revised.3/app-arm64-v8a-release.apk",
+            size = "32.0 MB",
+        )
+
+        assertEquals(
+            "Rikkahub-Revised-v2.4.8-revised.3-1723980000000-app-arm64-v8a-release.apk",
+            buildDownloadFileName(download, timestampMillis = 1_723_980_000_000),
+        )
+        assertEquals(
+            "Rikkahub-Revised-v2.4.8-revised.3-1723980000001-app-arm64-v8a-release.apk",
+            buildDownloadFileName(download, timestampMillis = 1_723_980_000_001),
+        )
+    }
+
     private fun asset(name: String, size: Long = 1_024): GitHubReleaseAsset =
         GitHubReleaseAsset(
             name = name,

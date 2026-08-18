@@ -82,13 +82,20 @@ class UpdateChecker(private val client: OkHttpClient) {
     fun downloadUpdate(context: Context, download: UpdateDownload) {
         runCatching {
             val request = DownloadManager.Request(download.url.toUri()).apply {
-                setTitle(download.name)
+                val destinationName = buildDownloadFileName(
+                    download = download,
+                    timestampMillis = System.currentTimeMillis(),
+                )
+                setTitle(destinationName)
                 setDescription(context.getString(R.string.update_card_downloading))
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setAllowedNetworkTypes(
                     DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE
                 )
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, download.name)
+                setDestinationInExternalPublicDir(
+                    Environment.DIRECTORY_DOWNLOADS,
+                    destinationName,
+                )
                 setMimeType("application/vnd.android.package-archive")
             }
             val downloadManager =
@@ -177,6 +184,31 @@ internal fun formatFileSize(bytes: Long): String = when {
         String.format(Locale.US, "%.1f MB", bytes / (1_024.0 * 1_024))
     else -> String.format(Locale.US, "%.1f GB", bytes / (1_024.0 * 1_024 * 1_024))
 }
+
+internal fun buildDownloadFileName(
+    download: UpdateDownload,
+    timestampMillis: Long,
+): String {
+    val releaseTag = download.url
+        .substringAfter(DOWNLOAD_URL_PREFIX, missingDelimiterValue = "")
+        .substringBefore('/')
+        .sanitizeFileNamePart()
+        .take(64)
+    val assetName = download.name
+        .substringAfterLast('/')
+        .sanitizeFileNamePart()
+        .takeLast(128)
+        .ifBlank { "update.apk" }
+    return listOf(
+        "Rikkahub-Revised",
+        releaseTag,
+        timestampMillis.toString(),
+        assetName,
+    ).filter(String::isNotBlank).joinToString("-")
+}
+
+private fun String.sanitizeFileNamePart(): String =
+    replace(Regex("[^A-Za-z0-9._-]"), "_")
 
 @Serializable
 data class UpdateDownload(

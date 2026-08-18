@@ -42,10 +42,10 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub.revised"
+        applicationId = "me.rerere.rikkahub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 176
+        versionCode = 177
         versionName = releaseVersionName
         buildConfigField("String", "SOURCE_REPOSITORY_URL", sourceRepositoryUrl.asBuildConfigString())
         buildConfigField("String", "SOURCE_LICENSE_URL", sourceLicenseUrl.asBuildConfigString())
@@ -107,6 +107,7 @@ android {
 
     buildTypes {
         release {
+            applicationIdSuffix = ".revised"
             signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = true
@@ -115,14 +116,13 @@ android {
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
         debug {
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = ".revised.debug"
             versionNameSuffix = "-$buildTimestamp-debug"
             buildConfigField("String", "VERSION_NAME", "\"$testVersionName-debug\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
         create("qa") {
             isDebuggable = true
-            applicationIdSuffix = ".qa"
             signingConfig = signingConfigs.getByName("qa")
             versionNameSuffix = "-$buildTimestamp"
             matchingFallbacks += listOf("debug")
