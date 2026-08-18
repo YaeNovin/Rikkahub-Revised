@@ -159,6 +159,8 @@ a network, comply with the AGPL-3.0 source-availability requirements.
 
 - [NOTICE](NOTICE) identifies the upstream project and the Revised distribution.
 - [MODIFICATIONS.md](MODIFICATIONS.md) records the material modifications.
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) lists the people who directly build and
+  maintain this independent repository.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists bundled third-party
   components and their licenses.
 - [RELEASE_SIGNING.md](RELEASE_SIGNING.md) records the public signing identity

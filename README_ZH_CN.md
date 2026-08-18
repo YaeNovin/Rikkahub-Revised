@@ -143,6 +143,7 @@ Rikkahub Revised 与其上游基础一致，采用
 
 - [NOTICE](NOTICE) 说明上游项目与 Revised 发行版的关系。
 - [MODIFICATIONS.md](MODIFICATIONS.md) 记录主要修改内容。
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) 列出直接构建与维护本独立仓库的人员。
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 列出内置第三方组件及其许可证。
 - [RELEASE_SIGNING.md](RELEASE_SIGNING.md) 记录公开签名身份和发行密钥连续性要求。
 
