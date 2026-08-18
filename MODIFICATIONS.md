@@ -13,6 +13,20 @@ release. It does not claim authorship of unchanged upstream code. Detailed file
 lists and release checks are maintained outside the repository during release
 preparation.
 
+## 2.4.8-revised.2 Maintenance Changes / 维护变更
+
+- English: Fixed automatic context-window discovery for OpenAI-, Google-, and
+  Anthropic-compatible model lists. Explicit provider metadata takes priority,
+  known model limits provide a fallback, and saved manual values are preserved.
+  中文：修复 OpenAI、Google 与 Anthropic 兼容协议的上下文窗口自动获取；优先采用
+  提供商返回值，在缺失时使用已知模型限制回退，并保留用户手动设置。
+- English: Removed the upstream official-website entry from the About screen
+  and made the displayed application name follow the Revised app resource.
+  中文：从“关于”界面移除上游官网入口，并让界面显示名称跟随 Revised 应用资源。
+- English: Added a bilingual automatic context-compression status with a
+  continuous progress animation during rolling-summary refreshes.
+  中文：滚动摘要自动刷新时显示中英文自动压缩状态，并提供持续进度动画。
+
 ## Major Modifications
 
 - Replaced fixed message-count truncation with token-aware rolling context
@@ -82,7 +96,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.1` and signing values
+- `release` uses `2.4.8-revised.2` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.

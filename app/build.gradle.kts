@@ -10,7 +10,7 @@ import java.util.Properties
 // Test builds remain identifiable across installs without changing the release version.
 val buildTimestamp = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
     .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-val releaseVersionName = "2.4.8-revised.1"
+val releaseVersionName = "2.4.8-revised.2"
 val testVersionName = "$releaseVersionName-dev-$buildTimestamp"
 val sourceRepositoryUrl = providers.gradleProperty("rikkahub.sourceRepositoryUrl")
     .getOrElse("https://github.com/YaeNovin/Rikkahub-Revised")
@@ -45,7 +45,7 @@ android {
         applicationId = "me.rerere.rikkahub.revised"
         minSdk = 26
         targetSdk = 37
-        versionCode = 175
+        versionCode = 176
         versionName = releaseVersionName
         buildConfigField("String", "SOURCE_REPOSITORY_URL", sourceRepositoryUrl.asBuildConfigString())
         buildConfigField("String", "SOURCE_LICENSE_URL", sourceLicenseUrl.asBuildConfigString())

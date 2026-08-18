@@ -34,6 +34,7 @@ import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
@@ -134,7 +135,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             val response = client.newCall(request).await()
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: error("empty body")
-                Log.d(TAG, "listModels: $body")
                 val bodyObject = json.parseToJsonElement(body).jsonObject
                 val models = bodyObject["models"]?.jsonArray ?: return@withContext emptyList()
 
@@ -153,7 +153,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         modelId = modelObject["name"]!!.jsonPrimitive.content.substringAfter("/"),
                         displayName = modelObject["displayName"]!!.jsonPrimitive.content,
                         type = if ("generateContent" in supportedGenerationMethods) ModelType.CHAT else ModelType.EMBEDDING,
-                        contextWindowTokens = modelObject.contextWindowTokensOrNull(),
+                        contextWindowTokens = modelObject.contextWindowTokensOrNull(
+                            modelId = modelObject["name"]!!.jsonPrimitive.content,
+                            protocol = ModelDiscoveryProtocol.GOOGLE,
+                        ),
                     )
                 }
             } else {

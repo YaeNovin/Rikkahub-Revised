@@ -27,7 +27,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`v2.4.8-revised.1`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.1) |
+| 当前版本 | [`v2.4.8-revised.2`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.2) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |

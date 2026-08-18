@@ -21,9 +21,11 @@ class ModelContextWindowTest {
         val values = listOf(
             "{\"inputTokenLimit\":1048576}" to 1_048_576,
             "{\"context_length\":\"128000\"}" to 128_000,
+            "{\"contextWindow\":\"128K\"}" to 128_000,
             "{\"context_window_tokens\":32768}" to 32_768,
             "{\"limits\":{\"max_input_tokens\":200000}}" to 200_000,
             "{\"architecture\":{\"max_context_length\":65536}}" to 65_536,
+            "{\"top_provider\":{\"context_length\":131072}}" to 131_072,
         )
 
         values.forEach { (body, expected) ->
@@ -45,5 +47,56 @@ class ModelContextWindowTest {
             val model = Json.parseToJsonElement(body).jsonObject
             assertEquals(null, model.contextWindowTokensOrNull())
         }
+    }
+
+    @Test
+    fun `uses protocol fallback only when discovery metadata is absent`() {
+        val empty = Json.parseToJsonElement("{}").jsonObject
+        val explicit = Json.parseToJsonElement("{\"context_length\":64000}").jsonObject
+
+        assertEquals(
+            400_000,
+            empty.contextWindowTokensOrNull("gpt-5", ModelDiscoveryProtocol.OPENAI),
+        )
+        assertEquals(
+            1_048_576,
+            empty.contextWindowTokensOrNull("gemini-2.5-flash", ModelDiscoveryProtocol.GOOGLE),
+        )
+        assertEquals(
+            200_000,
+            empty.contextWindowTokensOrNull("claude-sonnet-4-5", ModelDiscoveryProtocol.ANTHROPIC),
+        )
+        assertEquals(
+            64_000,
+            explicit.contextWindowTokensOrNull("gpt-5", ModelDiscoveryProtocol.OPENAI),
+        )
+        assertEquals(
+            200_000,
+            empty.contextWindowTokensOrNull("anthropic/claude-sonnet-4-5", ModelDiscoveryProtocol.OPENAI),
+        )
+        assertEquals(
+            null,
+            empty.contextWindowTokensOrNull("custom-deployment", ModelDiscoveryProtocol.OPENAI),
+        )
+    }
+
+    @Test
+    fun `merges discovered capacities without replacing manual settings`() {
+        val configured = listOf(
+            Model(modelId = "gpt-5"),
+            Model(modelId = "gpt-4o", contextWindowTokens = 96_000),
+            Model(modelId = "custom-deployment"),
+        )
+        val discovered = listOf(
+            Model(modelId = "gpt-5", contextWindowTokens = 400_000),
+            Model(modelId = "gpt-4o", contextWindowTokens = 128_000),
+        )
+
+        val merged = mergeDiscoveredContextWindows(configured, discovered)
+
+        assertEquals(400_000, merged[0].contextWindowTokens)
+        assertEquals(96_000, merged[1].contextWindowTokens)
+        assertEquals(null, merged[2].contextWindowTokens)
+        assertEquals(configured.map(Model::id), merged.map(Model::id))
     }
 }

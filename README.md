@@ -29,7 +29,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`v2.4.8-revised.1`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.1) |
+| Current release | [`v2.4.8-revised.2`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.2) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |

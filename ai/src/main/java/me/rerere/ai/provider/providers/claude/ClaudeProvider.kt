@@ -36,6 +36,7 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
@@ -269,7 +270,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 Model(
                     modelId = id,
                     displayName = displayName,
-                    contextWindowTokens = modelObj.contextWindowTokensOrNull(),
+                    contextWindowTokens = modelObj.contextWindowTokensOrNull(
+                        modelId = id,
+                        protocol = ModelDiscoveryProtocol.ANTHROPIC,
+                    ),
                 )
             }
         }

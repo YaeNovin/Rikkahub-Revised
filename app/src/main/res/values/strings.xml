@@ -1031,7 +1031,7 @@
   <string name="setting_provider_page_model_discovery">Model discovery</string>
   <string name="setting_provider_page_api_latency">API latency</string>
   <string name="setting_provider_page_context_window">Context window (tokens)</string>
-  <string name="setting_provider_page_context_window_desc">Set the model input capacity to show context usage in chat. Supports K and M suffixes; 1000K is normalized to 1M. Leave empty when unknown.</string>
+  <string name="setting_provider_page_context_window_desc">Automatically detected from provider metadata or known model limits. You can override it; K and M suffixes are supported. Leave empty when unknown.</string>
   <string name="setting_provider_page_first_output_latency">First output event</string>
   <string name="setting_provider_page_first_token_latency">First token latency</string>
   <string name="setting_provider_page_no_text_token">No text token</string>
@@ -1349,7 +1349,7 @@
 <string name="assistant_page_rolling_context_threshold_desc">Refresh the summary when the active branch reaches this estimated token count. Supports K and M suffixes.</string>
   <string name="chat_page_rolling_context">Refresh rolling summary</string>
   <string name="chat_page_rolling_context_desc">Update the compact context without deleting any chat messages.</string>
-  <string name="chat_page_rolling_context_compressing">Updating rolling summary...</string>
+  <string name="chat_page_rolling_context_compressing">Automatically compressing context...</string>
   <string name="assistant_page_advanced_memory">Advanced Memory</string>
   <string name="assistant_page_memory_mode_title">Current Memory Mode</string>
   <string name="assistant_page_memory_mode_disabled">Memory is disabled</string>

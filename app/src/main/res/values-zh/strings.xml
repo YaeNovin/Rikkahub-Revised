@@ -982,7 +982,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_model_discovery">模型发现</string>
   <string name="setting_provider_page_api_latency">API 延迟</string>
   <string name="setting_provider_page_context_window">上下文窗口（Token）</string>
-  <string name="setting_provider_page_context_window_desc">设置模型的输入上下文容量，以便在聊天中显示上下文使用量。支持 K、M 单位，输入 1000K 会自动规范为 1M；未知时请留空。</string>
+  <string name="setting_provider_page_context_window_desc">根据提供商元数据或已知模型限制自动获取，也可手动覆盖。支持 K、M 单位；未知时请留空。</string>
   <string name="setting_provider_page_first_output_latency">首个输出事件</string>
   <string name="setting_provider_page_first_token_latency">首 Token 延迟</string>
   <string name="setting_provider_page_no_text_token">未收到文本 Token</string>
@@ -1311,7 +1311,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
 <string name="assistant_page_rolling_context_threshold_desc">当前分支的估算 Token 数达到此值时自动更新摘要。支持 K、M 单位。</string>
   <string name="chat_page_rolling_context">刷新滚动摘要</string>
   <string name="chat_page_rolling_context_desc">仅更新紧凑上下文，不会删除任何聊天消息。</string>
-  <string name="chat_page_rolling_context_compressing">正在更新滚动摘要...</string>
+  <string name="chat_page_rolling_context_compressing">正在自动压缩上下文...</string>
   <string name="assistant_page_advanced_memory">高级记忆</string>
   <string name="assistant_page_memory_mode_title">当前记忆模式</string>
   <string name="assistant_page_memory_mode_disabled">记忆功能未启用</string>

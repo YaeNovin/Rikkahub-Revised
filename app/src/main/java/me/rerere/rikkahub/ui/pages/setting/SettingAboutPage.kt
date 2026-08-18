@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.pages.setting
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Earth
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.SmartPhone01
@@ -123,7 +122,7 @@ fun SettingAboutPage() {
                         )
 
                         Text(
-                            text = "RikkaHub",
+                            text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -158,12 +157,6 @@ fun SettingAboutPage() {
                     CardGroup(
                         modifier = Modifier.padding(horizontal = 8.dp),
                     ) {
-                        item(
-                            onClick = { context.openUrl("https://rikka-ai.com/") },
-                            leadingContent = { Icon(HugeIcons.Earth, null) },
-                            supportingContent = { Text("https://rikka-ai.com") },
-                            headlineContent = { Text(stringResource(R.string.about_page_website)) },
-                        )
                         item(
                             onClick = { context.openUrl(sourceRepositoryUrl) },
                             leadingContent = { Icon(HugeIcons.Github, null) },

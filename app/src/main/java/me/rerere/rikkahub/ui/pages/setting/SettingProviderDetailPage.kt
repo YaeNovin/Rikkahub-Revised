@@ -100,6 +100,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.formatContextWindowTokens
+import me.rerere.ai.provider.mergeDiscoveredContextWindows
 import me.rerere.ai.provider.parseContextWindowTokens
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
@@ -400,10 +401,19 @@ private fun ModelList(
     val modelList by produceState(emptyList(), providerSetting) {
         runCatching {
             println("loading models...")
-            value = providerManager.getProviderByType(providerSetting)
+            val discoveredModels = providerManager.getProviderByType(providerSetting)
                 .listModels(providerSetting)
                 .sortedBy { it.modelId }
                 .toList()
+            value = discoveredModels
+
+            val updatedModels = mergeDiscoveredContextWindows(
+                configuredModels = providerSetting.models,
+                discoveredModels = discoveredModels,
+            )
+            if (updatedModels != providerSetting.models) {
+                onUpdateProvider(providerSetting.copyProvider(models = updatedModels))
+            }
         }.onFailure {
             it.printStackTrace()
         }
