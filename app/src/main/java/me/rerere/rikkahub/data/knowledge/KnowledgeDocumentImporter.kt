@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.knowledge
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.net.toFile
@@ -76,6 +77,7 @@ class KnowledgeDocumentImporter(
         var temporaryFile: File? = null
 
         try {
+            persistReadPermission(uri)
             temporaryFile = File.createTempFile("knowledge-", ".source", context.cacheDir)
             copyToTemporaryFile(uri, temporaryFile)
             val settings = settingsStore.settingsFlow.value
@@ -174,6 +176,16 @@ class KnowledgeDocumentImporter(
             throw error
         } finally {
             temporaryFile?.delete()
+        }
+    }
+
+    private fun persistReadPermission(uri: Uri) {
+        if (uri.scheme != "content") return
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
         }
     }
 

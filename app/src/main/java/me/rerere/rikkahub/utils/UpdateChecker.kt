@@ -23,6 +23,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import java.util.Locale
+import java.util.zip.ZipFile
 
 private const val API_URL =
     "https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest"
@@ -31,7 +32,10 @@ private const val DOWNLOAD_URL_PREFIX =
 private const val UPDATE_CACHE_MILLIS = 30 * 60 * 1_000L
 private val KNOWN_ANDROID_ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
-class UpdateChecker(private val client: OkHttpClient) {
+class UpdateChecker(
+    private val context: Context,
+    private val client: OkHttpClient,
+) {
     private val json = Json { ignoreUnknownKeys = true }
     private val checkMutex = Mutex()
     private var cachedUpdate: CachedUpdate? = null
@@ -63,7 +67,7 @@ class UpdateChecker(private val client: OkHttpClient) {
                         response.isSuccessful -> {
                             val release =
                                 json.decodeFromString<GitHubRelease>(response.body.string())
-                            release.toUpdateInfo(Build.SUPPORTED_ABIS.toList())
+                            release.toUpdateInfo(resolveInstalledAppAbi())
                         }
                         else -> throw IOException(
                             "GitHub release request failed (${response.code})"
@@ -110,6 +114,27 @@ class UpdateChecker(private val client: OkHttpClient) {
             context.openUrl(download.url)
         }
     }
+
+    private fun resolveInstalledAppAbi(): String? {
+        val packagedAbis = runCatching {
+            ZipFile(context.applicationInfo.sourceDir).use { apk ->
+                apk.entries().asSequence()
+                    .mapNotNull { entry ->
+                        entry.name
+                            .takeIf { it.startsWith("lib/") }
+                            ?.substringAfter("lib/")
+                            ?.substringBefore('/')
+                            ?.takeIf(KNOWN_ANDROID_ABIS::contains)
+                    }
+                    .toSet()
+            }
+        }.getOrDefault(emptySet())
+        return detectInstalledAppAbi(
+            nativeLibraryDir = context.applicationInfo.nativeLibraryDir,
+            packagedAbis = packagedAbis,
+            supportedAbis = Build.SUPPORTED_ABIS.toList(),
+        )
+    }
 }
 
 private data class CachedUpdate(
@@ -133,36 +158,27 @@ internal data class GitHubReleaseAsset(
     val size: Long,
 )
 
-private fun GitHubRelease.toUpdateInfo(supportedAbis: List<String>) = UpdateInfo(
+private fun GitHubRelease.toUpdateInfo(installedAbi: String?) = UpdateInfo(
     version = tagName.trim(),
     publishedAt = publishedAt ?: createdAt.orEmpty(),
     changelog = body.orEmpty(),
-    downloads = selectCompatibleApkDownloads(assets, supportedAbis),
+    downloads = selectCompatibleApkDownloads(assets, installedAbi),
 )
 
 internal fun selectCompatibleApkDownloads(
     assets: List<GitHubReleaseAsset>,
-    supportedAbis: List<String>,
+    installedAbi: String?,
 ): List<UpdateDownload> {
+    if (installedAbi == null) return emptyList()
     val safeApks = assets.filter { asset ->
         asset.name.endsWith(".apk", ignoreCase = true) &&
             asset.browserDownloadUrl.startsWith(DOWNLOAD_URL_PREFIX)
     }
-    val preferredAbi = supportedAbis.firstNotNullOfOrNull { supportedAbi ->
-        supportedAbi.lowercase(Locale.US).takeIf { abi ->
-            safeApks.any { detectAssetAbi(it.name) == abi }
-        }
-    }
 
     return safeApks
-        .filter { asset ->
-            val assetAbi = detectAssetAbi(asset.name)
-            asset.name.contains("universal", ignoreCase = true) ||
-                (preferredAbi != null && assetAbi == preferredAbi)
-        }
-        .sortedBy { asset ->
-            if (detectAssetAbi(asset.name) == preferredAbi) 0 else 1
-        }
+        .filter { asset -> detectAssetAbi(asset.name) == installedAbi }
+        .sortedBy(GitHubReleaseAsset::name)
+        .take(1)
         .map { asset ->
             UpdateDownload(
                 name = asset.name,
@@ -170,6 +186,32 @@ internal fun selectCompatibleApkDownloads(
                 size = formatFileSize(asset.size),
             )
         }
+}
+
+internal fun detectInstalledAppAbi(
+    nativeLibraryDir: String?,
+    packagedAbis: Set<String>,
+    supportedAbis: List<String>,
+): String? {
+    val nativeDirectoryName = nativeLibraryDir
+        ?.trimEnd('/', '\\')
+        ?.substringAfterLast('/')
+        ?.substringAfterLast('\\')
+        ?.lowercase(Locale.US)
+    val nativeDirectoryAbi = when (nativeDirectoryName) {
+        "arm64" -> "arm64-v8a"
+        "arm" -> "armeabi-v7a"
+        "x86_64" -> "x86_64"
+        "x86" -> "x86"
+        else -> nativeDirectoryName?.takeIf(KNOWN_ANDROID_ABIS::contains)
+    }
+    if (nativeDirectoryAbi != null &&
+        (packagedAbis.isEmpty() || nativeDirectoryAbi in packagedAbis)
+    ) {
+        return nativeDirectoryAbi
+    }
+    return supportedAbis.firstOrNull(packagedAbis::contains)
+        ?: packagedAbis.singleOrNull()
 }
 
 private fun detectAssetAbi(name: String): String? {

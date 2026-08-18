@@ -9,9 +9,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
+import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
 import me.rerere.rikkahub.data.knowledge.KnowledgeDocumentImporter
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 import kotlin.uuid.Uuid
@@ -31,6 +33,10 @@ class KnowledgeBaseVM(
 
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError = _lastError.asStateFlow()
+
+    private val _documentPreview = MutableStateFlow<KnowledgeDocumentPreviewUiState?>(null)
+    val documentPreview = _documentPreview.asStateFlow()
+    private var previewJob: Job? = null
 
     fun createBase(name: String) {
         if (name.isBlank()) return
@@ -76,6 +82,39 @@ class KnowledgeBaseVM(
         _lastError.value = null
     }
 
+    fun previewDocument(document: KnowledgeDocumentEntity) {
+        previewJob?.cancel()
+        _documentPreview.value = KnowledgeDocumentPreviewUiState(document = document)
+        previewJob = viewModelScope.launch {
+            runCatching { repository.getDocumentPreview(document.id) }
+                .onSuccess { preview ->
+                    if (_documentPreview.value?.document?.id == document.id) {
+                        _documentPreview.value = KnowledgeDocumentPreviewUiState(
+                            document = document,
+                            content = preview.content,
+                            truncated = preview.truncated,
+                            loading = false,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    if (_documentPreview.value?.document?.id == document.id) {
+                        _documentPreview.value = KnowledgeDocumentPreviewUiState(
+                            document = document,
+                            loading = false,
+                            error = error.message ?: error.javaClass.simpleName,
+                        )
+                    }
+                }
+        }
+    }
+
+    fun dismissDocumentPreview() {
+        previewJob?.cancel()
+        previewJob = null
+        _documentPreview.value = null
+    }
+
     fun importDocument(base: KnowledgeBaseEntity, uri: Uri) {
         viewModelScope.launch {
             _lastError.value = null
@@ -84,3 +123,11 @@ class KnowledgeBaseVM(
         }
     }
 }
+
+data class KnowledgeDocumentPreviewUiState(
+    val document: KnowledgeDocumentEntity,
+    val content: String = "",
+    val truncated: Boolean = false,
+    val loading: Boolean = true,
+    val error: String? = null,
+)

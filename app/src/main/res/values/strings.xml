@@ -845,6 +845,12 @@
   <string name="knowledge_base_page_binding_disabled">This knowledge base is disabled and will not be available until enabled.</string>
   <string name="knowledge_base_page_document_delete_desc">Delete document \"%1$s\" and its indexed text blocks?</string>
   <string name="knowledge_base_page_import_error">Indexing failed: %1$s</string>
+  <string name="knowledge_base_page_preview">Preview document</string>
+  <string name="knowledge_base_page_preview_close">Close preview</string>
+  <string name="knowledge_base_page_preview_pages">%1$d pages</string>
+  <string name="knowledge_base_page_preview_failed">Preview failed: %1$s</string>
+  <string name="knowledge_base_page_preview_empty">No preview content is available.</string>
+  <string name="knowledge_base_page_preview_truncated">Preview truncated. Search still uses the complete indexed document.</string>
   <string name="setting_page_chat_storage_desc">%1$d files, %2$.2f MB</string>
   <string name="setting_page_code_display_settings">Code Display</string>
   <string name="setting_page_color_mode">Color Mode</string>

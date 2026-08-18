@@ -1345,6 +1345,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="knowledge_base_page_binding_disabled">知识库已关闭，重新启用后绑定的助手才能读取。</string>
   <string name="knowledge_base_page_document_delete_desc">删除文件“%1$s”及其索引文本块？</string>
   <string name="knowledge_base_page_import_error">索引失败：%1$s</string>
+  <string name="knowledge_base_page_preview">预览文档</string>
+  <string name="knowledge_base_page_preview_close">关闭预览</string>
+  <string name="knowledge_base_page_preview_pages">%1$d 页</string>
+  <string name="knowledge_base_page_preview_failed">预览失败：%1$s</string>
+  <string name="knowledge_base_page_preview_empty">暂无可预览内容。</string>
+  <string name="knowledge_base_page_preview_truncated">预览内容已截断，检索仍会使用完整的索引文档。</string>
   <string name="assistant_page_knowledge_bases">绑定知识库</string>
   <string name="assistant_page_knowledge_bases_desc">每次回复前，从选中的知识库检索相关内容。</string>
   <string name="assistant_page_knowledge_bases_unbound">未绑定</string>

@@ -4,22 +4,30 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -34,14 +42,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
+import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Eye
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
@@ -58,6 +70,7 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
     val bases by vm.bases.collectAsStateWithLifecycle()
     val lastError by vm.lastError.collectAsStateWithLifecycle()
     val assistants by vm.assistants.collectAsStateWithLifecycle()
+    val documentPreview by vm.documentPreview.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showCreateDialog by remember { mutableStateOf(false) }
 
@@ -127,6 +140,7 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
                         vm.setAssistantBinding(base.id, assistantId, bound)
                     },
                     onDeleteDocument = vm::deleteDocument,
+                    onPreviewDocument = vm::previewDocument,
                 )
             }
         }
@@ -159,6 +173,13 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
             },
         )
     }
+
+    documentPreview?.let { preview ->
+        KnowledgeDocumentPreviewSheet(
+            preview = preview,
+            onDismiss = vm::dismissDocumentPreview,
+        )
+    }
 }
 
 @Composable
@@ -171,6 +192,7 @@ private fun KnowledgeBaseCard(
     onSetRagEnabled: (Boolean) -> Unit,
     onSetAssistantBinding: (Uuid, Boolean) -> Unit,
     onDeleteDocument: (String) -> Unit,
+    onPreviewDocument: (KnowledgeDocumentEntity) -> Unit,
 ) {
     val repository: KnowledgeBaseRepository = koinInject()
     val documents by repository.observeDocuments(base.id).collectAsStateWithLifecycle(emptyList())
@@ -245,7 +267,11 @@ private fun KnowledgeBaseCard(
                 )
             }
             documents.forEach { document ->
-                KnowledgeDocumentRow(document = document, onDelete = { documentToDelete = document })
+                KnowledgeDocumentRow(
+                    document = document,
+                    onPreview = { onPreviewDocument(document) },
+                    onDelete = { documentToDelete = document },
+                )
             }
         }
     }
@@ -334,6 +360,7 @@ private fun KnowledgeBaseCard(
 @Composable
 private fun KnowledgeDocumentRow(
     document: KnowledgeDocumentEntity,
+    onPreview: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -362,8 +389,121 @@ private fun KnowledgeDocumentRow(
                 )
             }
         }
+        IconButton(
+            onClick = onPreview,
+            enabled = document.status != KnowledgeDocumentEntity.STATUS_INDEXING,
+        ) {
+            Icon(
+                HugeIcons.Eye,
+                contentDescription = stringResource(R.string.knowledge_base_page_preview),
+            )
+        }
         IconButton(onClick = onDelete) {
             Icon(HugeIcons.Delete01, contentDescription = stringResource(R.string.delete))
+        }
+    }
+}
+
+@Composable
+private fun KnowledgeDocumentPreviewSheet(
+    preview: KnowledgeDocumentPreviewUiState,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = preview.document.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = buildString {
+                            append(preview.document.mimeType)
+                            preview.document.pageCount?.let { pageCount ->
+                                append(" | ")
+                                append(stringResource(R.string.knowledge_base_page_preview_pages, pageCount))
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        HugeIcons.Cancel01,
+                        contentDescription = stringResource(R.string.knowledge_base_page_preview_close),
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (preview.document.mimeType.startsWith("image/")) {
+                    AsyncImage(
+                        model = preview.document.sourceUri,
+                        contentDescription = preview.document.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+                when {
+                    preview.loading -> Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 200.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+
+                    preview.error != null -> Text(
+                        text = stringResource(
+                            R.string.knowledge_base_page_preview_failed,
+                            preview.error,
+                        ),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+
+                    preview.content.isBlank() -> Text(
+                        text = stringResource(R.string.knowledge_base_page_preview_empty),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    else -> SelectionContainer {
+                        Text(
+                            text = preview.content,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                if (preview.truncated) {
+                    Text(
+                        text = stringResource(R.string.knowledge_base_page_preview_truncated),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         }
     }
 }

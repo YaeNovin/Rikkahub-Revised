@@ -6,6 +6,7 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.dao.KnowledgeBaseDAO
 import me.rerere.rikkahub.data.db.dao.KnowledgeChunkSearchRow
+import me.rerere.rikkahub.data.db.dao.KnowledgeDocumentPreviewChunk
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeCitationEntity
@@ -90,6 +91,17 @@ class KnowledgeBaseRepository(
 
     suspend fun deleteDocument(id: String) = dao.deleteDocument(id)
 
+    suspend fun getDocumentPreview(documentId: String): KnowledgeDocumentPreview {
+        val chunks = dao.getDocumentPreviewChunks(
+            documentId = documentId,
+            limit = KNOWLEDGE_PREVIEW_CHUNK_LIMIT + 1,
+        )
+        return KnowledgeDocumentPreview(
+            content = buildKnowledgeDocumentPreview(chunks.take(KNOWLEDGE_PREVIEW_CHUNK_LIMIT)),
+            truncated = chunks.size > KNOWLEDGE_PREVIEW_CHUNK_LIMIT,
+        )
+    }
+
     suspend fun searchEmbeddedChunks(baseIds: Set<String>, modelId: String, limit: Int): List<KnowledgeChunkSearchRow> {
         if (baseIds.isEmpty()) return emptyList()
         return dao.getEmbeddedChunks(baseIds.toList(), modelId, limit)
@@ -133,6 +145,30 @@ class KnowledgeBaseRepository(
         }
     }
 }
+
+data class KnowledgeDocumentPreview(
+    val content: String,
+    val truncated: Boolean,
+)
+
+private const val KNOWLEDGE_PREVIEW_CHUNK_LIMIT = 80
+
+internal fun buildKnowledgeDocumentPreview(
+    chunks: List<KnowledgeDocumentPreviewChunk>,
+): String = buildString {
+    var consumedEnd = -1
+    chunks.sortedBy(KnowledgeDocumentPreviewChunk::ordinal).forEach { chunk ->
+        val overlap = (consumedEnd - chunk.charStart).coerceAtLeast(0)
+        val text = chunk.content.drop(overlap.coerceAtMost(chunk.content.length))
+        if (text.isBlank()) {
+            consumedEnd = maxOf(consumedEnd, chunk.charEnd)
+            return@forEach
+        }
+        if (isNotEmpty() && chunk.charStart >= consumedEnd) append("\n\n")
+        append(text)
+        consumedEnd = maxOf(consumedEnd, chunk.charEnd)
+    }
+}.trim()
 
 internal fun List<UIMessageAnnotation.KnowledgeCitation>.filterExistingChunks(
     existingChunkIds: Set<String>,

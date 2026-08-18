@@ -5,7 +5,7 @@ import org.junit.Test
 
 class UpdateCheckerTest {
     @Test
-    fun `selects preferred device ABI and universal fallback only`() {
+    fun `selects only the ABI used by the installed app`() {
         val downloads = selectCompatibleApkDownloads(
             assets = listOf(
                 asset("app-x86_64-release.apk", 30L * 1_024 * 1_024),
@@ -13,11 +13,11 @@ class UpdateCheckerTest {
                 asset("app-arm64-v8a-release.apk", 32L * 1_024 * 1_024),
                 asset("app-universal-release.apk", 60L * 1_024 * 1_024),
             ),
-            supportedAbis = listOf("arm64-v8a", "armeabi-v7a"),
+            installedAbi = "arm64-v8a",
         )
 
         assertEquals(
-            listOf("app-arm64-v8a-release.apk", "app-universal-release.apk"),
+            listOf("app-arm64-v8a-release.apk"),
             downloads.map { it.name },
         )
         assertEquals("32.0 MB", downloads.first().size)
@@ -30,10 +30,10 @@ class UpdateCheckerTest {
                 asset("app-x86_64-release.apk"),
                 asset("app-universal-release.apk"),
             ),
-            supportedAbis = listOf("x86"),
+            installedAbi = "x86",
         )
 
-        assertEquals(listOf("app-universal-release.apk"), downloads.map { it.name })
+        assertEquals(emptyList<UpdateDownload>(), downloads)
     }
 
     @Test
@@ -47,10 +47,43 @@ class UpdateCheckerTest {
                     size = 1_024,
                 ),
             ),
-            supportedAbis = listOf("arm64-v8a"),
+            installedAbi = "arm64-v8a",
         )
 
         assertEquals(emptyList<UpdateDownload>(), downloads)
+    }
+
+    @Test
+    fun `does not offer an APK when the installed ABI is unknown`() {
+        val downloads = selectCompatibleApkDownloads(
+            assets = listOf(
+                asset("app-arm64-v8a-release.apk"),
+                asset("app-universal-release.apk"),
+            ),
+            installedAbi = null,
+        )
+
+        assertEquals(emptyList<UpdateDownload>(), downloads)
+    }
+
+    @Test
+    fun `detects installed ABI from native library directory before APK fallback`() {
+        assertEquals(
+            "armeabi-v7a",
+            detectInstalledAppAbi(
+                nativeLibraryDir = "/data/app/example/lib/arm",
+                packagedAbis = setOf("arm64-v8a", "armeabi-v7a"),
+                supportedAbis = listOf("arm64-v8a", "armeabi-v7a"),
+            ),
+        )
+        assertEquals(
+            "arm64-v8a",
+            detectInstalledAppAbi(
+                nativeLibraryDir = null,
+                packagedAbis = setOf("arm64-v8a", "x86_64"),
+                supportedAbis = listOf("arm64-v8a"),
+            ),
+        )
     }
 
     @Test

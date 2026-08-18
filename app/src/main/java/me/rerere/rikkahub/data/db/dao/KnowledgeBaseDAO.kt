@@ -61,6 +61,15 @@ interface KnowledgeBaseDAO {
     @Query("DELETE FROM knowledge_chunk WHERE document_id = :documentId")
     suspend fun deleteChunks(documentId: String)
 
+    @Query(
+        "SELECT ordinal, content, page_start, page_end, section_path, char_start, char_end " +
+            "FROM knowledge_chunk WHERE document_id = :documentId ORDER BY ordinal LIMIT :limit"
+    )
+    suspend fun getDocumentPreviewChunks(
+        documentId: String,
+        limit: Int,
+    ): List<KnowledgeDocumentPreviewChunk>
+
     @Query("SELECT COUNT(*) FROM knowledge_chunk WHERE knowledge_base_id = :baseId")
     suspend fun countChunks(baseId: String): Int
 
@@ -103,6 +112,21 @@ interface KnowledgeBaseDAO {
     @Query("DELETE FROM knowledge_citation WHERE conversation_id = :conversationId AND message_id = :messageId")
     suspend fun deleteCitations(conversationId: String, messageId: String)
 }
+
+data class KnowledgeDocumentPreviewChunk(
+    val ordinal: Int,
+    val content: String,
+    @androidx.room.ColumnInfo(name = "page_start")
+    val pageStart: Int?,
+    @androidx.room.ColumnInfo(name = "page_end")
+    val pageEnd: Int?,
+    @androidx.room.ColumnInfo(name = "section_path")
+    val sectionPath: String,
+    @androidx.room.ColumnInfo(name = "char_start")
+    val charStart: Int,
+    @androidx.room.ColumnInfo(name = "char_end")
+    val charEnd: Int,
+)
 
 data class KnowledgeChunkSearchRow(
     val id: String,
