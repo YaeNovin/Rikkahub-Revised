@@ -6,12 +6,28 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.3`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
-release. It does not claim authorship of unchanged upstream code. Detailed file
-lists and release checks are maintained outside the repository during release
-preparation.
+release. It does not claim authorship of unchanged upstream code. Release checks
+are maintained separately from user-facing release descriptions.
+
+## 2.4.8-revised.3 Maintenance Changes / 维护变更
+
+- English: Fixed stale update downloads and repeated installation prompts by
+  using versioned download files and strictly newer Android version codes.
+  中文：通过版本化下载文件和严格递增的 Android 版本码，修复旧安装包重复提示及
+  更新安装后不生效的问题。
+- English: Added device ABI matching for update packages and text/image preview
+  support for knowledge-base files.
+  中文：更新时按设备 ABI 匹配安装包，并为知识库文件增加文本与图片预览。
+- English: Added a maximum reasoning level with protocol- and vendor-aware
+  request mapping for OpenAI-, Google-, Anthropic-, and compatible model APIs.
+  中文：增加“最高”推理深度，并针对 OpenAI、Google、Anthropic 及兼容模型接口按
+  协议和厂商映射请求参数。
+- English: Added day-based cleanup for chat attachments and generated images
+  while preserving conversation text.
+  中文：支持按天清理聊天附件与生成图片，同时保留聊天文本。
 
 ## 2.4.8-revised.2 Maintenance Changes / 维护变更
 
@@ -61,11 +77,7 @@ preparation.
   app-internal actions, Provider authorities, Debug/QA package IDs, and made
   Firebase integration opt-in for a future fork-owned configuration.
 
-The implementation details are in the Git diff and history. A categorized
-comparison report is generated at
-`../open-source-preparation/RIKKAHUB_MODIFICATIONS_AND_OPEN_SOURCE_CHECKLIST.md`
-in the release-preparation workspace; that external report is not part of the
-published source tree.
+Implementation details are preserved in the source and Git history.
 
 ## Upstream Version Context
 
@@ -96,7 +108,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.2` and signing values
+- `release` uses `2.4.8-revised.3` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.
@@ -136,12 +148,13 @@ out incompatible architectures. Official release assets must use these names:
 - `app-universal-release.apk`
 
 Android still enforces signing continuity during installation. Every public APK
-must use the certificate recorded in `RELEASE_SIGNING.md`; release notes should
-also publish SHA-256 checksums for independent verification.
+must use the certificate recorded in `RELEASE_SIGNING.md`. Release descriptions
+remain limited to user-facing updates and fixes; asset integrity, signing, and
+build-environment details are verified separately during publication.
 
 ## License
 
 The modified work is distributed under GNU AGPL-3.0, consistent with the
 upstream project. No `-or-later` grant is inferred from the repository's current
-license declaration. See [LICENSE](LICENSE), [NOTICE](NOTICE), and
+license declaration. See [LICENSE](../LICENSE), [NOTICE](../NOTICE), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

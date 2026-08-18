@@ -154,6 +154,9 @@ flowchart TD
 `TextGenerationParams`，其中包括温度、Top-p、最大输出 Token、推理等级、工具、
 自定义请求头和自定义请求体。
 
+推理等级包含 `MAX`。各 Provider 会根据协议和模型系列映射或限制该等级，避免
+OpenAI、Google、Anthropic 及兼容端点收到不支持的推理强度参数。
+
 - 流式模式调用 `Provider.streamText()`，并由 `StreamChunkHandler` 合并增量块。
 - 非流式模式调用 `Provider.generateText()`，随后把单次结果转换到同一消息模型。
 - Provider 层的流式界面更新通常按约 40 ms 合并；要求立即显示的增量块不等待。

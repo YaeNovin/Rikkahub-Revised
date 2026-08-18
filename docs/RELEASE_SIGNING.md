@@ -52,15 +52,15 @@ Never print credentials in build logs.
 Before publishing an APK or AAB:
 
 1. Publish the complete corresponding source under AGPL-3.0 at a stable tag or
-   commit, including `LICENSE`, `NOTICE`, `MODIFICATIONS.md`, build scripts, and
-   applicable third-party notices.
+   commit, including `LICENSE`, `NOTICE`, `docs/MODIFICATIONS.md`, build scripts,
+   and applicable third-party notices.
 2. Confirm the embedded source and license URLs resolve to
    `https://github.com/YaeNovin/Rikkahub-Revised` and its `main` branch license.
-   The earlier local `example.invalid` validation build is not publishable.
 3. Run tests, Android Lint, a signed Release build, certificate verification,
    dependency-license review, secret scanning, and device installation tests.
-4. Publish APK SHA-256 checksums and verify the APK certificate SHA-256 against
-   the fingerprint above.
+4. Verify each uploaded asset against its local build and verify the APK
+   certificate against the fingerprint above. Keep user-facing release
+   descriptions limited to updates and fixes.
 5. Keep `versionCode` strictly increasing for every distributed update.
 
 ## GitHub Release Contract
@@ -68,6 +68,7 @@ Before publishing an APK or AAB:
 - Repository: `https://github.com/YaeNovin/Rikkahub-Revised`
 - API: `https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest`
 - First tag/version: `v2.4.8-revised.1` / `2.4.8-revised.1`
+- Current tag/version: `v2.4.8-revised.3` / `2.4.8-revised.3`
 - APK assets: `app-arm64-v8a-release.apk`, `app-x86_64-release.apk`, and
   `app-universal-release.apk`
 

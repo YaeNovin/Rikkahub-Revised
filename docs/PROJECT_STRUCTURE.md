@@ -1,11 +1,11 @@
-# RikkaHub 项目结构
+# Rikkahub Revised 项目结构
 
 本文档记录当前仓库的源码组织、构建关系与常见改动入口，供后续开发定位使用。
 它覆盖受版本控制的主要源码和配置；`.gradle/`、各模块 `build/`、`.idea/` 等本地或构建产物不作为源码结构维护。
 
 ## 1. 项目概览
 
-RikkaHub 是一个原生 Android LLM 聊天客户端。Android 主应用采用 Kotlin、Jetpack Compose、Koin、Room 和 DataStore；AI 协议、搜索、语音、文档、代码高亮和工作区被拆分为独立 Gradle 模块。项目还包含一个由 Android 内置 Ktor 服务托管的 React Web UI。
+Rikkahub Revised 是一个基于 RikkaHub 2.4.8 的独立修改发行版。Android 主应用采用 Kotlin、Jetpack Compose、Koin、Room 和 DataStore；AI 协议、搜索、语音、文档、代码高亮和工作区被拆分为独立 Gradle 模块。项目还包含一个由 Android 内置 Ktor 服务托管的 React Web UI。
 
 | 路径 | 类型 | 职责 | 主要内容或依赖关系 |
 | --- | --- | --- | --- |
@@ -13,7 +13,7 @@ RikkaHub 是一个原生 Android LLM 聊天客户端。Android 主应用采用 K
 | `build.gradle.kts` | Gradle 根构建脚本 | 集中声明构建插件 | Android、Kotlin、KSP、Firebase、Baseline Profile 插件 |
 | `gradle/libs.versions.toml` | 版本目录 | 统一第三方库与插件版本 | Android Gradle Plugin、Kotlin、Compose、Ktor、Room、Koin 等 |
 | `build-logic/` | Gradle included build | 共享 Android 库构建约定 | `rikkahub.android.library` 和 `rikkahub.android.library.compose`；统一 SDK 版本、Java 17 与 Compose 配置 |
-| `app/` | Android 应用模块 | APK 入口、主要业务和 Compose UI | 依赖全部 Android 功能模块；包名 `me.rerere.rikkahub` |
+| `app/` | Android 应用模块 | APK 入口、主要业务和 Compose UI | 依赖全部 Android 功能模块；源码命名空间为 `me.rerere.rikkahub`，Release 应用 ID 为 `me.rerere.rikkahub.revised` |
 | `ai/` | Android 库模块 | AI SDK 抽象与流式协议实现 | OpenAI、Claude、Google/Vertex Provider；依赖 `common` |
 | `common/` | Android 库模块 | 跨模块基础工具 | Android、缓存、HTTP、QuickJS 等公用能力 |
 | `document/` | Android 库模块 | 文档文本解析 | PDF、DOCX、PPTX、EPUB 解析；含 MuPDF 封装与 ABI 原生库 |
@@ -27,7 +27,7 @@ RikkaHub 是一个原生 Android LLM 聊天客户端。Android 主应用采用 K
 | `web-ui/` | 独立 TypeScript 前端 | Web 端聊天界面 | React 19、React Router 7、Tailwind、Zustand、React Query；产物复制到 `web/src/main/resources/static` |
 | `trace-cli/` | Bun TypeScript CLI | 录制真实 Provider 的 SSE 轨迹 | 生成 `ai` 测试可回放的 `events.jsonl`；不记录请求头或密钥 |
 | `locale-tui/` | Python Textual 工具 | Android 多语言资源维护 | 字符串浏览、缺失翻译、Dead Entry 检查与 AI 翻译 |
-| `docs/` | 文档与项目素材 | README 图片、引用资料、赞助商素材及工程文档 | 本文档位于此目录 |
+| `docs/` | 公开文档与项目素材 | 修改声明、贡献者、签名、第三方归属、工程文档、README 图片与参考资料 | 本文档位于此目录；各语言 README 保留在仓库根目录 |
 | `.github/` | GitHub 配置 | Issue 模板与自动化工作流 | 每日构建、Issue 模板校验 |
 | `.agents/`、`.claude/` | 开发辅助配置 | 面向 AI 编程工具的本地约定与技能 | 不参与应用运行或 APK 打包 |
 | `gradlew`、`gradlew.bat`、`gradle/wrapper/` | Gradle Wrapper | 固定 Gradle 运行环境 | Android 构建、测试、Lint 的统一入口 |
@@ -138,12 +138,16 @@ flowchart LR
 | 开发目标 | 首要修改位置 | 通常还需检查 |
 | --- | --- | --- |
 | 新增模型供应商或修复流式协议 | `ai/.../provider/providers/` | `ProviderManager`、`ModelRegistry`、`app` 的 Provider 设置与生成编排 |
+| 调整推理深度或厂商参数映射 | `ai/.../core/Reasoning.kt`、`ai/.../provider/providers/` | `ReasoningPicker.kt` 与协议请求测试 |
 | 新增 Compose 页面 | `app/.../ui/pages/` | `RouteActivity.kt` 的 `Screen` 与 `entryProvider`、相关 ViewModel/Repository |
 | 新增持久化数据 | `app/.../data/db/entity/`、`dao/` | `AppDatabase`、迁移、Repository、导入/导出或同步逻辑 |
 | 新增消息处理能力 | `app/.../data/ai/transformers/` 或 `tools/` | 生成管线、Assistant 配置、流式可视化和结束处理 |
 | 新增本地工具/MCP 功能 | `app/.../data/ai/tools/` 或 `mcp/` | 权限、文件管理、Assistant 配置和聊天工具展示 |
 | 新增搜索或语音服务 | `search/` 或 `speech/` | `app` 中对应设置页面与服务初始化 |
 | 新增文档格式支持 | `document/` | `DocumentAsPromptTransformer`、附件 UI 和文件类型判断 |
+| 调整知识库文件预览 | `app/.../ui/pages/knowledge/` | `KnowledgeBaseRepository`、`KnowledgeBaseDAO` 与预览测试 |
+| 调整聊天文件保留策略 | `FilesManager`、`FilesRepository`、`GenMediaRepository` | `SettingFilesPage.kt` 与文件保留测试 |
+| 调整应用内更新 | `app/.../utils/UpdateChecker.kt` | ABI 选择、版本化下载文件名、版本码与更新测试 |
 | 调整工作区终端或文件能力 | `workspace/` | `WorkspaceRepository`、工作区页面、本地工具和挂载安全性 |
 | 修改 Web 端功能 | `web-ui/app/` | `app/.../web/routes/`、前端类型检查、`web` 构建产物嵌入 |
 | 调整语言文案 | 各模块 `src/main/res/values*/strings.xml` | `locale-tui/` 配置与缺失翻译检查 |
@@ -158,7 +162,7 @@ flowchart LR
 ./gradlew lint
 ```
 
-`web` 模块的 `preBuild` 会执行 `web-ui` 的 `pnpm run build`，因此 Android 构建前需要先在 `web-ui/` 安装依赖。应用构建还需要 `app/google-services.json`，详见根目录 README。
+`web` 模块的 `preBuild` 会执行 `web-ui` 的 `pnpm run build`，因此 Android 构建前需要先在 `web-ui/` 安装依赖。Firebase 与 Crashlytics 默认关闭，普通构建不需要 `app/google-services.json`；只有显式启用 Firebase 时才需要提供与 Revised 应用 ID 匹配的维护者配置。
 
 ## 9. 维护规则
 

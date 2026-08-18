@@ -29,7 +29,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`v2.4.8-revised.2`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.2) |
+| Current release | [`v2.4.8-revised.3`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.3) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -50,12 +50,13 @@ Official Rikkahub Revised APKs are published only through this repository's
 | `app-universal-release.apk` | Universal fallback containing ARM64 and x86_64 native libraries |
 
 The in-app updater reads the latest public release from this repository and
-offers an APK compatible with the device ABI. Release notes publish SHA-256
-checksums and the release certificate fingerprint for independent verification.
+offers an APK compatible with the device ABI. Release descriptions contain only
+user-facing updates and fixes; package integrity and signing continuity are
+verified separately during publication.
 
 All future Revised releases must use the same signing certificate. Builds
 signed with another key cannot update an existing Rikkahub Revised installation.
-See [RELEASE_SIGNING.md](RELEASE_SIGNING.md) for the public certificate record
+See [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for the public certificate record
 and signing continuity policy. Private signing material is never stored in this
 repository.
 
@@ -64,17 +65,20 @@ repository.
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
 
-- Token-aware rolling context summaries, configurable context windows, and
-  context usage display.
+- Token-aware rolling context summaries, automatic context-window discovery,
+  animated compression feedback, and context usage display.
 - Local knowledge bases with document ingestion, chunking, hybrid retrieval,
-  assistant bindings, RAG, and source citations.
+  assistant bindings, RAG, source citations, and file previews.
 - Expanded memory metadata, embedding-based retrieval, lexical fallback, and
   scoped memory tools.
 - Provider capability metadata, embedding support, connection diagnostics,
-  sanitized protocol traces, and safer custom-provider configuration handling.
+  sanitized protocol traces, maximum reasoning controls with provider-specific
+  parameter mapping, and safer custom-provider configuration handling.
 - Tighter approval and privacy boundaries for workspace, clipboard, calendar,
   and screen-time tools.
 - Separated backup scopes and safer S3/WebDAV archive restoration.
+- Day-based cleanup for chat attachments and generated images while retaining
+  conversation text.
 - Interactive ECharts, ABC notation, Leaflet, and railroad-diagram rendering,
   plus Mermaid, LaTeX, Markdown, and WebView improvements.
 - A Revised-owned update feed with ABI-aware APK selection.
@@ -82,7 +86,7 @@ or changes the following areas:
   opt-in Firebase integration.
 
 For the auditable modification record, upstream comparison, and release
-requirements, read [MODIFICATIONS.md](MODIFICATIONS.md).
+requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).
 
 ## Inherited Capabilities
 
@@ -96,7 +100,7 @@ The upstream foundation provides the core Android chat experience, including:
   optional Linux workspace environment.
 
 These inherited capabilities originate from the upstream project unless a
-change is identified in [MODIFICATIONS.md](MODIFICATIONS.md).
+change is identified in [MODIFICATIONS.md](docs/MODIFICATIONS.md).
 
 ## Build From Source
 
@@ -158,12 +162,12 @@ foundation. When distributing modified versions or providing the software over
 a network, comply with the AGPL-3.0 source-availability requirements.
 
 - [NOTICE](NOTICE) identifies the upstream project and the Revised distribution.
-- [MODIFICATIONS.md](MODIFICATIONS.md) records the material modifications.
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) lists the people who directly build and
+- [MODIFICATIONS.md](docs/MODIFICATIONS.md) records the material modifications.
+- [CONTRIBUTORS.md](docs/CONTRIBUTORS.md) lists the people who directly build and
   maintain this independent repository.
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists bundled third-party
+- [THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) lists bundled third-party
   components and their licenses.
-- [RELEASE_SIGNING.md](RELEASE_SIGNING.md) records the public signing identity
+- [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) records the public signing identity
   and release-key continuity requirements.
 
 Copyright and authorship of unchanged upstream code remain with the upstream

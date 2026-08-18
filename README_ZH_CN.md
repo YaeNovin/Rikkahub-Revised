@@ -27,7 +27,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`v2.4.8-revised.2`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.2) |
+| 当前版本 | [`v2.4.8-revised.3`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.3) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -48,23 +48,25 @@ Rikkahub Revised 的正式 APK 仅通过本仓库的
 | `app-universal-release.apk` | 同时包含 ARM64 与 x86_64 原生库的通用备用包 |
 
 应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
-APK。Release 说明会公布各文件的 SHA-256 校验值和发布证书指纹，供用户独立核验。
+APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
+流程中单独核验。
 
 后续 Revised 正式版本必须继续使用同一签名证书。使用其他密钥签名的构建无法覆盖
 安装现有的 Rikkahub Revised。公开证书信息与签名连续性要求见
-[RELEASE_SIGNING.md](RELEASE_SIGNING.md)。私有签名材料不会存放在本仓库中。
+[RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md)。私有签名材料不会存放在本仓库中。
 
 ## Revised 的主要改动
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-- 基于 Token 的滚动上下文摘要、可配置上下文窗口和上下文使用量展示。
-- 本地知识库、文档导入与分块、混合检索、助手绑定、RAG 和来源引用。
+- 基于 Token 的滚动上下文摘要、上下文窗口自动识别、压缩动画提示和使用量展示。
+- 本地知识库、文档导入与分块、混合检索、助手绑定、RAG、来源引用和文件预览。
 - 更完整的记忆元数据、基于嵌入的检索、词法回退和限定范围的记忆工具。
-- Provider 能力元数据、嵌入支持、连接诊断、脱敏协议追踪和更安全的自定义
-  Provider 配置处理。
+- Provider 能力元数据、嵌入支持、连接诊断、脱敏协议追踪、按协议和厂商映射的
+  最高推理深度，以及更安全的自定义 Provider 配置处理。
 - 更严格的工作区、剪贴板、日历和屏幕使用时间工具审批与隐私边界。
 - 分离的备份范围，以及更安全的 S3/WebDAV 归档恢复路径校验。
+- 按天清理聊天附件和生成图片，同时保留聊天文本。
 - ECharts、ABC 乐谱、Leaflet 和铁路图的交互式渲染，以及 Mermaid、LaTeX、
   Markdown 和 WebView 改进。
 - 由 Revised 仓库维护、能够按 ABI 选择 APK 的更新源。
@@ -72,7 +74,7 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
   Firebase 集成。
 
 完整的修改记录、上游对比和发行要求见
-[MODIFICATIONS.md](MODIFICATIONS.md)。
+[MODIFICATIONS.md](docs/MODIFICATIONS.md)。
 
 ## 继承自上游的基础能力
 
@@ -84,7 +86,7 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - Markdown、代码高亮、LaTeX、表格和 Mermaid 渲染。
 - 本地记忆、Provider 导入导出、内嵌 Web 界面和可选 Linux 工作区环境。
 
-除非 [MODIFICATIONS.md](MODIFICATIONS.md) 明确记录了修改，否则这些基础能力的
+除非 [MODIFICATIONS.md](docs/MODIFICATIONS.md) 明确记录了修改，否则这些基础能力的
 原始实现与作者归属于上游项目。
 
 ## 从源码构建
@@ -142,9 +144,9 @@ Rikkahub Revised 与其上游基础一致，采用
 提供软件服务时，必须遵守 AGPL-3.0 关于对应源码可获取性的要求。
 
 - [NOTICE](NOTICE) 说明上游项目与 Revised 发行版的关系。
-- [MODIFICATIONS.md](MODIFICATIONS.md) 记录主要修改内容。
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) 列出直接构建与维护本独立仓库的人员。
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 列出内置第三方组件及其许可证。
-- [RELEASE_SIGNING.md](RELEASE_SIGNING.md) 记录公开签名身份和发行密钥连续性要求。
+- [MODIFICATIONS.md](docs/MODIFICATIONS.md) 记录主要修改内容。
+- [CONTRIBUTORS.md](docs/CONTRIBUTORS.md) 列出直接构建与维护本独立仓库的人员。
+- [THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) 列出内置第三方组件及其许可证。
+- [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) 记录公开签名身份和发行密钥连续性要求。
 
 未修改上游代码的版权与作者身份仍归上游贡献者所有，本仓库不主张这些代码的作者权。

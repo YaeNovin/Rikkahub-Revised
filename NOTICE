@@ -18,11 +18,11 @@ distribution does not automatically inherit or migrate upstream app data.
 The upstream work and this modified distribution are provided under the GNU
 Affero General Public License, version 3 (AGPL-3.0). The complete license text
 is in LICENSE. The modified features and relevant dates are summarized in
-MODIFICATIONS.md.
+docs/MODIFICATIONS.md.
 
 This modified distribution is not an official upstream RikkaHub release and
 must not be represented as endorsed or supported by the upstream maintainers.
 
 Bundled third-party components remain under their own licenses. Their versions,
 sources, checksums, notices, and packaged license paths are listed in
-THIRD_PARTY_NOTICES.md.
+docs/THIRD_PARTY_NOTICES.md.

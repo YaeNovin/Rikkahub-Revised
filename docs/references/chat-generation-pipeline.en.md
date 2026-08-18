@@ -178,6 +178,10 @@ selected model and assistant configuration, including temperature, top-p,
 maximum output tokens, reasoning level, tools, custom headers, and custom body
 entries.
 
+Reasoning levels include `MAX`. Each Provider maps or caps that level to fields
+supported by its protocol and model family, so OpenAI-, Google-, Anthropic-, and
+compatible endpoints do not receive unsupported effort values.
+
 - Streaming mode calls `Provider.streamText()` and merges chunks through
   `StreamChunkHandler`.
 - Non-streaming mode calls `Provider.generateText()` and normalizes the single
