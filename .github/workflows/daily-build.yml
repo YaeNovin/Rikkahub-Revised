@@ -127,6 +127,26 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
+      - name: Prepare nightly release
+        run: |
+          set -euo pipefail
+
+          previous_nightly=""
+          if git rev-parse --verify refs/tags/nightly >/dev/null 2>&1; then
+            previous_nightly="$(git rev-parse refs/tags/nightly)"
+          fi
+
+          if [ -n "$previous_nightly" ] && git merge-base --is-ancestor "$previous_nightly" "$GITHUB_SHA"; then
+            git log --format='- %s' "${previous_nightly}..${GITHUB_SHA}" > nightly-release-notes.md
+          fi
+          if [ ! -s nightly-release-notes.md ]; then
+            git log -1 --format='- %s' "$GITHUB_SHA" > nightly-release-notes.md
+          fi
+
+          # nightly is intentionally mutable and must identify the commit that produced the APKs.
+          git tag --force nightly "$GITHUB_SHA"
+          git push --force origin refs/tags/nightly
+
       # 把 APK 直接发布为 Prerelease，用户点链接即可下载单个 apk，无需登录、无需解压
       - name: Publish nightly prerelease
         uses: softprops/action-gh-release@v3
@@ -135,8 +155,5 @@ jobs:
           tag_name: nightly            # 固定 tag，每晚覆盖同一个「最新每日构建」
           name: Nightly Build
           prerelease: true
-          body: |
-            自动每日构建（commit `${{ github.sha }}`）
-
-            > ⚠️ 开发版本，可能不稳定，仅供测试。
+          body_path: nightly-release-notes.md
           files: app/build/outputs/apk/release/*.apk
