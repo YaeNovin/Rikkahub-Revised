@@ -29,7 +29,9 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
+import me.rerere.ai.provider.inferModelTypeFromId
 import me.rerere.ai.provider.usesVolcengineMultimodalEmbeddingApi
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
@@ -89,7 +91,10 @@ class OpenAIProvider(
                 Model(
                     modelId = id,
                     displayName = id,
-                    type = inferModelType(id),
+                    type = inferOpenAIModelType(id),
+                    inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id),
+                    outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id),
+                    abilities = ModelRegistry.MODEL_ABILITIES.getData(id),
                     contextWindowTokens = modelObj.contextWindowTokensOrNull(
                         modelId = id,
                         protocol = ModelDiscoveryProtocol.OPENAI,
@@ -416,28 +421,9 @@ class OpenAIProvider(
         else -> "image/png"
     }
 
-    private fun inferModelType(modelId: String): ModelType {
-        val normalized = modelId.lowercase()
-        return if (
-            normalized.contains("embedding") ||
-            normalized.contains("embed") ||
-            normalized.contains("embed-") ||
-            normalized.startsWith("bge") ||
-            normalized.contains("/bge") ||
-            normalized.contains("e5") ||
-            normalized.contains("mxbai") ||
-            normalized.contains("nomic") ||
-            normalized.startsWith("e5-") ||
-            normalized.contains("gte") ||
-            normalized.contains("jina-embeddings")
-        ) {
-            ModelType.EMBEDDING
-        } else {
-            ModelType.CHAT
-        }
-    }
-
     companion object {
         private val SUPPORTED_EDIT_IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp")
     }
 }
+
+internal fun inferOpenAIModelType(modelId: String): ModelType = inferModelTypeFromId(modelId)

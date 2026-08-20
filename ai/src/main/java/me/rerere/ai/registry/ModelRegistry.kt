@@ -2,6 +2,8 @@ package me.rerere.ai.registry
 
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.inferModelTypeFromId
 
 fun interface ModelData<T> {
     fun getData(modelId: String): T
@@ -631,12 +633,19 @@ object ModelRegistry {
         QWEN_MT
     )
 
+    val MODEL_TYPE = ModelData(::inferModelTypeFromId)
+
     val MODEL_INPUT_MODALITIES = ModelData { modelId ->
-        resolveModalities(modelId) { it.inputModalities }
+        resolveModalities(modelId, fallback = listOf(Modality.TEXT)) { it.inputModalities }
     }
 
     val MODEL_OUTPUT_MODALITIES = ModelData { modelId ->
-        resolveModalities(modelId) { it.outputModalities }
+        val fallback = if (MODEL_TYPE.getData(modelId) == ModelType.IMAGE) {
+            listOf(Modality.IMAGE)
+        } else {
+            listOf(Modality.TEXT)
+        }
+        resolveModalities(modelId, fallback = fallback) { it.outputModalities }
     }
 
     val MODEL_ABILITIES = ModelData { modelId ->
@@ -669,13 +678,14 @@ object ModelRegistry {
 
     private fun resolveModalities(
         modelId: String,
+        fallback: List<Modality>,
         selector: (ModelDefinition) -> Set<Modality>
     ): List<Modality> {
         val modalities = resolveModels(modelId)
             .flatMap { selector(it) }
             .toSet()
         return if (modalities.isEmpty()) {
-            listOf(Modality.TEXT)
+            fallback
         } else {
             listOf(Modality.TEXT, Modality.IMAGE).filter { it in modalities }
         }
