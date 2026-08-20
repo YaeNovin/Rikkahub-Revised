@@ -68,7 +68,20 @@ class BackupPolicyTest {
     @Test
     fun `attachment and workspace archive paths reject traversal`() {
         assertEquals("nested/file.txt", BackupPolicy.safeRelativePath("upload/nested/file.txt", "upload"))
+        assertEquals(
+            "nested/result.png",
+            BackupPolicy.safeRelativePath(
+                "${BackupPolicy.GENERATED_IMAGES_DIRECTORY}/nested/result.png",
+                BackupPolicy.GENERATED_IMAGES_DIRECTORY,
+            ),
+        )
         assertNull(BackupPolicy.safeRelativePath("upload/../settings.json", "upload"))
+        assertNull(
+            BackupPolicy.safeRelativePath(
+                "${BackupPolicy.GENERATED_IMAGES_DIRECTORY}/../settings.json",
+                BackupPolicy.GENERATED_IMAGES_DIRECTORY,
+            ),
+        )
         assertNull(BackupPolicy.safeRelativePath("upload\\escape.txt", "upload"))
         assertNull(BackupPolicy.workspaceRestoreRelativePath("workspaces/demo/tmp/cache.txt"))
         assertNull(BackupPolicy.workspaceRestoreRelativePath("workspaces/../files/escape.txt"))

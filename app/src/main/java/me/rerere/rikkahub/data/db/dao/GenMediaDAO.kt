@@ -11,6 +11,22 @@ interface GenMediaDAO {
     @Query("SELECT * FROM genmediaentity ORDER BY create_at DESC")
     fun getAll(): PagingSource<Int, GenMediaEntity>
 
+    @Query(
+        """
+        SELECT * FROM genmediaentity
+        WHERE TRIM(:query) = ''
+            OR prompt LIKE '%' || TRIM(:query) || '%' COLLATE NOCASE
+            OR model_id LIKE '%' || TRIM(:query) || '%' COLLATE NOCASE
+            OR provider_name LIKE '%' || TRIM(:query) || '%' COLLATE NOCASE
+            OR format LIKE '%' || TRIM(:query) || '%' COLLATE NOCASE
+            OR CAST(seed AS TEXT) LIKE '%' || TRIM(:query) || '%'
+            OR (CAST(width AS TEXT) || 'x' || CAST(height AS TEXT))
+                LIKE '%' || TRIM(:query) || '%' COLLATE NOCASE
+        ORDER BY create_at DESC
+        """
+    )
+    fun search(query: String): PagingSource<Int, GenMediaEntity>
+
     @Query("SELECT * FROM genmediaentity ORDER BY create_at DESC")
     suspend fun getAllMedia(): List<GenMediaEntity>
 
@@ -18,7 +34,7 @@ interface GenMediaDAO {
     suspend fun getMediaBefore(cutoffMillis: Long): List<GenMediaEntity>
 
     @Insert
-    suspend fun insert(media: GenMediaEntity)
+    suspend fun insert(media: GenMediaEntity): Long
 
     @Query("DELETE FROM genmediaentity WHERE id = :id")
     suspend fun delete(id: Int)

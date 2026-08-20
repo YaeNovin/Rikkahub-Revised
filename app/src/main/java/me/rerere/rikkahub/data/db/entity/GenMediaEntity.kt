@@ -20,6 +20,16 @@ data class GenMediaEntity(
     val type: String = TYPE_IMAGE_GENERATION,
     @ColumnInfo("source_paths")
     val sourcePaths: String? = null,
+    @ColumnInfo("provider_name")
+    val providerName: String? = null,
+    @ColumnInfo("width")
+    val width: Int? = null,
+    @ColumnInfo("height")
+    val height: Int? = null,
+    @ColumnInfo("format")
+    val format: String? = null,
+    @ColumnInfo("seed")
+    val seed: Long? = null,
 ) {
     companion object {
         const val TYPE_IMAGE_GENERATION = "image_generation"
