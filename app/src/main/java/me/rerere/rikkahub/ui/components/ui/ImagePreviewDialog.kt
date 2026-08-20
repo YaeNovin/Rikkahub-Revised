@@ -32,6 +32,7 @@ import org.koin.compose.koinInject
 @Composable
 fun ImagePreviewDialog(
     images: List<String>,
+    topEndAction: (@Composable () -> Unit)? = null,
     onDismissRequest: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -46,7 +47,7 @@ fun ImagePreviewDialog(
             usePlatformDefaultWidth = false
         )
     ) {
-        Box {
+        Box(modifier = Modifier.fillMaxSize()) {
             ImagePager(
                 modifier = Modifier.fillMaxSize(),
                 pagerState = state,
@@ -82,6 +83,17 @@ fun ImagePreviewDialog(
                     }
                 ) {
                     Icon(HugeIcons.Download01, null, tint = Color.White)
+                }
+            }
+
+            if (topEndAction != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .zIndex(1f)
+                        .padding(8.dp),
+                ) {
+                    topEndAction()
                 }
             }
         }

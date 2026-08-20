@@ -398,9 +398,20 @@
   <string name="imggen_page_custom_size_example">例如 1024x1024</string>
   <string name="imggen_page_delete">删除</string>
   <string name="imggen_page_gallery">相册</string>
+  <string name="imggen_page_gallery_all">全部图片</string>
+  <string name="imggen_page_gallery_create_folder">创建</string>
+  <string name="imggen_page_gallery_delete_folder">删除文件夹及内容</string>
+  <string name="imggen_page_gallery_delete_folder_message">警告：所选文件夹及其中的全部图片将被永久删除，此操作无法撤销，也无法恢复。</string>
+  <string name="imggen_page_gallery_dissolve">解散</string>
+  <string name="imggen_page_gallery_dissolve_folder">解散文件夹</string>
+  <string name="imggen_page_gallery_dissolve_folder_message">文件夹将被删除，其中的图片会保留在图库中并变为未分类状态。</string>
+  <string name="imggen_page_gallery_folder_name">文件夹名称</string>
+  <string name="imggen_page_gallery_move_to_folder">移动到文件夹</string>
+  <string name="imggen_page_gallery_new_folder">新建文件夹</string>
   <string name="imggen_page_gallery_search_hint">搜索提示词、模型、供应商、尺寸、格式或种子</string>
   <string name="imggen_page_gallery_search_clear">清除图库搜索</string>
   <string name="imggen_page_gallery_no_results">没有匹配的图片</string>
+  <string name="imggen_page_gallery_unfiled">未分类</string>
   <string name="imggen_page_generate_image">生成图片</string>
   <string name="imggen_page_generation_count">生成数量</string>
   <string name="imggen_page_generation_count_desc">每次生成的图片数量</string>
@@ -409,6 +420,9 @@
   <string name="imggen_page_model_default">模型默认</string>
   <string name="imggen_page_metadata_model">模型</string>
   <string name="imggen_page_metadata_provider">供应商</string>
+  <string name="imggen_page_metadata_aspect_ratio">比例</string>
+  <string name="imggen_page_metadata_file_size">文件大小</string>
+  <string name="imggen_page_metadata_folder">文件夹</string>
   <string name="imggen_page_metadata_size">尺寸</string>
   <string name="imggen_page_metadata_format">格式</string>
   <string name="imggen_page_metadata_seed">种子</string>
@@ -417,6 +431,8 @@
   <string name="imggen_page_model_selection">模型选择</string>
   <string name="imggen_page_model_selection_desc">选择用于图片生成的AI模型</string>
   <string name="imggen_page_new_session">新会话</string>
+  <string name="imggen_page_image_details">图片详细信息</string>
+  <string name="imggen_page_close">关闭</string>
   <string name="imggen_page_no_generated_images">暂无生成的图片</string>
   <string name="imggen_page_prompt_copied">提示词已复制到剪贴板</string>
   <string name="imggen_page_background">背景</string>
@@ -1421,4 +1437,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
     <string name="imggen_error_invalid_configuration">所选模型或供应商与当前操作不兼容。</string>
     <string name="imggen_error_generic">图片处理失败，请重试。</string>
     <string name="imggen_error_delete_failed">无法删除图片。</string>
+    <string name="imggen_error_delete_folder_failed">无法删除文件夹及其中的图片。</string>
+    <string name="imggen_error_dissolve_folder_failed">无法解散文件夹。</string>
 </resources>

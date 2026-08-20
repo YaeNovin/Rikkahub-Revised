@@ -406,9 +406,20 @@
   <string name="imggen_page_custom_size_example">e.g. 1024x1024</string>
   <string name="imggen_page_delete">Delete</string>
   <string name="imggen_page_gallery">Gallery</string>
+  <string name="imggen_page_gallery_all">All images</string>
+  <string name="imggen_page_gallery_create_folder">Create</string>
+  <string name="imggen_page_gallery_delete_folder">Delete folder and contents</string>
+  <string name="imggen_page_gallery_delete_folder_message">Warning: The selected folder and every image it contains will be permanently deleted. This action cannot be undone.</string>
+  <string name="imggen_page_gallery_dissolve">Dissolve</string>
+  <string name="imggen_page_gallery_dissolve_folder">Dissolve folder</string>
+  <string name="imggen_page_gallery_dissolve_folder_message">The folder will be removed and its images will become unfiled. No images will be deleted.</string>
+  <string name="imggen_page_gallery_folder_name">Folder name</string>
+  <string name="imggen_page_gallery_move_to_folder">Move to folder</string>
+  <string name="imggen_page_gallery_new_folder">New folder</string>
   <string name="imggen_page_gallery_search_hint">Search prompts, models, providers, sizes, formats, or seeds</string>
   <string name="imggen_page_gallery_search_clear">Clear gallery search</string>
   <string name="imggen_page_gallery_no_results">No matching images</string>
+  <string name="imggen_page_gallery_unfiled">Unfiled</string>
   <string name="imggen_page_generate_image">Generate Image</string>
   <string name="imggen_page_generation_count">Generation Count</string>
   <string name="imggen_page_generation_count_desc">Number of images to generate each time</string>
@@ -417,6 +428,9 @@
   <string name="imggen_page_model_default">Model default</string>
   <string name="imggen_page_metadata_model">Model</string>
   <string name="imggen_page_metadata_provider">Provider</string>
+  <string name="imggen_page_metadata_aspect_ratio">Aspect ratio</string>
+  <string name="imggen_page_metadata_file_size">File size</string>
+  <string name="imggen_page_metadata_folder">Folder</string>
   <string name="imggen_page_metadata_size">Size</string>
   <string name="imggen_page_metadata_format">Format</string>
   <string name="imggen_page_metadata_seed">Seed</string>
@@ -425,6 +439,8 @@
   <string name="imggen_page_model_selection">Model Selection</string>
   <string name="imggen_page_model_selection_desc">Select AI model for image generation</string>
   <string name="imggen_page_new_session">New session</string>
+  <string name="imggen_page_image_details">Image details</string>
+  <string name="imggen_page_close">Close</string>
   <string name="imggen_page_no_generated_images">No generated images</string>
   <string name="imggen_page_prompt_copied">Prompt copied to clipboard</string>
   <string name="imggen_page_background">Background</string>
@@ -1435,4 +1451,6 @@
     <string name="imggen_error_invalid_configuration">The selected model or provider is not compatible with this operation.</string>
     <string name="imggen_error_generic">Image processing failed. Please retry.</string>
     <string name="imggen_error_delete_failed">Could not delete the image.</string>
+    <string name="imggen_error_delete_folder_failed">Could not delete the folder and its images.</string>
+    <string name="imggen_error_dissolve_folder_failed">Could not dissolve the folder.</string>
 </resources>

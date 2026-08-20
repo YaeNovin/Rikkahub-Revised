@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.imggen
 
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -99,7 +100,12 @@ import me.rerere.hugeicons.stroke.Colors
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.FloppyDisk
+import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.FolderAdd
+import me.rerere.hugeicons.stroke.FolderRemove
 import me.rerere.hugeicons.stroke.Image03
+import me.rerere.hugeicons.stroke.InformationCircle
+import me.rerere.hugeicons.stroke.MoveTo
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
@@ -112,6 +118,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
+import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.toLocalDateTime
@@ -639,6 +646,8 @@ private fun ImageGalleryScreen(
 ) {
     val generatedImages = vm.generatedImages.collectAsLazyPagingItems()
     val galleryQuery by vm.galleryQuery.collectAsStateWithLifecycle()
+    val folders by vm.galleryFolders.collectAsStateWithLifecycle()
+    val selectedFolderId by vm.selectedGalleryFolderId.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
     val clipboardManager = LocalClipboardManager.current
@@ -646,6 +655,29 @@ private fun ImageGalleryScreen(
     val toaster = LocalToaster.current
     val pullToRefreshState = rememberPullToRefreshState()
     val unknownValue = stringResource(R.string.imggen_page_metadata_unknown)
+    var previewImage by remember { mutableStateOf<GeneratedImage?>(null) }
+    var detailsImage by remember { mutableStateOf<GeneratedImage?>(null) }
+    var moveImage by remember { mutableStateOf<GeneratedImage?>(null) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var folderPendingDeletion by remember { mutableStateOf<String?>(null) }
+    var folderPendingDissolution by remember { mutableStateOf<String?>(null) }
+
+    fun saveImage(image: GeneratedImage) {
+        scope.launch {
+            try {
+                filesManager.saveMessageImage(context, "file://${image.filePath}")
+                toaster.show(
+                    message = context.getString(R.string.imggen_page_image_saved_success),
+                    type = ToastType.Success,
+                )
+            } catch (e: Exception) {
+                toaster.show(
+                    message = context.getString(R.string.imggen_page_save_failed, e.message),
+                    type = ToastType.Error,
+                )
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -677,6 +709,65 @@ private fun ImageGalleryScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = selectedFolderId == null,
+                onClick = { vm.selectGalleryFolder(null) },
+                leadingIcon = {
+                    Icon(HugeIcons.Image03, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+                label = { Text(stringResource(R.string.imggen_page_gallery_all)) },
+            )
+            folders.forEach { folder ->
+                FilterChip(
+                    selected = selectedFolderId == folder.id,
+                    onClick = { vm.selectGalleryFolder(folder.id) },
+                    leadingIcon = {
+                        Icon(HugeIcons.Folder01, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    label = {
+                        Text(folder.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },
+                )
+            }
+            IconButton(onClick = { showCreateFolderDialog = true }) {
+                Icon(
+                    imageVector = HugeIcons.FolderAdd,
+                    contentDescription = stringResource(R.string.imggen_page_gallery_new_folder),
+                )
+            }
+            selectedFolderId?.let { folderId ->
+                Tooltip(
+                    tooltip = { Text(stringResource(R.string.imggen_page_gallery_delete_folder)) },
+                ) {
+                    IconButton(onClick = { folderPendingDeletion = folderId }) {
+                        Icon(
+                            imageVector = HugeIcons.Delete01,
+                            contentDescription = stringResource(R.string.imggen_page_gallery_delete_folder),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                Tooltip(
+                    tooltip = { Text(stringResource(R.string.imggen_page_gallery_dissolve_folder)) },
+                ) {
+                    IconButton(onClick = { folderPendingDissolution = folderId }) {
+                        Icon(
+                            imageVector = HugeIcons.FolderRemove,
+                            contentDescription = stringResource(R.string.imggen_page_gallery_dissolve_folder),
+                        )
+                    }
+                }
+            }
+        }
 
         PullToRefreshBox(
             isRefreshing = false,
@@ -713,10 +804,10 @@ private fun ImageGalleryScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 240.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    columns = GridCells.Adaptive(minSize = 108.dp),
+                    contentPadding = PaddingValues(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(
@@ -726,131 +817,18 @@ private fun ImageGalleryScreen(
                     ) { index ->
                         val image = generatedImages[index]
                         image?.let {
-                            var showPreview by remember { mutableStateOf(false) }
-                            val sizeText = if (it.width != null && it.height != null) {
-                                "${it.width}x${it.height}"
-                            } else {
-                                unknownValue
-                            }
-
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column {
-                                    AsyncImage(
-                                        model = File(it.filePath),
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .aspectRatio(1f)
-                                            .clickable { showPreview = true },
-                                        contentScale = ContentScale.Crop,
-                                    )
-
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        GalleryMetadataText(
-                                            label = stringResource(R.string.imggen_page_metadata_model),
-                                            value = it.model,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                        GalleryMetadataText(
-                                            label = stringResource(R.string.imggen_page_metadata_provider),
-                                            value = it.provider ?: unknownValue,
-                                        )
-                                        Text(
-                                            text = it.prompt,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        GalleryMetadataText(
-                                            label = stringResource(R.string.imggen_page_metadata_size),
-                                            value = sizeText,
-                                        )
-                                        GalleryMetadataText(
-                                            label = stringResource(R.string.imggen_page_metadata_format),
-                                            value = it.format?.uppercase() ?: unknownValue,
-                                        )
-                                        GalleryMetadataText(
-                                            label = stringResource(R.string.imggen_page_metadata_seed),
-                                            value = it.seed?.toString() ?: unknownValue,
-                                        )
-                                        GalleryMetadataText(
-                                            label = stringResource(R.string.imggen_page_metadata_generated_at),
-                                            value = Instant.ofEpochMilli(it.timestamp).toLocalDateTime(),
-                                        )
-
-                                        Row {
-                                            IconButton(
-                                                onClick = {
-                                                    clipboardManager.setText(AnnotatedString(it.prompt))
-                                                    toaster.show(
-                                                        message = context.getString(R.string.imggen_page_prompt_copied),
-                                                        type = ToastType.Success,
-                                                    )
-                                                },
-                                                modifier = Modifier.size(32.dp),
-                                            ) {
-                                                Icon(
-                                                    imageVector = HugeIcons.Copy01,
-                                                    contentDescription = stringResource(R.string.imggen_page_copy_prompt),
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                            }
-
-                                            IconButton(
-                                                onClick = {
-                                                    scope.launch {
-                                                        try {
-                                                            filesManager.saveMessageImage(context, "file://${it.filePath}")
-                                                            toaster.show(
-                                                                message = context.getString(R.string.imggen_page_image_saved_success),
-                                                                type = ToastType.Success,
-                                                            )
-                                                        } catch (e: Exception) {
-                                                            toaster.show(
-                                                                message = context.getString(
-                                                                    R.string.imggen_page_save_failed,
-                                                                    e.message,
-                                                                ),
-                                                                type = ToastType.Error,
-                                                            )
-                                                        }
-                                                    }
-                                                },
-                                                modifier = Modifier.size(32.dp),
-                                            ) {
-                                                Icon(
-                                                    imageVector = HugeIcons.FloppyDisk,
-                                                    contentDescription = stringResource(R.string.imggen_page_save),
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                            }
-
-                                            IconButton(
-                                                onClick = { vm.deleteImage(it) },
-                                                modifier = Modifier.size(32.dp),
-                                            ) {
-                                                Icon(
-                                                    imageVector = HugeIcons.Delete01,
-                                                    contentDescription = stringResource(R.string.imggen_page_delete),
-                                                    modifier = Modifier.size(16.dp),
-                                                    tint = MaterialTheme.colorScheme.error,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (showPreview) {
-                                ImagePreviewDialog(
-                                    images = listOf(it.filePath),
-                                    onDismissRequest = { showPreview = false },
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .clickable { previewImage = it },
+                                shape = RoundedCornerShape(4.dp),
+                            ) {
+                                AsyncImage(
+                                    model = File(it.filePath),
+                                    contentDescription = it.prompt,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
                                 )
                             }
                         }
@@ -859,6 +837,308 @@ private fun ImageGalleryScreen(
             }
         }
     }
+
+    previewImage?.let { image ->
+        ImagePreviewDialog(
+            images = listOf(image.filePath),
+            onDismissRequest = { previewImage = null },
+            topEndAction = {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f),
+                ) {
+                    IconButton(onClick = { detailsImage = image }) {
+                        Icon(
+                            imageVector = HugeIcons.InformationCircle,
+                            contentDescription = stringResource(R.string.imggen_page_image_details),
+                            tint = MaterialTheme.colorScheme.inverseOnSurface,
+                        )
+                    }
+                }
+            },
+        )
+    }
+
+    detailsImage?.let { image ->
+        val folderName = folders.firstOrNull { it.id == image.folderId }?.name
+            ?: stringResource(R.string.imggen_page_gallery_unfiled)
+        GalleryDetailsDialog(
+            image = image,
+            folderName = folderName,
+            unknownValue = unknownValue,
+            fileSize = Formatter.formatShortFileSize(context, image.fileSizeBytes),
+            onDismiss = { detailsImage = null },
+            onCopyPrompt = {
+                clipboardManager.setText(AnnotatedString(image.prompt))
+                toaster.show(
+                    message = context.getString(R.string.imggen_page_prompt_copied),
+                    type = ToastType.Success,
+                )
+            },
+            onSave = { saveImage(image) },
+            onMove = {
+                detailsImage = null
+                moveImage = image
+            },
+            onDelete = {
+                detailsImage = null
+                previewImage = null
+                vm.deleteImage(image)
+            },
+        )
+    }
+
+    moveImage?.let { image ->
+        MoveImageToFolderDialog(
+            currentFolderId = image.folderId,
+            folders = folders.map { it.id to it.name },
+            onDismiss = { moveImage = null },
+            onMove = { folderId ->
+                vm.moveImageToFolder(image, folderId)
+                moveImage = null
+                previewImage = null
+            },
+        )
+    }
+
+    if (showCreateFolderDialog) {
+        CreateGalleryFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { name ->
+                vm.createGalleryFolder(name)
+                showCreateFolderDialog = false
+            },
+        )
+    }
+
+    folderPendingDeletion?.let { folderId ->
+        AlertDialog(
+            onDismissRequest = { folderPendingDeletion = null },
+            title = { Text(stringResource(R.string.imggen_page_gallery_delete_folder)) },
+            text = { Text(stringResource(R.string.imggen_page_gallery_delete_folder_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.deleteGalleryFolderWithContents(folderId)
+                        folderPendingDeletion = null
+                    },
+                ) {
+                    Text(stringResource(R.string.imggen_page_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderPendingDeletion = null }) {
+                    Text(stringResource(R.string.imggen_page_cancel))
+                }
+            },
+        )
+    }
+
+    folderPendingDissolution?.let { folderId ->
+        AlertDialog(
+            onDismissRequest = { folderPendingDissolution = null },
+            title = { Text(stringResource(R.string.imggen_page_gallery_dissolve_folder)) },
+            text = { Text(stringResource(R.string.imggen_page_gallery_dissolve_folder_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.dissolveGalleryFolder(folderId)
+                        folderPendingDissolution = null
+                    },
+                ) {
+                    Text(stringResource(R.string.imggen_page_gallery_dissolve))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderPendingDissolution = null }) {
+                    Text(stringResource(R.string.imggen_page_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun GalleryDetailsDialog(
+    image: GeneratedImage,
+    folderName: String,
+    unknownValue: String,
+    fileSize: String,
+    onDismiss: () -> Unit,
+    onCopyPrompt: () -> Unit,
+    onSave: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val dimensions = if (image.width != null && image.height != null) {
+        "${image.width}x${image.height}"
+    } else {
+        unknownValue
+    }
+    val aspectRatio = imageAspectRatio(image.width, image.height) ?: unknownValue
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(HugeIcons.InformationCircle, contentDescription = null) },
+        title = { Text(stringResource(R.string.imggen_page_image_details)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_model), image.model)
+                GalleryMetadataText(
+                    stringResource(R.string.imggen_page_metadata_provider),
+                    image.provider ?: unknownValue,
+                )
+                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_aspect_ratio), aspectRatio)
+                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_size), dimensions)
+                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_file_size), fileSize)
+                GalleryMetadataText(
+                    stringResource(R.string.imggen_page_metadata_format),
+                    image.format?.uppercase() ?: unknownValue,
+                )
+                GalleryMetadataText(
+                    stringResource(R.string.imggen_page_metadata_seed),
+                    image.seed?.toString() ?: unknownValue,
+                )
+                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_folder), folderName)
+                GalleryMetadataText(
+                    stringResource(R.string.imggen_page_metadata_generated_at),
+                    Instant.ofEpochMilli(image.timestamp).toLocalDateTime(),
+                )
+                Text(
+                    text = image.prompt,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    IconButton(onClick = onCopyPrompt) {
+                        Icon(HugeIcons.Copy01, stringResource(R.string.imggen_page_copy_prompt))
+                    }
+                    IconButton(onClick = onSave) {
+                        Icon(HugeIcons.FloppyDisk, stringResource(R.string.imggen_page_save))
+                    }
+                    IconButton(onClick = onMove) {
+                        Icon(HugeIcons.MoveTo, stringResource(R.string.imggen_page_gallery_move_to_folder))
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            HugeIcons.Delete01,
+                            stringResource(R.string.imggen_page_delete),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.imggen_page_close))
+            }
+        },
+    )
+}
+
+@Composable
+private fun MoveImageToFolderDialog(
+    currentFolderId: String?,
+    folders: List<Pair<String, String>>,
+    onDismiss: () -> Unit,
+    onMove: (String?) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.imggen_page_gallery_move_to_folder)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                GalleryFolderChoice(
+                    name = stringResource(R.string.imggen_page_gallery_unfiled),
+                    selected = currentFolderId == null,
+                    onClick = { onMove(null) },
+                )
+                folders.forEach { (id, name) ->
+                    GalleryFolderChoice(
+                        name = name,
+                        selected = currentFolderId == id,
+                        onClick = { onMove(id) },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.imggen_page_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun GalleryFolderChoice(
+    name: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(HugeIcons.Folder01, contentDescription = null)
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun CreateGalleryFolderDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.imggen_page_gallery_new_folder)) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.imggen_page_gallery_folder_name)) },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onCreate(name) },
+                enabled = name.isNotBlank(),
+            ) {
+                Text(stringResource(R.string.imggen_page_gallery_create_folder))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.imggen_page_cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -875,6 +1155,15 @@ private fun GalleryMetadataText(
         overflow = TextOverflow.Ellipsis,
     )
 }
+
+private fun imageAspectRatio(width: Int?, height: Int?): String? {
+    if (width == null || height == null || width <= 0 || height <= 0) return null
+    val divisor = greatestCommonDivisor(width, height)
+    return "${width / divisor}:${height / divisor}"
+}
+
+private tailrec fun greatestCommonDivisor(left: Int, right: Int): Int =
+    if (right == 0) left else greatestCommonDivisor(right, left % right)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

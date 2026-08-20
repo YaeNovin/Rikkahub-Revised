@@ -2,9 +2,10 @@ package me.rerere.rikkahub.data.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity
+@Entity(indices = [Index(value = ["folder_id"])])
 data class GenMediaEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
@@ -30,6 +31,8 @@ data class GenMediaEntity(
     val format: String? = null,
     @ColumnInfo("seed")
     val seed: Long? = null,
+    @ColumnInfo("folder_id")
+    val folderId: String? = null,
 ) {
     companion object {
         const val TYPE_IMAGE_GENERATION = "image_generation"

@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
+import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
@@ -37,6 +38,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         ConversationEntity::class,
         MemoryEntity::class,
         GenMediaEntity::class,
+        GenMediaFolderEntity::class,
         MessageNodeEntity::class,
         ManagedFileEntity::class,
         FavoriteEntity::class,
@@ -47,7 +49,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         KnowledgeChunkEntity::class,
         KnowledgeCitationEntity::class,
     ],
-    version = 29,
+    version = 30,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -72,6 +74,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
         AutoMigration(from = 28, to = 29),
+        AutoMigration(from = 29, to = 30),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)

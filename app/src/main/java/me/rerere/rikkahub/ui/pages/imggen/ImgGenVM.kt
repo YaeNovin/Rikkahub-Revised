@@ -18,13 +18,16 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -46,11 +49,13 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
+import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.uuid.Uuid
 
 @Serializable
 data class GeneratedImage(
@@ -64,6 +69,8 @@ data class GeneratedImage(
     val height: Int? = null,
     val format: String? = null,
     val seed: Long? = null,
+    val folderId: String? = null,
+    val fileSizeBytes: Long = 0L,
 )
 
 private fun GenMediaEntity.toGeneratedImage(filesManager: FilesManager): GeneratedImage {
@@ -81,6 +88,8 @@ private fun GenMediaEntity.toGeneratedImage(filesManager: FilesManager): Generat
         height = this.height,
         format = this.format,
         seed = this.seed,
+        folderId = this.folderId,
+        fileSizeBytes = File(fullPath).length().coerceAtLeast(0L),
     )
 }
 
@@ -131,15 +140,22 @@ class ImgGenVM(
     private val _galleryQuery = MutableStateFlow("")
     val galleryQuery: StateFlow<String> = _galleryQuery
 
+    private val _selectedGalleryFolderId = MutableStateFlow<String?>(null)
+    val selectedGalleryFolderId: StateFlow<String?> = _selectedGalleryFolderId
+
+    val galleryFolders: StateFlow<List<GenMediaFolderEntity>> = genMediaRepository.getFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
     @OptIn(FlowPreview::class)
-    val generatedImages: Flow<PagingData<GeneratedImage>> = _galleryQuery
-        .debounce(GALLERY_SEARCH_DEBOUNCE_MILLIS)
-        .map(String::trim)
+    val generatedImages: Flow<PagingData<GeneratedImage>> = combine(
+        _galleryQuery.debounce(GALLERY_SEARCH_DEBOUNCE_MILLIS).map(String::trim),
+        _selectedGalleryFolderId,
+    ) { query, folderId -> query to folderId }
         .distinctUntilChanged()
-        .flatMapLatest { query ->
+        .flatMapLatest { (query, folderId) ->
             Pager(
                 config = PagingConfig(pageSize = 20, enablePlaceholders = false),
-                pagingSourceFactory = { genMediaRepository.searchMedia(query) },
+                pagingSourceFactory = { genMediaRepository.searchMedia(query, folderId) },
             ).flow
         }
         .map { pagingData ->
@@ -153,6 +169,86 @@ class ImgGenVM(
 
     fun updateGalleryQuery(query: String) {
         _galleryQuery.value = query
+    }
+
+    fun selectGalleryFolder(folderId: String?) {
+        _selectedGalleryFolderId.value = folderId
+    }
+
+    fun createGalleryFolder(name: String) {
+        val normalizedName = name.trim()
+        if (normalizedName.isEmpty()) return
+        val folder = GenMediaFolderEntity(
+            id = Uuid.random().toString(),
+            name = normalizedName,
+            createAt = System.currentTimeMillis(),
+        )
+        viewModelScope.launch {
+            genMediaRepository.createFolder(folder)
+            _selectedGalleryFolderId.value = folder.id
+        }
+    }
+
+    fun moveImageToFolder(image: GeneratedImage, folderId: String?) {
+        if (image.id <= 0) return
+        viewModelScope.launch {
+            genMediaRepository.moveMediaToFolder(image.id, folderId)
+        }
+    }
+
+    fun dissolveGalleryFolder(folderId: String) {
+        viewModelScope.launch {
+            try {
+                genMediaRepository.dissolveFolder(folderId)
+                clearSelectedGalleryFolder(folderId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Gallery folder dissolution failed (${e::class.simpleName})")
+                _error.value = getApplication<Application>()
+                    .getString(R.string.imggen_error_dissolve_folder_failed)
+            }
+        }
+    }
+
+    fun deleteGalleryFolderWithContents(folderId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val files = genMediaRepository.getMediaInFolder(folderId)
+                        .map(::resolveStoredImageFile)
+                        .distinctBy { it.absolutePath }
+                    deleteFilesWithRollback(files) {
+                        genMediaRepository.deleteFolderWithContents(folderId)
+                    }
+                }
+                clearSelectedGalleryFolder(folderId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Gallery folder deletion failed (${e::class.simpleName})")
+                _error.value = getApplication<Application>()
+                    .getString(R.string.imggen_error_delete_folder_failed)
+            }
+        }
+    }
+
+    private fun clearSelectedGalleryFolder(folderId: String) {
+        if (_selectedGalleryFolderId.value == folderId) {
+            _selectedGalleryFolderId.value = null
+        }
+    }
+
+    private fun resolveStoredImageFile(media: GenMediaEntity): File {
+        val imagesDirectory = filesManager.getImagesDir().canonicalFile
+        val imageFile = File(
+            imagesDirectory,
+            media.path.removePrefix("images/"),
+        ).canonicalFile
+        check(imageFile.path.startsWith(imagesDirectory.path + File.separator)) {
+            "Stored image path is outside the gallery directory"
+        }
+        return imageFile
     }
 
     fun updateNumberOfImages(count: Int) {
@@ -486,6 +582,7 @@ class ImgGenVM(
                 height = metadata.height,
                 format = metadata.format,
                 seed = item.seed ?: requestedSeed,
+                fileSizeBytes = createdFile.length().coerceAtLeast(0L),
             )
         } catch (e: Throwable) {
             createdFile.delete()
@@ -580,18 +677,12 @@ class ImgGenVM(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val file = File(image.filePath)
-                    val tombstone = File(file.parentFile, ".${file.name}.${System.nanoTime()}.deleting")
-                    val moved = file.exists() && file.renameTo(tombstone)
-                    if (file.exists() && !moved) error("Unable to prepare image for deletion")
-                    try {
+                    deleteFilesWithRollback(listOf(File(image.filePath))) {
                         genMediaRepository.deleteMedia(image.id)
-                    } catch (e: Throwable) {
-                        if (moved) tombstone.renameTo(file)
-                        throw e
                     }
-                    if (moved) tombstone.delete()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Image deletion failed (${e::class.simpleName})")
                 _error.value = getApplication<Application>().getString(R.string.imggen_error_delete_failed)
@@ -636,3 +727,45 @@ private data class StoredImageMetadata(
     val height: Int?,
     val format: String?,
 )
+
+private data class StagedFileDeletion(
+    val original: File,
+    val tombstone: File,
+)
+
+internal suspend fun deleteFilesWithRollback(
+    files: List<File>,
+    deleteRecords: suspend () -> Unit,
+) {
+    val stagedFiles = mutableListOf<StagedFileDeletion>()
+    var recordsDeleted = false
+    try {
+        files.distinctBy { it.absolutePath }.forEachIndexed { index, file ->
+            if (!file.exists()) return@forEachIndexed
+            val tombstone = File(
+                file.parentFile,
+                ".${file.name}.${System.nanoTime()}.$index.deleting",
+            )
+            check(file.renameTo(tombstone)) { "Unable to prepare image for deletion" }
+            stagedFiles += StagedFileDeletion(file, tombstone)
+        }
+
+        deleteRecords()
+        recordsDeleted = true
+
+        stagedFiles.forEach { staged ->
+            check(staged.tombstone.delete() || !staged.tombstone.exists()) {
+                "Unable to permanently delete image"
+            }
+        }
+    } catch (error: Throwable) {
+        if (!recordsDeleted) {
+            stagedFiles.asReversed().forEach { staged ->
+                if (staged.tombstone.exists() && !staged.tombstone.renameTo(staged.original)) {
+                    error.addSuppressed(IllegalStateException("Unable to restore image after deletion failure"))
+                }
+            }
+        }
+        throw error
+    }
+}
