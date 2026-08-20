@@ -44,6 +44,15 @@ interface Provider<T : ProviderSetting> {
         error("Embedding generation is not supported")
     }
 
+    fun imageGenerationConstraints(
+        providerSetting: ProviderSetting,
+        model: Model,
+    ): ImageGenerationConstraints = ImageGenerationConstraints(
+        supportsGeneration = supports(ProviderCapability.IMAGE_GENERATION),
+        supportsEdit = supports(ProviderCapability.IMAGE_EDIT),
+        supportsPartialImages = supports(ProviderCapability.PARTIAL_IMAGES),
+    )
+
     suspend fun generateImage(
         providerSetting: ProviderSetting,
         params: ImageGenerationParams,
@@ -61,7 +70,34 @@ interface Provider<T : ProviderSetting> {
 
 enum class ProviderCapability {
     BALANCE,
+    IMAGE_GENERATION,
+    IMAGE_EDIT,
+    PARTIAL_IMAGES,
 }
+
+data class ImageGenerationConstraints(
+    val supportsGeneration: Boolean,
+    val supportsEdit: Boolean,
+    val supportsPartialImages: Boolean,
+    val maxOutputImages: Int = 1,
+    val maxReferenceImages: Int = 0,
+    val supportsSize: Boolean = true,
+    val supportedSizes: Set<String>? = null,
+    val supportsCustomSize: Boolean = true,
+    val customSizeMultiple: Int? = null,
+    val customSizeMaxDimension: Int? = null,
+    val customSizeMinPixels: Long? = null,
+    val customSizeMaxPixels: Long? = null,
+    val customSizeMaxAspectRatio: Int? = null,
+    val sizeRequestField: String = "size",
+    val supportedQualityValues: Set<String> = emptySet(),
+    val supportedOutputFormats: Set<String> = emptySet(),
+    val supportedBackgroundValues: Set<String> = emptySet(),
+    val supportsOutputCompression: Boolean = false,
+    val supportedResolutionValues: Set<String> = emptySet(),
+    val blockedImageOptionKeys: Set<String> = emptySet(),
+    val usesJsonImageEdit: Boolean = false,
+)
 
 @Serializable
 data class TextGenerationResult(
@@ -91,6 +127,11 @@ data class ImageGenerationParams(
     val numOfImages: Int = 1,
     val size: String = ImageGenSize.AUTO.value,
     val partialImages: Int = 2,
+    val quality: String? = null,
+    val outputFormat: String? = null,
+    val background: String? = null,
+    val outputCompression: Int = 100,
+    val resolution: String? = null,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )
@@ -103,6 +144,11 @@ data class ImageEditParams(
     val numOfImages: Int = 1,
     val size: String = ImageGenSize.AUTO.value,
     val partialImages: Int = 2,
+    val quality: String? = null,
+    val outputFormat: String? = null,
+    val background: String? = null,
+    val outputCompression: Int = 100,
+    val resolution: String? = null,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )

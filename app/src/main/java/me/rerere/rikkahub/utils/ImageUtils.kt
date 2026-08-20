@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import com.drew.imaging.ImageMetadataReader
@@ -23,6 +24,64 @@ import com.google.zxing.common.HybridBinarizer
  */
 object ImageUtils {
 
+    private const val LARGE_IMAGE_BYTES = 10L * 1024L * 1024L
+
+    /**
+     * Re-encodes a large static image before it enters the chat upload directory.
+     * Sampling happens during decode, so a camera-sized image never has to be
+     * materialized at its original resolution.
+     */
+    fun optimizeLargeImage(
+        context: Context,
+        uri: Uri,
+        target: File,
+        sourceSizeBytes: Long?,
+        maxDimension: Int = 4096,
+        maxPixels: Long = 12_000_000L,
+        quality: Int = 86,
+    ): Boolean {
+        if (sourceSizeBytes == null || sourceSizeBytes < LARGE_IMAGE_BYTES) return false
+        if (context.contentResolver.getType(uri)?.lowercase() == "image/gif") return false
+
+        return runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, bounds)
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching false
+
+            var sampleSize = 1
+            while (
+                (bounds.outWidth / sampleSize) > maxDimension ||
+                    (bounds.outHeight / sampleSize) > maxDimension ||
+                    (bounds.outWidth.toLong() / sampleSize) * (bounds.outHeight.toLong() / sampleSize) > maxPixels
+            ) {
+                sampleSize *= 2
+            }
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val decoded = context.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, decodeOptions)
+            } ?: return@runCatching false
+            val oriented = correctImageOrientation(context, uri, decoded)
+            try {
+                target.parentFile?.mkdirs()
+                target.outputStream().use { output ->
+                    oriented.compress(Bitmap.CompressFormat.JPEG, quality, output)
+                }
+                true
+            } finally {
+                if (oriented !== decoded) oriented.recycle()
+                decoded.recycle()
+            }
+        }.onFailure {
+            Log.w("ImageUtils", "Failed to optimize large image $uri", it)
+            target.delete()
+        }.getOrDefault(false)
+    }
+
     /**
      * 优化的图片加载方法，避免OOM
      * 1. 先获取图片尺寸
@@ -38,7 +97,8 @@ object ImageUtils {
     fun loadOptimizedBitmap(
         context: Context,
         uri: Uri,
-        maxSize: Int = 1024
+        maxSize: Int = 1024,
+        preferredConfig: Bitmap.Config = Bitmap.Config.RGB_565,
     ): Bitmap? {
         return runCatching {
             // 第一步：获取图片的原始尺寸，不加载到内存
@@ -56,7 +116,7 @@ object ImageUtils {
             // 第二步：使用采样率加载压缩后的图片
             val loadOptions = BitmapFactory.Options().apply {
                 inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565 // 使用RGB_565减少内存占用
+                inPreferredConfig = preferredConfig
             }
 
             val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->

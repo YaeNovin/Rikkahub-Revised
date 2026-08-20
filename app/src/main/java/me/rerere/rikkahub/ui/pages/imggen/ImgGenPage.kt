@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -59,6 +60,8 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,6 +76,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -96,10 +100,12 @@ import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.FloppyDisk
 import me.rerere.hugeicons.stroke.Image03
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.files.FileUtils
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -108,9 +114,11 @@ import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.ImageUtils
+import me.rerere.rikkahub.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.io.File
+import java.time.Instant
 import kotlin.uuid.Uuid
 
 @Composable
@@ -149,7 +157,7 @@ fun ImageGenPage(
                     IconButton(onClick = vm::startNewSession) {
                         Icon(
                             imageVector = HugeIcons.Add01,
-                            contentDescription = "New session"
+                            contentDescription = stringResource(R.string.imggen_page_new_session)
                         )
                     }
                 }
@@ -240,24 +248,59 @@ private fun ImageGenScreen(
     val prompt by vm.prompt.collectAsStateWithLifecycle()
     val numberOfImages by vm.numberOfImages.collectAsStateWithLifecycle()
     val size by vm.size.collectAsStateWithLifecycle()
+    val quality by vm.quality.collectAsStateWithLifecycle()
+    val outputFormat by vm.outputFormat.collectAsStateWithLifecycle()
+    val background by vm.background.collectAsStateWithLifecycle()
+    val outputCompression by vm.outputCompression.collectAsStateWithLifecycle()
+    val resolution by vm.resolution.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val currentGeneratedImages by vm.currentGeneratedImages.collectAsStateWithLifecycle()
     val referenceImages by vm.referenceImages.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val settings by vm.settingsStore.settingsFlow.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
+    val selectedModel = settings.findModelById(settings.imageGenerationModelId)
+    val selectedProvider = selectedModel?.findProvider(settings.providers)
+    val selectedConstraints = if (selectedModel != null && selectedProvider != null) {
+        vm.providerManager.imageGenerationConstraints(selectedProvider, selectedModel)
+    } else {
+        null
+    }
+    val maxOutputImages = selectedConstraints?.maxOutputImages ?: 1
+    val maxReferenceImages = selectedConstraints?.takeIf { it.supportsEdit }?.maxReferenceImages ?: 0
+    val supportedSizes = selectedConstraints?.supportedSizes
+    val supportsSize = selectedConstraints?.supportsSize ?: true
     val toaster = LocalToaster.current
     var showSettingsSheet by remember { mutableStateOf(false) }
-    val sheetState = rememberBottomSheetState(
-        initialValue = SheetValue.Hidden,
-        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
-    )
+    var settingsPresentationId by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(error) {
         error?.let { errorMessage ->
             toaster.show(message = errorMessage, type = ToastType.Error)
             vm.clearError()
         }
+    }
+
+    LaunchedEffect(
+        selectedModel?.id,
+        selectedProvider?.id,
+        maxOutputImages,
+        maxReferenceImages,
+        supportsSize,
+        supportedSizes,
+        outputFormat,
+    ) {
+        if (numberOfImages > maxOutputImages) vm.updateNumberOfImages(maxOutputImages)
+        vm.limitReferenceImages(maxReferenceImages)
+        if (!supportsSize) {
+            vm.updateSize(ImageGenSize.AUTO.value)
+        } else if (selectedConstraints?.supportsCustomSize != true && supportedSizes?.let { size !in it } == true) {
+            vm.updateSize(supportedSizes.firstOrNull() ?: ImageGenSize.AUTO.value)
+        }
+        if (quality !in selectedConstraints?.supportedQualityValues.orEmpty()) vm.updateQuality(null)
+        if (outputFormat !in selectedConstraints?.supportedOutputFormats.orEmpty()) vm.updateOutputFormat(null)
+        if (background !in selectedConstraints?.supportedBackgroundValues.orEmpty()) vm.updateBackground(null)
+        if (background == "transparent" && outputFormat !in setOf(null, "png", "webp")) vm.updateBackground(null)
+        if (resolution !in selectedConstraints?.supportedResolutionValues.orEmpty()) vm.updateResolution(null)
     }
 
     Column(
@@ -273,28 +316,40 @@ private fun ImageGenScreen(
                 .weight(1f)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                (0 until minOf(2, currentGeneratedImages.size)).forEach { index ->
-                    val image = currentGeneratedImages[index]
-                    var showPreview by remember { mutableStateOf(false) }
-                    AsyncImage(
-                        model = File(image.filePath),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .weight(1f)
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showPreview = true },
-                        contentScale = ContentScale.Crop
-                    )
+                currentGeneratedImages.chunked(2).forEach { rowImages ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        rowImages.forEach { image ->
+                            key(image.filePath) {
+                                var showPreview by remember { mutableStateOf(false) }
+                                AsyncImage(
+                                    model = File(image.filePath),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { showPreview = true },
+                                    contentScale = ContentScale.Crop,
+                                )
 
-                    if (showPreview) {
-                        ImagePreviewDialog(
-                            images = listOf(image.filePath),
-                            onDismissRequest = { showPreview = false },
-                        )
+                                if (showPreview) {
+                                    ImagePreviewDialog(
+                                        images = listOf(image.filePath),
+                                        onDismissRequest = { showPreview = false },
+                                    )
+                                }
+                            }
+                        }
+                        if (rowImages.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -310,20 +365,43 @@ private fun ImageGenScreen(
             isGenerating = isGenerating,
             referenceImages = referenceImages,
             settings = settings,
-            onShowSettings = { showSettingsSheet = true },
+            onShowSettings = {
+                settingsPresentationId++
+                showSettingsSheet = true
+            },
             modifier = Modifier
         )
     }
 
     if (showSettingsSheet) {
-        SettingsBottomSheet(
-            vm = vm,
-            numberOfImages = numberOfImages,
-            size = size,
-            scope = scope,
-            sheetState = sheetState,
-            onDismiss = { showSettingsSheet = false }
-        )
+        key(settingsPresentationId) {
+            val settingsSheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            )
+            SettingsBottomSheet(
+                vm = vm,
+                numberOfImages = numberOfImages,
+                size = size,
+                maxOutputImages = maxOutputImages,
+                supportsSize = supportsSize,
+                supportedSizes = supportedSizes,
+                supportsCustomSize = selectedConstraints?.supportsCustomSize ?: true,
+                sizeRequestField = selectedConstraints?.sizeRequestField ?: "size",
+                quality = quality,
+                outputFormat = outputFormat,
+                background = background,
+                outputCompression = outputCompression,
+                resolution = resolution,
+                supportedQualityValues = selectedConstraints?.supportedQualityValues.orEmpty(),
+                supportedOutputFormats = selectedConstraints?.supportedOutputFormats.orEmpty(),
+                supportedBackgroundValues = selectedConstraints?.supportedBackgroundValues.orEmpty(),
+                supportsOutputCompression = selectedConstraints?.supportsOutputCompression == true,
+                supportedResolutionValues = selectedConstraints?.supportedResolutionValues.orEmpty(),
+                sheetState = settingsSheetState,
+                onDismiss = { showSettingsSheet = false }
+            )
+        }
     }
 }
 
@@ -339,20 +417,54 @@ private fun InputBar(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val selectedModel = settings.findModelById(settings.imageGenerationModelId)
+    val selectedProvider = selectedModel?.findProvider(settings.providers)
+    val selectedConstraints = if (selectedModel != null && selectedProvider != null) {
+        vm.providerManager.imageGenerationConstraints(selectedProvider, selectedModel)
+    } else {
+        null
+    }
+    val editing = referenceImages.isNotEmpty()
+    val selectableProviders = remember(settings.providers, editing) {
+        settings.providers.mapNotNull { provider ->
+            val supportedModels = provider.models.mapNotNull { model ->
+                val effectiveProvider = model.findProvider(settings.providers) ?: return@mapNotNull null
+                val constraints = vm.providerManager.imageGenerationConstraints(effectiveProvider, model)
+                val supported = if (editing) constraints.supportsEdit else constraints.supportsGeneration
+                model.copy(type = ModelType.IMAGE).takeIf { supported }
+            }
+            provider.copyProvider(models = supportedModels).takeIf { supportedModels.isNotEmpty() }
+        }
+    }
+    val maxReferenceImages = selectedConstraints?.maxReferenceImages ?: 0
     val imagePickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
-            if (selectedUris.isNotEmpty()) {
+            val remainingSlots = (maxReferenceImages - referenceImages.size).coerceAtLeast(0)
+            val acceptedUris = selectedUris.take(remainingSlots)
+            if (acceptedUris.isNotEmpty()) {
                 scope.launch {
-                    val paths = selectedUris.mapNotNull { uri ->
+                    val paths = acceptedUris.mapNotNull { uri ->
                         withContext(Dispatchers.IO) {
                             runCatching {
-                                val bitmap = ImageUtils.loadOptimizedBitmap(context, uri, maxSize = 2048)
+                                val bitmap = ImageUtils.loadOptimizedBitmap(
+                                    context = context,
+                                    uri = uri,
+                                    maxSize = 2048,
+                                    preferredConfig = android.graphics.Bitmap.Config.ARGB_8888,
+                                )
                                     ?: error("Failed to decode image")
-                                val pngBytes = FileUtils.compressBitmapToPng(bitmap)
-                                bitmap.recycle()
                                 val file = File(context.appTempFolder, "imggen_ref_${Uuid.random()}.png")
-                                file.writeBytes(pngBytes)
-                                file.absolutePath
+                                val stagingFile = File(file.parentFile, ".${file.name}.part")
+                                try {
+                                    stagingFile.outputStream().use { output ->
+                                        check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+                                    }
+                                    check(stagingFile.renameTo(file))
+                                    file.absolutePath
+                                } finally {
+                                    bitmap.recycle()
+                                    stagingFile.delete()
+                                }
                             }.getOrNull()
                         }
                     }
@@ -368,7 +480,8 @@ private fun InputBar(
         if (referenceImages.isNotEmpty()) {
             ReferenceImagesRow(
                 images = referenceImages,
-                onRemove = vm::removeReferenceImage
+                onRemove = vm::removeReferenceImage,
+                enabled = !isGenerating,
             )
         }
 
@@ -392,7 +505,7 @@ private fun InputBar(
         ) {
             ModelSelector(
                 modelId = settings.imageGenerationModelId,
-                providers = settings.providers,
+                providers = selectableProviders,
                 type = ModelType.IMAGE,
                 onlyIcon = true,
                 onSelect = { model ->
@@ -411,17 +524,22 @@ private fun InputBar(
             }
 
             IconButton(
-                onClick = { imagePickerLauncher.launch("image/*") }
+                onClick = { imagePickerLauncher.launch("image/*") },
+                enabled = !isGenerating && selectedConstraints?.supportsEdit == true &&
+                    referenceImages.size < maxReferenceImages,
             ) {
                 Icon(
                     imageVector = HugeIcons.Add01,
-                    contentDescription = "Add reference image"
+                    contentDescription = stringResource(R.string.imggen_page_add_reference_image)
                 )
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            val canSend = prompt.isNotBlank()
+            val canSend = prompt.isNotBlank() && selectedProvider != null && (
+                if (editing) selectedConstraints?.supportsEdit == true
+                else selectedConstraints?.supportsGeneration == true
+            )
             Surface(
                 onClick = {
                     if (!isGenerating) {
@@ -467,6 +585,7 @@ private fun InputBar(
 private fun ReferenceImagesRow(
     images: List<String>,
     onRemove: (String) -> Unit,
+    enabled: Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -491,6 +610,7 @@ private fun ReferenceImagesRow(
 
                     Surface(
                         onClick = { onRemove(image) },
+                        enabled = enabled,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(3.dp)
@@ -501,7 +621,7 @@ private fun ReferenceImagesRow(
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = HugeIcons.Delete01,
-                                contentDescription = null,
+                                contentDescription = stringResource(R.string.imggen_page_remove_reference_image),
                                 tint = MaterialTheme.colorScheme.inverseOnSurface,
                                 modifier = Modifier.size(12.dp)
                             )
@@ -518,160 +638,221 @@ private fun ImageGalleryScreen(
     vm: ImgGenVM,
 ) {
     val generatedImages = vm.generatedImages.collectAsLazyPagingItems()
+    val galleryQuery by vm.galleryQuery.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val pullToRefreshState = rememberPullToRefreshState()
+    val unknownValue = stringResource(R.string.imggen_page_metadata_unknown)
 
-    PullToRefreshBox(
-        isRefreshing = false,
-        onRefresh = { generatedImages.refresh() },
-        state = pullToRefreshState
+    Column(
+        modifier = Modifier.fillMaxSize(),
     ) {
-        if (generatedImages.itemCount == 0) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Image03,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = stringResource(R.string.imggen_page_no_generated_images),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
+        OutlinedTextField(
+            value = galleryQuery,
+            onValueChange = vm::updateGalleryQuery,
+            placeholder = { Text(stringResource(R.string.imggen_page_gallery_search_hint)) },
+            leadingIcon = {
+                Icon(
+                    imageVector = HugeIcons.Search01,
+                    contentDescription = null,
+                )
+            },
+            trailingIcon = if (galleryQuery.isNotEmpty()) {
+                {
+                    IconButton(onClick = { vm.updateGalleryQuery("") }) {
+                        Icon(
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = stringResource(R.string.imggen_page_gallery_search_clear),
+                        )
+                    }
                 }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(
-                    count = generatedImages.itemCount,
-                    key = generatedImages.itemKey { it.id },
-                    contentType = generatedImages.itemContentType { "GeneratedImage" }
-                ) { index ->
-                    val image = generatedImages[index]
-                    image?.let {
-                        var showPreview by remember { mutableStateOf(false) }
+            } else {
+                null
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
 
-                        Card(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column {
-                                AsyncImage(
-                                    model = File(it.filePath),
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(1f)
-                                        .clickable { showPreview = true },
-                                    contentScale = ContentScale.Crop
-                                )
+        PullToRefreshBox(
+            isRefreshing = false,
+            onRefresh = { generatedImages.refresh() },
+            state = pullToRefreshState,
+            modifier = Modifier.weight(1f),
+        ) {
+            if (generatedImages.itemCount == 0) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = HugeIcons.Image03,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = stringResource(
+                                if (galleryQuery.isBlank()) {
+                                    R.string.imggen_page_no_generated_images
+                                } else {
+                                    R.string.imggen_page_gallery_no_results
+                                }
+                            ),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 240.dp),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(
+                        count = generatedImages.itemCount,
+                        key = generatedImages.itemKey { it.id },
+                        contentType = generatedImages.itemContentType { "GeneratedImage" },
+                    ) { index ->
+                        val image = generatedImages[index]
+                        image?.let {
+                            var showPreview by remember { mutableStateOf(false) }
+                            val sizeText = if (it.width != null && it.height != null) {
+                                "${it.width}x${it.height}"
+                            } else {
+                                unknownValue
+                            }
 
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Column {
-                                        Text(
-                                            text = it.model,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column {
+                                    AsyncImage(
+                                        model = File(it.filePath),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .aspectRatio(1f)
+                                            .clickable { showPreview = true },
+                                        contentScale = ContentScale.Crop,
+                                    )
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                                    ) {
+                                        GalleryMetadataText(
+                                            label = stringResource(R.string.imggen_page_metadata_model),
+                                            value = it.model,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        GalleryMetadataText(
+                                            label = stringResource(R.string.imggen_page_metadata_provider),
+                                            value = it.provider ?: unknownValue,
                                         )
                                         Text(
-                                            text = it.prompt.take(20) + if (it.prompt.length > 20) "..." else "",
+                                            text = it.prompt,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
-                                    }
+                                        GalleryMetadataText(
+                                            label = stringResource(R.string.imggen_page_metadata_size),
+                                            value = sizeText,
+                                        )
+                                        GalleryMetadataText(
+                                            label = stringResource(R.string.imggen_page_metadata_format),
+                                            value = it.format?.uppercase() ?: unknownValue,
+                                        )
+                                        GalleryMetadataText(
+                                            label = stringResource(R.string.imggen_page_metadata_seed),
+                                            value = it.seed?.toString() ?: unknownValue,
+                                        )
+                                        GalleryMetadataText(
+                                            label = stringResource(R.string.imggen_page_metadata_generated_at),
+                                            value = Instant.ofEpochMilli(it.timestamp).toLocalDateTime(),
+                                        )
 
-                                    Row {
-                                        IconButton(
-                                            onClick = {
-                                                clipboardManager.setText(AnnotatedString(it.prompt))
-                                                toaster.show(
-                                                    message = "Prompt copied to clipboard",
-                                                    type = ToastType.Success
+                                        Row {
+                                            IconButton(
+                                                onClick = {
+                                                    clipboardManager.setText(AnnotatedString(it.prompt))
+                                                    toaster.show(
+                                                        message = context.getString(R.string.imggen_page_prompt_copied),
+                                                        type = ToastType.Success,
+                                                    )
+                                                },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = HugeIcons.Copy01,
+                                                    contentDescription = stringResource(R.string.imggen_page_copy_prompt),
+                                                    modifier = Modifier.size(16.dp),
                                                 )
-                                            },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = HugeIcons.Copy01,
-                                                contentDescription = "Copy prompt",
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
+                                            }
 
-                                        IconButton(
-                                            onClick = {
-                                                scope.launch {
-                                                    try {
-                                                        filesManager.saveMessageImage(context, "file://${it.filePath}")
-                                                        toaster.show(
-                                                            message = context.getString(R.string.imggen_page_image_saved_success),
-                                                            type = ToastType.Success
-                                                        )
-                                                    } catch (e: Exception) {
-                                                        toaster.show(
-                                                            message = context.getString(
-                                                                R.string.imggen_page_save_failed,
-                                                                e.message
-                                                            ),
-                                                            type = ToastType.Error
-                                                        )
+                                            IconButton(
+                                                onClick = {
+                                                    scope.launch {
+                                                        try {
+                                                            filesManager.saveMessageImage(context, "file://${it.filePath}")
+                                                            toaster.show(
+                                                                message = context.getString(R.string.imggen_page_image_saved_success),
+                                                                type = ToastType.Success,
+                                                            )
+                                                        } catch (e: Exception) {
+                                                            toaster.show(
+                                                                message = context.getString(
+                                                                    R.string.imggen_page_save_failed,
+                                                                    e.message,
+                                                                ),
+                                                                type = ToastType.Error,
+                                                            )
+                                                        }
                                                     }
-                                                }
-                                            },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = HugeIcons.FloppyDisk,
-                                                contentDescription = stringResource(R.string.imggen_page_save),
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
+                                                },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = HugeIcons.FloppyDisk,
+                                                    contentDescription = stringResource(R.string.imggen_page_save),
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            }
 
-                                        IconButton(
-                                            onClick = { vm.deleteImage(it) },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = HugeIcons.Delete01,
-                                                contentDescription = stringResource(R.string.imggen_page_delete),
-                                                modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
+                                            IconButton(
+                                                onClick = { vm.deleteImage(it) },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = HugeIcons.Delete01,
+                                                    contentDescription = stringResource(R.string.imggen_page_delete),
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        if (showPreview) {
-                            ImagePreviewDialog(
-                                images = listOf(it.filePath),
-                                onDismissRequest = { showPreview = false }
-                            )
+                            if (showPreview) {
+                                ImagePreviewDialog(
+                                    images = listOf(it.filePath),
+                                    onDismissRequest = { showPreview = false },
+                                )
+                            }
                         }
                     }
                 }
@@ -680,24 +861,56 @@ private fun ImageGalleryScreen(
     }
 }
 
+@Composable
+private fun GalleryMetadataText(
+    label: String,
+    value: String,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Text(
+        text = "$label: $value",
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsBottomSheet(
     vm: ImgGenVM,
     numberOfImages: Int,
     size: String,
-    scope: CoroutineScope,
+    maxOutputImages: Int,
+    supportsSize: Boolean,
+    supportedSizes: Set<String>?,
+    supportsCustomSize: Boolean,
+    sizeRequestField: String,
+    quality: String?,
+    outputFormat: String?,
+    background: String?,
+    outputCompression: Int,
+    resolution: String?,
+    supportedQualityValues: Set<String>,
+    supportedOutputFormats: Set<String>,
+    supportedBackgroundValues: Set<String>,
+    supportsOutputCompression: Boolean,
+    supportedResolutionValues: Set<String>,
     sheetState: SheetState,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() }
+        sheetGesturesEnabled = false,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -714,41 +927,142 @@ private fun SettingsBottomSheet(
             ) {
                 OutlinedNumberInput(
                     value = numberOfImages,
-                    onValueChange = vm::updateNumberOfImages,
+                    onValueChange = { vm.updateNumberOfImages(it.coerceAtMost(maxOutputImages)) },
                     modifier = Modifier.width(120.dp)
                 )
             }
 
-            FormItem(
-                label = { Text("Image Size") }
-            ) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+            if (supportsSize) {
+                FormItem(
+                    label = {
+                        Text(
+                            stringResource(
+                                if (sizeRequestField == "aspect_ratio") {
+                                    R.string.imggen_page_aspect_ratio
+                                } else {
+                                    R.string.imggen_page_image_size
+                                }
+                            )
+                        )
+                    }
                 ) {
-                    ImageGenSize.entries.forEach { sizeOption ->
-                        FilterChip(
-                            selected = size == sizeOption.value,
-                            onClick = { vm.updateSize(sizeOption.value) },
-                            label = { Text(sizeOption.value) }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val sizeOptions = supportedSizes ?: ImageGenSize.entries
+                            .mapTo(linkedSetOf()) { it.value }
+                        sizeOptions.forEach { sizeOption ->
+                            FilterChip(
+                                selected = size == sizeOption,
+                                onClick = { vm.updateSize(sizeOption) },
+                                label = { Text(sizeOption) }
+                            )
+                        }
+                    }
+
+                    if (supportsCustomSize) {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = size,
+                            onValueChange = vm::updateSize,
+                            label = { Text(stringResource(R.string.imggen_page_custom_size)) },
+                            placeholder = { Text(stringResource(R.string.imggen_page_custom_size_example)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodySmall,
                         )
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(8.dp))
+            if (supportedQualityValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_quality),
+                    value = quality,
+                    options = supportedQualityValues,
+                    onValueChange = vm::updateQuality,
+                )
+            }
 
-                OutlinedTextField(
-                    value = size,
-                    onValueChange = vm::updateSize,
-                    label = { Text("Custom size") },
-                    placeholder = { Text("e.g. 1024x1024") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodySmall,
+            if (supportedOutputFormats.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_output_format),
+                    value = outputFormat,
+                    options = supportedOutputFormats,
+                    onValueChange = vm::updateOutputFormat,
+                )
+            }
+
+            if (supportedBackgroundValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_background),
+                    value = background,
+                    options = supportedBackgroundValues,
+                    onValueChange = vm::updateBackground,
+                )
+            }
+
+            if (supportsOutputCompression && outputFormat in setOf("jpeg", "webp")) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_output_compression)) },
+                    description = { Text(stringResource(R.string.imggen_page_output_compression_desc)) },
+                ) {
+                    OutlinedNumberInput(
+                        value = outputCompression,
+                        onValueChange = vm::updateOutputCompression,
+                        modifier = Modifier.width(120.dp),
+                    )
+                }
+            }
+
+            if (supportedResolutionValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_resolution),
+                    value = resolution,
+                    options = supportedResolutionValues,
+                    onValueChange = vm::updateResolution,
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ImageOptionChips(
+    title: String,
+    value: String?,
+    options: Set<String>,
+    onValueChange: (String?) -> Unit,
+) {
+    FormItem(label = { Text(title) }) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            FilterChip(
+                selected = value == null,
+                onClick = { onValueChange(null) },
+                label = { Text(stringResource(R.string.imggen_page_model_default)) },
+            )
+            options.forEach { option ->
+                val label = when (option) {
+                    "off" -> stringResource(R.string.reasoning_off)
+                    "low" -> stringResource(R.string.reasoning_light)
+                    "medium" -> stringResource(R.string.reasoning_medium)
+                    "high" -> stringResource(R.string.reasoning_heavy)
+                    else -> option
+                }
+                FilterChip(
+                    selected = value == option,
+                    onClick = { onValueChange(option) },
+                    label = { Text(label) },
+                )
+            }
         }
     }
 }

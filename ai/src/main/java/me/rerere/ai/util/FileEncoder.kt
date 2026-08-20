@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.util.Base64
 import android.util.Base64OutputStream
+import android.util.LruCache
 import androidx.core.net.toUri
 import me.rerere.ai.ui.UIMessagePart
 import java.io.ByteArrayOutputStream
@@ -18,12 +19,30 @@ private val supportedTypes = setOf(
     "image/webp",
 )
 
+private const val IMAGE_CACHE_MAX_ENTRY_CHARS = 8 * 1024 * 1024
+private const val IMAGE_CACHE_MAX_CHARS = 24 * 1024 * 1024
+
+/**
+ * Chat history is sent again for every follow-up message. Keep the compressed
+ * representation of ordinary local images so those follow-ups do not decode
+ * and compress the same file repeatedly. The cache is deliberately bounded;
+ * very large payloads are left uncached to avoid trading latency for OOM risk.
+ */
+private val encodedImageCache = object : LruCache<String, EncodedImage>(IMAGE_CACHE_MAX_CHARS) {
+    override fun sizeOf(key: String, value: EncodedImage): Int = value.base64.length
+}
+
 data class EncodedImage(
     val base64: String,
     val mimeType: String
 )
 
 data class EncodedAudio(
+    val base64: String,
+    val mimeType: String,
+)
+
+data class EncodedVideo(
     val base64: String,
     val mimeType: String,
 )
@@ -64,11 +83,26 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
                 throw IllegalArgumentException("File does not exist: ${this.url}")
             }
             val mimeType = file.guessMimeType().getOrThrow()
-            // 统一进行压缩处理
-            val (encoded, outputMimeType) = file.compressAndEncode(mimeType)
+            val cacheKey = file.imageEncodingCacheKey(mimeType)
+            val cached = synchronized(encodedImageCache) {
+                encodedImageCache.get(cacheKey)
+            }
+            val encodedImage = cached ?: file.compressAndEncode(mimeType).let { (encoded, outputMimeType) ->
+                EncodedImage(base64 = encoded, mimeType = outputMimeType).also { result ->
+                    if (mimeType != "image/gif" && result.base64.length <= IMAGE_CACHE_MAX_ENTRY_CHARS) {
+                        synchronized(encodedImageCache) {
+                            encodedImageCache.put(cacheKey, result)
+                        }
+                    }
+                }
+            }
             EncodedImage(
-                base64 = if (withPrefix) "data:$outputMimeType;base64,$encoded" else encoded,
-                mimeType = outputMimeType
+                base64 = if (withPrefix) {
+                    "data:${encodedImage.mimeType};base64,${encodedImage.base64}"
+                } else {
+                    encodedImage.base64
+                },
+                mimeType = encodedImage.mimeType,
             )
         }
 
@@ -85,7 +119,7 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
     }
 }
 
-fun UIMessagePart.Video.encodeBase64(withPrefix: Boolean = true): Result<String> = runCatching {
+fun UIMessagePart.Video.encodeBase64(withPrefix: Boolean = true): Result<EncodedVideo> = runCatching {
     when {
         this.url.startsWith("file://") -> {
             val filePath =
@@ -95,11 +129,24 @@ fun UIMessagePart.Video.encodeBase64(withPrefix: Boolean = true): Result<String>
                 throw IllegalArgumentException("File does not exist: ${this.url}")
             }
             val encoded = file.encodeToBase64Streaming()
-            if (withPrefix) "data:video/mp4;base64,$encoded" else encoded
+            val mimeType = file.videoMimeType()
+            EncodedVideo(
+                base64 = if (withPrefix) "data:$mimeType;base64,$encoded" else encoded,
+                mimeType = mimeType,
+            )
         }
 
         else -> throw IllegalArgumentException("Unsupported URL format: $url")
     }
+}
+
+private fun File.videoMimeType(): String = when (extension.lowercase()) {
+    "mp4", "m4v" -> "video/mp4"
+    "webm" -> "video/webm"
+    "3gp", "3gpp" -> "video/3gpp"
+    "mov" -> "video/quicktime"
+    "mkv" -> "video/x-matroska"
+    else -> "video/mp4"
 }
 
 fun UIMessagePart.Audio.encodeBase64(withPrefix: Boolean = true): Result<EncodedAudio> = runCatching {
@@ -229,6 +276,9 @@ private fun File.compressAndEncode(
         bitmap.recycle()
     }
 }
+
+private fun File.imageEncodingCacheKey(sourceMimeType: String): String =
+    "${absolutePath}|${length()}|${lastModified()}|$sourceMimeType"
 
 private fun File.normalizeByExif(bitmap: Bitmap): Bitmap {
     val orientation = runCatching {

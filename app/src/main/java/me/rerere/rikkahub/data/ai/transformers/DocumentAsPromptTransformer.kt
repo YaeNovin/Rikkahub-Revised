@@ -9,6 +9,7 @@ import me.rerere.document.EpubParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
 import me.rerere.document.XlsxParser
+import me.rerere.rikkahub.utils.isMidiFileType
 import java.io.File
 import java.net.URI
 import java.util.LinkedHashMap
@@ -41,9 +42,12 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                             val content = readDocumentContent(document)
                             val path = resolveWorkspacePath(document)
                             val pathAttr = path?.let { " path=\"${it.escapeXmlAttribute()}\"" } ?: ""
+                            val isMidi = isMidiFileType(document.fileName, document.mime)
+                            val midiAttr = if (isMidi) " format=\"abc\"" else ""
+                            val fenceLanguage = if (isMidi) "abc" else ""
                             val prompt = """
-                                <UploadFile name="${document.fileName.escapeXmlAttribute()}"$pathAttr>
-                                ```
+                                <UploadFile name="${document.fileName.escapeXmlAttribute()}"$pathAttr$midiAttr>
+                                ```$fenceLanguage
                                 $content
                                 ```
                                 </UploadFile>
@@ -95,7 +99,9 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         val content = runCatching {
             val extension = document.fileName.substringAfterLast('.', "").lowercase()
             val mime = document.mime.substringBefore(';').trim().lowercase()
-            when {
+            if (isMidiFileType(document.fileName, document.mime)) {
+                MidiToAbcConverter.convert(file).getOrThrow()
+            } else when {
                 extension == "pdf" || mime == "application/pdf" -> parsePdfAsText(file)
                 extension == "docx" || mime == DOCX_MIME -> parseDocxAsText(file)
                 extension == "xlsx" || mime == XLSX_MIME -> parseXlsxAsText(file)

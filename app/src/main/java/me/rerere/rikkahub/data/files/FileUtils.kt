@@ -76,14 +76,44 @@ object FileUtils {
             }.onFailure {
                 Log.w(TAG, "getFileMimeType: Failed to resolve MIME for $uri", it)
             }.getOrNull()
+            "file" -> {
+                val file = uri.path?.let(::File)
+                file?.let { guessMimeType(it, it.name) }
+                    ?.takeUnless { it == "application/octet-stream" }
+            }
             else -> null
         }
+    }
+
+    fun getFileSize(context: Context, uri: Uri): Long? {
+        if (uri.scheme == "file") {
+            return uri.path?.let(::File)?.takeIf(File::isFile)?.length()
+        }
+        if (uri.scheme != "content") return null
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index == -1 || cursor.isNull(index)) null else cursor.getLong(index)
+            }
+        }.onFailure {
+            Log.w(TAG, "getFileSize: Failed to query size for $uri", it)
+        }.getOrNull()
     }
 
     fun guessMimeType(file: File, fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         if (ext.isNotEmpty()) {
-            return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            return when (ext) {
+                "mid", "midi" -> "audio/midi"
+                else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            }
                 ?: "application/octet-stream"
         }
         return sniffMimeType(file)

@@ -1365,8 +1365,8 @@ class ChatService(
         return conversation.copy(messageNodes = updatedNodes)
     }
 
-    private fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {
-        fun copyLocalFileIfNeeded(url: String): String {
+    private suspend fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {
+        suspend fun copyLocalFileIfNeeded(url: String): String {
             if (!url.startsWith("file:")) return url
             val copied = filesManager.createChatFilesByContents(listOf(url.toUri())).firstOrNull()
             return copied?.toString() ?: url

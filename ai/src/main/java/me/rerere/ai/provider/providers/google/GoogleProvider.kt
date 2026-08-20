@@ -2,7 +2,9 @@ package me.rerere.ai.provider.providers.google
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.onFailure
@@ -10,6 +12,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -26,21 +34,28 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import androidx.core.net.toUri
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.cappedBudget
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
+import me.rerere.ai.provider.ImageEditParams
+import me.rerere.ai.provider.ImageGenerationConstraints
+import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderCapability
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.inferModelTypeFromId
+import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
@@ -50,6 +65,7 @@ import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.GoogleThoughtMetadata
+import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
@@ -71,22 +87,57 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import org.apache.commons.text.StringEscapeUtils
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val TAG = "GoogleProvider"
+private const val LARGE_MEDIA_UPLOAD_BYTES = 8L * 1024L * 1024L
+private const val MEDIA_UPLOAD_CONCURRENCY = 2
+private const val MEDIA_UPLOAD_ATTEMPTS = 3
+private const val MEDIA_UPLOAD_RETRY_DELAY_MILLIS = 600L
+private const val MEDIA_ACTIVE_POLL_INITIAL_MILLIS = 250L
+private const val MEDIA_ACTIVE_POLL_MAX_MILLIS = 1_000L
+private const val MEDIA_CACHE_TTL_MILLIS = 24L * 60L * 60L * 1_000L
+private const val MAX_IMAGE_RESPONSE_BYTES = 96L * 1024L * 1024L
+internal val GOOGLE_IMAGE_ASPECT_RATIOS = linkedSetOf(
+    "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
+)
+internal val GOOGLE_EXTENDED_IMAGE_ASPECT_RATIOS = linkedSetOf(
+    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4",
+    "8:1", "9:16", "16:9", "21:9",
+)
+internal val GOOGLE_3_IMAGE_RESOLUTIONS = linkedSetOf("1K", "2K", "4K")
+internal val GOOGLE_31_IMAGE_RESOLUTIONS = linkedSetOf("512", "1K", "2K", "4K")
+
+private data class UploadedGoogleFile(
+    val uri: String,
+    val name: String,
+    val mimeType: String,
+    val state: String = "ACTIVE",
+    val cachedAtMillis: Long = System.currentTimeMillis(),
+)
 
 class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
+    override val capabilities: Set<ProviderCapability> = setOf(
+        ProviderCapability.IMAGE_GENERATION,
+        ProviderCapability.IMAGE_EDIT,
+    )
+
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val serviceAccountTokenProvider by lazy {
         ServiceAccountTokenProvider(client)
     }
+    private val uploadedFileCache = ConcurrentHashMap<String, UploadedGoogleFile>()
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
         return if (!providerSetting.vertexAI) {
@@ -172,6 +223,132 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 emptyList()
             }
         }
+
+    override fun imageGenerationConstraints(
+        providerSetting: ProviderSetting,
+        model: Model,
+    ): ImageGenerationConstraints {
+        val modelId = model.modelId.substringAfterLast('/').lowercase()
+        val isGeminiImage = modelId.startsWith("gemini-") &&
+            inferModelTypeFromId(modelId) == ModelType.IMAGE
+        if (providerSetting !is ProviderSetting.Google || !isGeminiImage) {
+            return ImageGenerationConstraints(
+                supportsGeneration = false,
+                supportsEdit = false,
+                supportsPartialImages = false,
+                supportsSize = false,
+                supportsCustomSize = false,
+            )
+        }
+
+        val isGemini31 = modelId.startsWith("gemini-3.1-")
+        val isGemini3 = modelId.startsWith("gemini-3-") || isGemini31
+        return ImageGenerationConstraints(
+            supportsGeneration = true,
+            supportsEdit = true,
+            supportsPartialImages = false,
+            maxOutputImages = 1,
+            maxReferenceImages = if (isGemini3) 14 else 3,
+            supportsSize = true,
+            supportedSizes = if (isGemini31) GOOGLE_EXTENDED_IMAGE_ASPECT_RATIOS else GOOGLE_IMAGE_ASPECT_RATIOS,
+            supportsCustomSize = false,
+            sizeRequestField = "aspect_ratio",
+            supportedResolutionValues = when {
+                isGemini31 -> GOOGLE_31_IMAGE_RESOLUTIONS
+                isGemini3 -> GOOGLE_3_IMAGE_RESOLUTIONS
+                else -> emptySet()
+            },
+        )
+    }
+
+    override suspend fun generateImage(
+        providerSetting: ProviderSetting,
+        params: ImageGenerationParams,
+    ): Flow<ImageGenerationItem> = flow {
+        require(providerSetting is ProviderSetting.Google) { "Expected Google provider setting" }
+        val constraints = imageGenerationConstraints(providerSetting, params.model)
+        require(constraints.supportsGeneration) { "Selected Google model does not support image generation" }
+
+        val requestBody = buildGoogleImageRequestBody(
+            prompt = params.prompt,
+            size = params.size,
+            resolution = params.resolution,
+            customBody = params.customBody,
+            constraints = constraints,
+            imageParts = emptyList(),
+        )
+        requestGoogleImages(providerSetting, params.model, params.customHeaders.toHeaders(), requestBody)
+            .forEach { emit(it) }
+    }.flowOn(Dispatchers.IO)
+
+    override suspend fun editImage(
+        providerSetting: ProviderSetting,
+        params: ImageEditParams,
+    ): Flow<ImageGenerationItem> = flow {
+        require(providerSetting is ProviderSetting.Google) { "Expected Google provider setting" }
+        val constraints = imageGenerationConstraints(providerSetting, params.model)
+        require(constraints.supportsEdit) { "Selected Google model does not support image editing" }
+        require(params.images.isNotEmpty()) { "At least one image is required" }
+
+        val imageParts = params.images.take(constraints.maxReferenceImages).map { path ->
+            val imageFile = File(path)
+            require(imageFile.isFile) { "Image file does not exist: $path" }
+            UIMessagePart.Image(url = imageFile.absolutePath).toGooglePart()
+                ?: error("Failed to encode reference image: ${imageFile.name}")
+        }
+        val requestBody = buildGoogleImageRequestBody(
+            prompt = params.prompt,
+            size = params.size,
+            resolution = params.resolution,
+            customBody = params.customBody,
+            constraints = constraints,
+            imageParts = imageParts,
+        )
+        requestGoogleImages(providerSetting, params.model, params.customHeaders.toHeaders(), requestBody)
+            .forEach { emit(it) }
+    }.flowOn(Dispatchers.IO)
+
+    private suspend fun requestGoogleImages(
+        providerSetting: ProviderSetting.Google,
+        model: Model,
+        headers: okhttp3.Headers,
+        requestBody: JsonObject,
+    ): List<ImageGenerationItem> {
+        val path = if (providerSetting.vertexAI) {
+            "publishers/google/models/${model.modelId}:generateContent"
+        } else {
+            "models/${model.modelId}:generateContent"
+        }
+        val request = transformRequest(
+            providerSetting = providerSetting,
+            request = Request.Builder()
+                .url(buildUrl(providerSetting, path))
+                .headers(headers)
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .configureReferHeaders(providerSetting.baseUrl)
+                .build(),
+        )
+
+        return client.newCall(request).await().use { response ->
+            if (!response.isSuccessful) {
+                val detail = response.body?.string()
+                throw providerRequestFailure(
+                    response = response,
+                    cause = null,
+                    detail = "Failed to generate image: ${response.code} $detail",
+                )
+            }
+            val responseBody = response.body ?: error("Empty image generation response")
+            val contentLength = responseBody.contentLength()
+            require(contentLength < 0 || contentLength <= MAX_IMAGE_RESPONSE_BYTES) {
+                "Image generation response is too large"
+            }
+            val body = json.parseToJsonElement(responseBody.string()).jsonObject
+            parseGoogleGeneratedImages(body).ifEmpty {
+                error("Google response did not contain a generated image")
+            }
+        }
+    }
 
     override suspend fun generateEmbedding(
         providerSetting: ProviderSetting.Google,
@@ -277,7 +454,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val uploadedFiles = uploadLargeMedia(providerSetting, messages)
+        val requestBody = buildCompletionRequestBody(messages, params, uploadedFiles)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -302,7 +480,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            val body = response.body?.string()
+            throw providerRequestFailure(
+                response = response,
+                cause = null,
+                detail = "Failed to get response: ${response.code} $body",
+            )
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -324,7 +507,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val uploadedFiles = uploadLargeMedia(providerSetting, messages)
+        val requestBody = buildCompletionRequestBody(messages, params, uploadedFiles)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -347,7 +531,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        Log.i(TAG, "streamText: model=${params.model.modelId}, uploadedFiles=${uploadedFiles.size}")
 
         val responseId = Uuid.random().toString()
         val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
@@ -384,7 +568,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 t: Throwable?,
                 response: Response?
             ) {
-                var exception = t
+                var detail = t?.message
 
                 t?.printStackTrace()
                 println("[onFailure] 发生错误: ${t?.message}")
@@ -396,20 +580,17 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                             val bodyElement = json.parseToJsonElement(bodyStr)
                             println(bodyElement)
                             if (bodyElement is JsonObject) {
-                                exception = Exception(
-                                    bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                        ?: "unknown"
-                                )
+                                detail = bodyElement["error"]?.jsonObject?.get("message")
+                                    ?.jsonPrimitive?.content ?: bodyStr
                             }
                         } else {
-                            exception = Exception("Unknown error: ${response.code}")
+                            detail = "Unknown error: ${response.code}"
                         }
                     }
                 } catch (e: Throwable) {
                     e.printStackTrace()
-                    exception = e
                 } finally {
-                    close(exception ?: Exception("Stream failed"))
+                    close(providerRequestFailure(response, t, detail ?: "Stream failed"))
                 }
             }
 
@@ -433,6 +614,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private fun buildCompletionRequestBody(
         messages: List<UIMessage>,
         params: TextGenerationParams
+    ): JsonObject = buildCompletionRequestBody(messages, params, emptyMap())
+
+    private fun buildCompletionRequestBody(
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        uploadedFiles: Map<String, UploadedGoogleFile>,
     ): JsonObject = buildJsonObject {
         // System message if available
         val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
@@ -501,7 +688,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         // Contents (user messages)
         put(
             "contents",
-            buildContents(messages)
+            buildContents(messages, uploadedFiles)
         )
 
         // Tools
@@ -588,6 +775,208 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             MessageRole.SYSTEM -> "system"
             MessageRole.ASSISTANT -> "model"
             MessageRole.TOOL -> "user" // google api中, tool结果是用户role发送的
+        }
+    }
+
+    private suspend fun uploadLargeMedia(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+    ): Map<String, UploadedGoogleFile> {
+        if (!providerSetting.supportsFilesApi()) return emptyMap()
+        val candidates = messages.asSequence()
+            .flatMap { it.parts.asSequence() }
+            .mapNotNull { part ->
+                val url = when (part) {
+                    is UIMessagePart.Image -> part.url
+                    is UIMessagePart.Video -> part.url
+                    is UIMessagePart.Audio -> part.url
+                    else -> return@mapNotNull null
+                }
+                val file = localMediaFile(url) ?: return@mapNotNull null
+                if (file.length() < LARGE_MEDIA_UPLOAD_BYTES) return@mapNotNull null
+                val mimeType = mediaMimeType(part, file) ?: return@mapNotNull null
+                Triple(url, file, mimeType)
+            }
+            .distinctBy { it.first }
+            .toList()
+
+        if (candidates.isEmpty()) return emptyMap()
+        val uploadSemaphore = Semaphore(MEDIA_UPLOAD_CONCURRENCY)
+        return coroutineScope {
+            candidates.map { (url, file, mimeType) ->
+                async(Dispatchers.IO) {
+                    uploadSemaphore.withPermit {
+                        val cacheKey = "${providerSetting.baseUrl}|${file.absolutePath}|${file.length()}|${file.lastModified()}"
+                        val cached = uploadedFileCache[cacheKey]?.takeIf {
+                            System.currentTimeMillis() - it.cachedAtMillis < MEDIA_CACHE_TTL_MILLIS
+                        }
+                        val uploaded = cached ?: runCatching {
+                            uploadFile(providerSetting, file, mimeType)
+                        }.onFailure {
+                            Log.w(TAG, "Files API upload failed for ${file.name}; using inline media", it)
+                        }.getOrNull()?.also { uploadedFileCache[cacheKey] = it }
+                        url to uploaded
+                    }
+                }
+            }.awaitAll().mapNotNull { (url, uploaded) -> uploaded?.let { url to it } }.toMap()
+        }
+    }
+
+    private suspend fun uploadFile(
+        providerSetting: ProviderSetting.Google,
+        file: File,
+        mimeType: String,
+    ): UploadedGoogleFile {
+        var lastFailure: Throwable? = null
+        repeat(MEDIA_UPLOAD_ATTEMPTS) { attempt ->
+            try {
+                return uploadFileOnce(providerSetting, file, mimeType)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                lastFailure = error
+                if (attempt + 1 < MEDIA_UPLOAD_ATTEMPTS && error.isRetryableMediaUploadFailure()) {
+                    delay(MEDIA_UPLOAD_RETRY_DELAY_MILLIS * (attempt + 1))
+                } else {
+                    throw error
+                }
+            }
+        }
+        throw lastFailure ?: IllegalStateException("Google media upload failed")
+    }
+
+    private suspend fun uploadFileOnce(
+        providerSetting: ProviderSetting.Google,
+        file: File,
+        mimeType: String,
+    ): UploadedGoogleFile {
+        val startRequest = transformRequest(
+            providerSetting,
+            Request.Builder()
+                .url(providerSetting.filesUploadUrl())
+                .header("X-Goog-Upload-Protocol", "resumable")
+                .header("X-Goog-Upload-Command", "start")
+                .header("X-Goog-Upload-Header-Content-Length", file.length().toString())
+                .header("X-Goog-Upload-Header-Content-Type", mimeType)
+                .post(
+                    buildJsonObject {
+                        put("file", buildJsonObject { put("display_name", file.name) })
+                    }.toString().toRequestBody("application/json".toMediaType())
+                )
+                .build(),
+        )
+        val uploadUrl = client.newCall(startRequest).await().use { response ->
+            require(response.isSuccessful) { "Files API start failed: ${response.code}" }
+            response.header("X-Goog-Upload-URL") ?: error("Files API did not return an upload URL")
+        }
+
+        val finishRequest = transformRequest(
+            providerSetting,
+            Request.Builder()
+                .url(uploadUrl)
+                .header("X-Goog-Upload-Offset", "0")
+                .header("X-Goog-Upload-Command", "upload, finalize")
+                .post(file.asRequestBody(mimeType.toMediaType()))
+                .build(),
+        )
+        val uploaded = client.newCall(finishRequest).await().use { response ->
+            require(response.isSuccessful) { "Files API upload failed: ${response.code}" }
+            parseUploadedFile(response.body?.string().orEmpty(), mimeType)
+        }
+        return awaitActiveFile(providerSetting, uploaded)
+    }
+
+    private fun Throwable.isRetryableMediaUploadFailure(): Boolean {
+        if (this is IOException) return true
+        val message = message.orEmpty()
+        return Regex("\\b(408|429|5\\d{2})\\b").containsMatchIn(message)
+    }
+
+    private suspend fun awaitActiveFile(
+        providerSetting: ProviderSetting.Google,
+        uploaded: UploadedGoogleFile,
+    ): UploadedGoogleFile {
+        var waitMillis = MEDIA_ACTIVE_POLL_INITIAL_MILLIS
+        repeat(90) {
+            val state = client.newCall(
+                transformRequest(
+                    providerSetting,
+                    Request.Builder().url(buildUrl(providerSetting, uploaded.name)).get().build(),
+                )
+            ).await().use { response ->
+                require(response.isSuccessful) { "Files API status failed: ${response.code}" }
+                parseUploadedFile(response.body?.string().orEmpty(), uploaded.mimeType)
+            }
+            when (state.state.uppercase()) {
+                "ACTIVE" -> return state.copy(state = "ACTIVE")
+                "FAILED" -> error("Google rejected uploaded media")
+            }
+            delay(waitMillis)
+            waitMillis = (waitMillis * 2).coerceAtMost(MEDIA_ACTIVE_POLL_MAX_MILLIS)
+        }
+        error("Timed out waiting for Google media processing")
+    }
+
+    private fun parseUploadedFile(body: String, fallbackMimeType: String): UploadedGoogleFile {
+        val root = json.parseToJsonElement(body).jsonObject
+        val file = (root["file"] ?: root).jsonObject
+        val uri = file["uri"]?.jsonPrimitive?.contentOrNull ?: error("Google file URI missing")
+        val name = file["name"]?.jsonPrimitive?.contentOrNull
+            ?: uri.substringAfterLast("/v1beta/").substringAfterLast("/v1/")
+        require(name.isNotBlank()) { "Google file name missing" }
+        return UploadedGoogleFile(
+            uri = uri,
+            name = name,
+            mimeType = file["mimeType"]?.jsonPrimitive?.contentOrNull ?: fallbackMimeType,
+            state = file["state"]?.jsonPrimitive?.contentOrNull ?: "ACTIVE",
+        )
+    }
+
+    private fun ProviderSetting.Google.supportsFilesApi(): Boolean =
+        !vertexAI && runCatching { baseUrl.toHttpUrl().host == "generativelanguage.googleapis.com" }.getOrDefault(false)
+
+    private fun ProviderSetting.Google.filesUploadUrl(): HttpUrl {
+        val base = baseUrl.toHttpUrl()
+        val version = base.pathSegments.lastOrNull()?.takeIf { it.startsWith("v1") } ?: "v1beta"
+        return base.newBuilder().encodedPath("/upload/$version/files").query(null).build()
+    }
+
+    private fun localMediaFile(url: String): File? = runCatching {
+        when {
+            url.startsWith("file://") -> File(url.toUri().path ?: return@runCatching null)
+            File(url).isAbsolute -> File(url)
+            else -> null
+        }
+    }.getOrNull()?.takeIf { it.isFile }
+
+    private fun mediaMimeType(part: UIMessagePart, file: File): String? {
+        val extension = file.extension.lowercase()
+        return when (part) {
+            is UIMessagePart.Image -> when (extension) {
+                "png" -> "image/png"
+                "gif" -> "image/gif"
+                "webp" -> "image/webp"
+                "heic", "heif" -> "image/heif"
+                "avif" -> "image/avif"
+                else -> "image/jpeg"
+            }
+            is UIMessagePart.Video -> when (extension) {
+                "webm" -> "video/webm"
+                "3gp", "3gpp" -> "video/3gpp"
+                "mov" -> "video/quicktime"
+                "mkv" -> "video/x-matroska"
+                else -> "video/mp4"
+            }
+            is UIMessagePart.Audio -> when (extension) {
+                "mp3", "mp2", "mpga" -> "audio/mpeg"
+                "wav", "wave" -> "audio/wav"
+                "ogg", "oga", "opus" -> "audio/ogg"
+                "flac" -> "audio/flac"
+                "aac" -> "audio/aac"
+                "mid", "midi" -> "audio/midi"
+                else -> null
+            }
+            else -> null
         }
     }
 
@@ -687,28 +1076,36 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun buildContents(messages: List<UIMessage>): JsonArray {
+    private fun buildContents(messages: List<UIMessage>): JsonArray = buildContents(messages, emptyMap())
+
+    private fun buildContents(
+        messages: List<UIMessage>,
+        uploadedFiles: Map<String, UploadedGoogleFile>,
+    ): JsonArray {
         return buildJsonArray {
             messages
                 .filter { it.role != MessageRole.SYSTEM && it.isValidToUpload() }
                 .forEach { message ->
                     if (message.role == MessageRole.ASSISTANT) {
-                        addModelMessage(message)
+                        addModelMessage(message, uploadedFiles)
                     } else {
-                        addUserMessage(message)
+                        addUserMessage(message, uploadedFiles)
                     }
                 }
         }
     }
 
-    private fun JsonArrayBuilder.addModelMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addModelMessage(
+        message: UIMessage,
+        uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
+    ) {
         val groups = groupPartsByToolBoundary(message.parts)
         val partsBuffer = mutableListOf<JsonObject>()
 
         for (group in groups) {
             when (group) {
                 is PartGroup.Content -> {
-                    group.parts.mapNotNull { it.toGooglePart() }.forEach { partsBuffer.add(it) }
+                    group.parts.mapNotNull { it.toGooglePart(uploadedFiles) }.forEach { partsBuffer.add(it) }
                 }
 
                 is PartGroup.Tools -> {
@@ -742,22 +1139,34 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun JsonArrayBuilder.addUserMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addUserMessage(
+        message: UIMessage,
+        uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
+    ) {
         add(buildJsonObject {
             put("role", commonRoleToGoogleRole(message.role))
             putJsonArray("parts") {
-                message.parts.mapNotNull { it.toGooglePart() }.forEach { add(it) }
+                message.parts.mapNotNull { it.toGooglePart(uploadedFiles) }.forEach { add(it) }
             }
         })
     }
 
-    private fun UIMessagePart.toGooglePart(): JsonObject? = when (this) {
+    private fun UIMessagePart.toGooglePart(
+        uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
+    ): JsonObject? = when (this) {
         is UIMessagePart.Text -> buildJsonObject {
             put("text", text)
         }
 
         is UIMessagePart.Image -> {
-            encodeBase64(false).getOrNull()?.let { encoded ->
+            uploadedFiles[url]?.let { uploaded ->
+                buildJsonObject {
+                    put("fileData", buildJsonObject {
+                        put("mimeType", uploaded.mimeType)
+                        put("fileUri", uploaded.uri)
+                    })
+                }
+            } ?: encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
                         put("mimeType", encoded.mimeType)
@@ -771,18 +1180,32 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
 
         is UIMessagePart.Video -> {
-            encodeBase64(false).getOrNull()?.let { base64Data ->
+            uploadedFiles[url]?.let { uploaded ->
+                buildJsonObject {
+                    put("fileData", buildJsonObject {
+                        put("mimeType", uploaded.mimeType)
+                        put("fileUri", uploaded.uri)
+                    })
+                }
+            } ?: encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
-                        put("mimeType", "video/mp4")
-                        put("data", base64Data)
+                        put("mimeType", encoded.mimeType)
+                        put("data", encoded.base64)
                     })
                 }
             }
         }
 
         is UIMessagePart.Audio -> {
-            encodeBase64(false).getOrNull()?.let { encoded ->
+            uploadedFiles[url]?.let { uploaded ->
+                buildJsonObject {
+                    put("fileData", buildJsonObject {
+                        put("mimeType", uploaded.mimeType)
+                        put("fileUri", uploaded.uri)
+                    })
+                }
+            } ?: encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
                         put("mimeType", encoded.mimeType)
@@ -885,6 +1308,65 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         )
     }
 }
+
+internal fun buildGoogleImageRequestBody(
+    prompt: String,
+    size: String,
+    resolution: String?,
+    customBody: List<CustomBody>,
+    constraints: ImageGenerationConstraints,
+    imageParts: List<JsonObject>,
+): JsonObject {
+    val aspectRatio = size.takeIf {
+        it.isNotBlank() && it != "auto" && constraints.supportedSizes?.contains(it) == true
+    }
+    val imageSize = resolution?.takeIf(constraints.supportedResolutionValues::contains)
+
+    return buildJsonObject {
+        putJsonArray("contents") {
+            add(buildJsonObject {
+                put("role", "user")
+                putJsonArray("parts") {
+                    add(buildJsonObject { put("text", prompt) })
+                    imageParts.forEach { add(it) }
+                }
+            })
+        }
+        put("generationConfig", buildJsonObject {
+            putJsonArray("responseModalities") {
+                add(JsonPrimitive("TEXT"))
+                add(JsonPrimitive("IMAGE"))
+            }
+            if (aspectRatio != null || imageSize != null) {
+                put("imageConfig", buildJsonObject {
+                    aspectRatio?.let { put("aspectRatio", it) }
+                    imageSize?.let { put("imageSize", it) }
+                })
+            }
+        })
+    }.mergeCustomBody(customBody)
+}
+
+internal fun parseGoogleGeneratedImages(response: JsonObject): List<ImageGenerationItem> =
+    (response["candidates"] as? JsonArray).orEmpty().flatMap { candidateElement ->
+        val candidate = candidateElement as? JsonObject ?: return@flatMap emptyList()
+        val content = candidate["content"] as? JsonObject ?: return@flatMap emptyList()
+        (content["parts"] as? JsonArray).orEmpty().mapNotNull { partElement ->
+            val part = partElement as? JsonObject ?: return@mapNotNull null
+            if ((part["thought"] as? JsonPrimitive)?.booleanOrNull == true) return@mapNotNull null
+            val inlineData = (part["inlineData"] ?: part["inline_data"]) as? JsonObject
+                ?: return@mapNotNull null
+            val data = inlineData["data"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf(String::isNotBlank)
+                ?: return@mapNotNull null
+            val mimeType = (inlineData["mimeType"] ?: inlineData["mime_type"])
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.takeIf(String::isNotBlank)
+                ?: "image/png"
+            ImageGenerationItem(data = data, mimeType = mimeType)
+        }
+    }
 
 internal fun inferGoogleModelType(
     modelId: String,
