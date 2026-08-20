@@ -35,6 +35,7 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.stream.SseEvent
@@ -101,7 +102,12 @@ class ChatCompletionsAPI(
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            val body = response.body?.string()
+            throw providerRequestFailure(
+                response = response,
+                cause = null,
+                detail = "Failed to get response: ${response.code} $body",
+            )
         }
 
         val bodyStr = response.body?.string() ?: ""
@@ -182,7 +188,7 @@ class ChatCompletionsAPI(
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
+                var detail = t?.message
 
                 t?.printStackTrace()
                 println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
@@ -192,15 +198,14 @@ class ChatCompletionsAPI(
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
                         println(bodyElement)
-                        exception = bodyElement.parseErrorDetail()
-                        Log.i(TAG, "onFailure: $exception")
+                        detail = bodyElement.parseErrorDetail().message ?: bodyRaw
+                        Log.i(TAG, "onFailure: $detail")
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
                     e.printStackTrace()
-                    exception = e
                 } finally {
-                    close(exception)
+                    close(providerRequestFailure(response, t, detail ?: bodyRaw))
                 }
             }
 
