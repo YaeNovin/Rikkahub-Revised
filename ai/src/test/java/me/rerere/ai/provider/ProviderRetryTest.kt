@@ -100,6 +100,9 @@ class ProviderRetryTest {
     @Test
     fun `recognizes common connection abort and HTTP2 reset failures`() {
         assertTrue(IOException("Software caused connection abort").isRetryableProviderFailure())
+        assertTrue(IOException("Stream failed").isRetryableProviderFailure())
+        assertTrue(IOException("socket closed while switching networks").isRetryableProviderFailure())
+        assertTrue(IOException("Network is unreachable").isRetryableProviderFailure())
         assertTrue(IOException("stream was reset: CANCEL").isRetryableProviderFailure())
         assertTrue(IOException("HTTP/2 stream 3 was reset").isRetryableProviderFailure())
         assertFalse(CancellationException("cancelled by user").isRetryableProviderFailure())

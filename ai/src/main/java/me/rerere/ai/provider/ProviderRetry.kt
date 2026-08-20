@@ -101,9 +101,17 @@ private fun String.containsRetryableNetworkMessage(): Boolean {
         "connection shutdown",
         "broken pipe",
         "unexpected end of stream",
+        "stream failed",
+        "stream closed",
         "stream reset",
         "stream was reset",
         "http/2 stream",
+        "socket closed",
+        "connection closed",
+        "connection lost",
+        "network is unreachable",
+        "network unreachable",
+        "network changed",
         "timeout",
         "timed out",
     ).any(normalized::contains)
@@ -154,6 +162,12 @@ class ProviderRetryController(
         onRetry(retryNumber, retryDelay)
         delayBeforeRetry(retryDelay)
         return true
+    }
+
+    fun remainingDurationMillis(): Long {
+        val elapsedMillis = ((nanoTime() - startedAtNanos).coerceAtLeast(0L) /
+            NANOS_PER_MILLISECOND)
+        return (maxDurationMillis - elapsedMillis).coerceAtLeast(0L)
     }
 
     private fun exponentialDelayMillis(retryIndex: Int): Long {

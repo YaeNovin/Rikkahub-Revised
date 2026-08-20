@@ -572,6 +572,13 @@ class GenerationHandler(
                                 retryNumber,
                             )
                         },
+                        delayBeforeRetry = { delayMillis ->
+                            waitForNetworkBeforeRetry(
+                                context = context,
+                                retryDelayMillis = delayMillis,
+                                remainingDurationMillis = retryController.remainingDurationMillis(),
+                            )
+                        },
                     ) {
                         receivedEffectiveOutput = false
                         if (stream) {
@@ -679,6 +686,13 @@ class GenerationHandler(
                             )
                             processingStatus.value = context.getString(
                                 R.string.chat_page_generation_resuming,
+                            )
+                        },
+                        delayBeforeRetry = { delayMillis ->
+                            waitForNetworkBeforeRetry(
+                                context = context,
+                                retryDelayMillis = delayMillis,
+                                remainingDurationMillis = retryController.remainingDurationMillis(),
                             )
                         },
                     )
