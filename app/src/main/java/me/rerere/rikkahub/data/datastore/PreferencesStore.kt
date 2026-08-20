@@ -24,6 +24,15 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.ai.DEFAULT_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.DEFAULT_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.DEFAULT_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_INTERVAL_SECONDS
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
@@ -81,6 +90,10 @@ class SettingsStore(
         val CUSTOM_THEMES = stringPreferencesKey("custom_themes")
         val DISPLAY_SETTING = stringPreferencesKey("display_setting")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
+        val ENABLE_GENERATION_RETRY = booleanPreferencesKey("enable_generation_retry")
+        val GENERATION_RETRY_MAX_RETRIES = intPreferencesKey("generation_retry_max_retries")
+        val GENERATION_RETRY_INTERVAL_SECONDS = intPreferencesKey("generation_retry_interval_seconds")
+        val GENERATION_RETRY_MAX_DURATION_SECONDS = intPreferencesKey("generation_retry_max_duration_seconds")
 
         // 模型选择
         val FAVORITE_MODELS = stringPreferencesKey("favorite_models")
@@ -200,6 +213,20 @@ class SettingsStore(
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
                 developerMode = preferences[DEVELOPER_MODE] == true,
+                enableGenerationRetry = preferences[ENABLE_GENERATION_RETRY] ?: true,
+                generationRetryMaxRetries = preferences[GENERATION_RETRY_MAX_RETRIES]
+                    ?.coerceIn(MIN_GENERATION_RETRY_COUNT, MAX_GENERATION_RETRY_COUNT)
+                    ?: DEFAULT_GENERATION_RETRY_COUNT,
+                generationRetryInitialIntervalSeconds = preferences[GENERATION_RETRY_INTERVAL_SECONDS]
+                    ?.coerceIn(
+                        MIN_GENERATION_RETRY_INTERVAL_SECONDS,
+                        MAX_GENERATION_RETRY_INTERVAL_SECONDS,
+                    ) ?: DEFAULT_GENERATION_RETRY_INTERVAL_SECONDS,
+                generationRetryMaxDurationSeconds = preferences[GENERATION_RETRY_MAX_DURATION_SECONDS]
+                    ?.coerceIn(
+                        MIN_GENERATION_RETRY_DURATION_SECONDS,
+                        MAX_GENERATION_RETRY_DURATION_SECONDS,
+                    ) ?: DEFAULT_GENERATION_RETRY_DURATION_SECONDS,
                 displaySetting = JsonInstant.decodeFromString(preferences[DISPLAY_SETTING] ?: "{}"),
                 searchServices = preferences[SEARCH_SERVICES]?.let {
                     JsonInstant.decodeFromString(it)
@@ -358,6 +385,19 @@ class SettingsStore(
             preferences[THEME_ID] = settings.themeId
             preferences[CUSTOM_THEMES] = JsonInstant.encodeToString(settings.customThemes)
             preferences[DEVELOPER_MODE] = settings.developerMode
+            preferences[ENABLE_GENERATION_RETRY] = settings.enableGenerationRetry
+            preferences[GENERATION_RETRY_MAX_RETRIES] = settings.generationRetryMaxRetries
+                .coerceIn(MIN_GENERATION_RETRY_COUNT, MAX_GENERATION_RETRY_COUNT)
+            preferences[GENERATION_RETRY_INTERVAL_SECONDS] = settings.generationRetryInitialIntervalSeconds
+                .coerceIn(
+                    MIN_GENERATION_RETRY_INTERVAL_SECONDS,
+                    MAX_GENERATION_RETRY_INTERVAL_SECONDS,
+                )
+            preferences[GENERATION_RETRY_MAX_DURATION_SECONDS] = settings.generationRetryMaxDurationSeconds
+                .coerceIn(
+                    MIN_GENERATION_RETRY_DURATION_SECONDS,
+                    MAX_GENERATION_RETRY_DURATION_SECONDS,
+                )
             preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
 
             preferences[FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
@@ -518,6 +558,10 @@ data class Settings(
     val themeId: String = PresetThemes[0].id,
     val customThemes: List<CustomTheme> = emptyList(),
     val developerMode: Boolean = false,
+    val enableGenerationRetry: Boolean = true,
+    val generationRetryMaxRetries: Int = DEFAULT_GENERATION_RETRY_COUNT,
+    val generationRetryInitialIntervalSeconds: Int = DEFAULT_GENERATION_RETRY_INTERVAL_SECONDS,
+    val generationRetryMaxDurationSeconds: Int = DEFAULT_GENERATION_RETRY_DURATION_SECONDS,
     val displaySetting: DisplaySetting = DisplaySetting(),
     val favoriteModels: List<Uuid> = emptyList(),
     val chatModelId: Uuid = Uuid.random(),

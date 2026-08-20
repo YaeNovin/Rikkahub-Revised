@@ -1,0 +1,15 @@
+package me.rerere.rikkahub.data.ai
+
+import me.rerere.ai.provider.MAX_PROVIDER_RETRIES
+
+internal const val MIN_GENERATION_RETRY_COUNT = 1
+internal const val MAX_GENERATION_RETRY_COUNT = MAX_PROVIDER_RETRIES
+internal const val DEFAULT_GENERATION_RETRY_COUNT = 3
+
+internal const val MIN_GENERATION_RETRY_INTERVAL_SECONDS = 1
+internal const val MAX_GENERATION_RETRY_INTERVAL_SECONDS = 30
+internal const val DEFAULT_GENERATION_RETRY_INTERVAL_SECONDS = 1
+
+internal const val MIN_GENERATION_RETRY_DURATION_SECONDS = 10
+internal const val MAX_GENERATION_RETRY_DURATION_SECONDS = 300
+internal const val DEFAULT_GENERATION_RETRY_DURATION_SECONDS = 60

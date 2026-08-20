@@ -1,11 +1,13 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
@@ -22,9 +24,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_INTERVAL_SECONDS
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -32,6 +41,7 @@ import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
@@ -259,6 +269,103 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_general_page_generation_retry_title)) },
+                ) {
+                    item(
+                        headlineContent = {
+                            Text(stringResource(R.string.setting_general_page_generation_retry_enabled_title))
+                        },
+                        supportingContent = {
+                            Text(stringResource(R.string.setting_general_page_generation_retry_desc))
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.enableGenerationRetry,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(enableGenerationRetry = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = {
+                            Text(stringResource(R.string.setting_general_page_generation_retry_count_title))
+                        },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(R.string.setting_general_page_generation_retry_count_desc))
+                                RetryIntegerSlider(
+                                    value = settings.generationRetryMaxRetries,
+                                    valueRange = MIN_GENERATION_RETRY_COUNT..MAX_GENERATION_RETRY_COUNT,
+                                    valueLabel = stringResource(
+                                        R.string.setting_general_page_generation_retry_count_value,
+                                        settings.generationRetryMaxRetries,
+                                    ),
+                                    enabled = settings.enableGenerationRetry,
+                                    onValueChange = {
+                                        vm.updateSettings(settings.copy(generationRetryMaxRetries = it))
+                                    },
+                                )
+                            }
+                        },
+                    )
+                    item(
+                        headlineContent = {
+                            Text(stringResource(R.string.setting_general_page_generation_retry_interval_title))
+                        },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(R.string.setting_general_page_generation_retry_interval_desc))
+                                RetryIntegerSlider(
+                                    value = settings.generationRetryInitialIntervalSeconds,
+                                    valueRange = MIN_GENERATION_RETRY_INTERVAL_SECONDS..
+                                        MAX_GENERATION_RETRY_INTERVAL_SECONDS,
+                                    valueLabel = stringResource(
+                                        R.string.setting_general_page_generation_retry_seconds_value,
+                                        settings.generationRetryInitialIntervalSeconds,
+                                    ),
+                                    enabled = settings.enableGenerationRetry,
+                                    onValueChange = {
+                                        vm.updateSettings(
+                                            settings.copy(generationRetryInitialIntervalSeconds = it)
+                                        )
+                                    },
+                                )
+                            }
+                        },
+                    )
+                    item(
+                        headlineContent = {
+                            Text(stringResource(R.string.setting_general_page_generation_retry_duration_title))
+                        },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(R.string.setting_general_page_generation_retry_duration_desc))
+                                RetryIntegerSlider(
+                                    value = settings.generationRetryMaxDurationSeconds,
+                                    valueRange = MIN_GENERATION_RETRY_DURATION_SECONDS..
+                                        MAX_GENERATION_RETRY_DURATION_SECONDS,
+                                    valueLabel = stringResource(
+                                        R.string.setting_general_page_generation_retry_seconds_value,
+                                        settings.generationRetryMaxDurationSeconds,
+                                    ),
+                                    enabled = settings.enableGenerationRetry,
+                                    step = 10,
+                                    onValueChange = {
+                                        vm.updateSettings(
+                                            settings.copy(generationRetryMaxDurationSeconds = it)
+                                        )
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_page_tts_settings)) },
                 ) {
                     item(
@@ -300,5 +407,39 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RetryIntegerSlider(
+    value: Int,
+    valueRange: IntRange,
+    valueLabel: String,
+    enabled: Boolean,
+    step: Int = 1,
+    onValueChange: (Int) -> Unit,
+) {
+    val segmentCount = (valueRange.last - valueRange.first) / step
+    val normalizedValue = value.coerceIn(valueRange)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Slider(
+            value = ((normalizedValue - valueRange.first) / step).toFloat(),
+            onValueChange = { position ->
+                onValueChange(valueRange.first + position.roundToInt() * step)
+            },
+            valueRange = 0f..segmentCount.toFloat(),
+            steps = (segmentCount - 1).coerceAtLeast(0),
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = valueLabel,
+            modifier = Modifier.widthIn(min = 72.dp),
+            textAlign = TextAlign.End,
+        )
     }
 }

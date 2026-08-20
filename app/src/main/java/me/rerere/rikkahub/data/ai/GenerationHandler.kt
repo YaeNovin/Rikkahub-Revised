@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -28,9 +30,14 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.ProviderRetryController
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.crossesRequestReplayBoundary
+import me.rerere.ai.provider.isRetryableProviderFailure
+import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.registry.ModelRegistry
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
@@ -51,6 +58,7 @@ import me.rerere.rikkahub.data.ai.tools.createKnowledgeBaseTools
 import me.rerere.rikkahub.data.ai.tools.KnowledgeBaseCapabilities
 import me.rerere.rikkahub.data.ai.tools.createSessionCapabilitiesTool
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
@@ -500,6 +508,8 @@ class GenerationHandler(
             conversationLorebookIds = conversationLorebookIds,
             processingStatus = processingStatus,
             workspaceCwd = workspaceCwd,
+        ).compactHistoricalMediaForRequest(
+            mediaSizeBytes = ::resolveContentMediaSize,
         )
         val requestCitations = internalMessages.currentRequestKnowledgeCitations()
             .plus(
@@ -527,47 +537,189 @@ class GenerationHandler(
                 addAll(model.customBodies)
             }
         )
-        if (stream) {
-            val streamChunkHandler = StreamChunkHandler(model)
-            var lastUiUpdateNanos = 0L
-            var hasPendingUiUpdate = false
+        val previousProcessingStatus = processingStatus.value
+        var receivedEffectiveOutput = false
+        var providerMessages = internalMessages
+        var streamRecoveryAttempted = false
+        val retryController = ProviderRetryController(
+            maxRetries = settings.generationRetryMaxRetries.coerceIn(
+                MIN_GENERATION_RETRY_COUNT,
+                MAX_GENERATION_RETRY_COUNT,
+            ),
+            initialDelayMillis = settings.generationRetryInitialIntervalSeconds.coerceIn(
+                MIN_GENERATION_RETRY_INTERVAL_SECONDS,
+                MAX_GENERATION_RETRY_INTERVAL_SECONDS,
+            ) * 1_000L,
+            maxDurationMillis = settings.generationRetryMaxDurationSeconds.coerceIn(
+                MIN_GENERATION_RETRY_DURATION_SECONDS,
+                MAX_GENERATION_RETRY_DURATION_SECONDS,
+            ) * 1_000L,
+        )
+        try {
+            while (true) {
+                try {
+                    retryProviderRequest(
+                        enabled = settings.enableGenerationRetry && model.tools.isEmpty(),
+                        retryController = retryController,
+                        canRetry = { !receivedEffectiveOutput },
+                        onRetry = { retryNumber, delayMillis ->
+                            Log.w(
+                                TAG,
+                                "generateInternal: retry #$retryNumber in ${delayMillis}ms (${model.id})"
+                            )
+                            processingStatus.value = context.getString(
+                                R.string.chat_page_generation_retrying,
+                                retryNumber,
+                            )
+                        },
+                    ) {
+                        receivedEffectiveOutput = false
+                        if (stream) {
+                            val streamChunkHandler = StreamChunkHandler(model)
+                            val preBoundaryChunks = mutableListOf<StreamChunk>()
+                            var lastUiUpdateNanos = 0L
+                            var hasPendingUiUpdate = false
 
-            suspend fun flushStreamUpdate() {
-                messages = messages.withKnowledgeCitations(requestCitations)
-                onUpdateMessages(messages)
-                lastUiUpdateNanos = System.nanoTime()
-                hasPendingUiUpdate = false
-            }
+                            suspend fun flushStreamUpdate() {
+                                messages = messages.withKnowledgeCitations(requestCitations)
+                                onUpdateMessages(messages)
+                                lastUiUpdateNanos = System.nanoTime()
+                                hasPendingUiUpdate = false
+                            }
 
-            providerImpl.streamText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params
-            ).collect { chunk ->
-                messages = streamChunkHandler.handle(messages, chunk)
-                val now = System.nanoTime()
-                if (chunk.requiresImmediateUiUpdate() ||
-                    now - lastUiUpdateNanos >= STREAM_UI_UPDATE_INTERVAL_NANOS
-                ) {
-                    flushStreamUpdate()
-                } else {
-                    hasPendingUiUpdate = true
+                            suspend fun handleChunk(chunk: StreamChunk) {
+                                messages = streamChunkHandler.handle(messages, chunk)
+                                val now = System.nanoTime()
+                                if (chunk.requiresImmediateUiUpdate() ||
+                                    now - lastUiUpdateNanos >= STREAM_UI_UPDATE_INTERVAL_NANOS
+                                ) {
+                                    flushStreamUpdate()
+                                } else {
+                                    hasPendingUiUpdate = true
+                                }
+                            }
+
+                            providerImpl.streamText(
+                                providerSetting = provider,
+                                messages = providerMessages,
+                                params = params
+                            ).collect { chunk ->
+                                if (!receivedEffectiveOutput) {
+                                    preBoundaryChunks += chunk
+                                    if (chunk.crossesRequestReplayBoundary()) {
+                                        receivedEffectiveOutput = true
+                                        processingStatus.value = previousProcessingStatus
+                                        for (pendingChunk in preBoundaryChunks) {
+                                            messages = streamChunkHandler.handle(messages, pendingChunk)
+                                        }
+                                        preBoundaryChunks.clear()
+                                        flushStreamUpdate()
+                                    }
+                                } else {
+                                    handleChunk(chunk)
+                                }
+                            }
+
+                            if (!receivedEffectiveOutput && preBoundaryChunks.isNotEmpty()) {
+                                for (pendingChunk in preBoundaryChunks) {
+                                    messages = streamChunkHandler.handle(messages, pendingChunk)
+                                }
+                                flushStreamUpdate()
+                            } else if (hasPendingUiUpdate) {
+                                flushStreamUpdate()
+                            }
+                        } else {
+                            val result = providerImpl.generateText(
+                                providerSetting = provider,
+                                messages = providerMessages,
+                                params = params,
+                            )
+                            receivedEffectiveOutput = true
+                            messages = messages.handleTextGenerationResult(result = result, model = model)
+                                .withKnowledgeCitations(requestCitations)
+                            onUpdateMessages(messages)
+                        }
+                    }
+                    if (streamRecoveryAttempted) {
+                        val mergedMessages = messages.mergeLastAssistantTextParts()
+                        if (mergedMessages !== messages) {
+                            messages = mergedMessages
+                            onUpdateMessages(messages)
+                        }
+                    }
+                    break
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    val continuationMessages = if (
+                        stream &&
+                        settings.enableGenerationRetry &&
+                        !streamRecoveryAttempted &&
+                        receivedEffectiveOutput &&
+                        error.isRetryableProviderFailure()
+                    ) {
+                        buildInterruptedStreamContinuation(
+                            requestMessages = internalMessages,
+                            currentMessages = messages,
+                            hasClientTools = tools.isNotEmpty(),
+                            hasServerTools = model.tools.isNotEmpty(),
+                        )
+                    } else {
+                        null
+                    }
+                    if (continuationMessages == null) throw error
+
+                    val reconnectScheduled = retryController.waitBeforeRetry(
+                        error = error,
+                        onRetry = { retryNumber, delayMillis ->
+                            Log.w(
+                                TAG,
+                                "generateInternal: reconnect #$retryNumber in ${delayMillis}ms (${model.id})",
+                                error,
+                            )
+                            processingStatus.value = context.getString(
+                                R.string.chat_page_generation_resuming,
+                            )
+                        },
+                    )
+                    if (!reconnectScheduled) throw error
+
+                    streamRecoveryAttempted = true
+                    providerMessages = continuationMessages
                 }
             }
-            if (hasPendingUiUpdate) {
-                flushStreamUpdate()
-            }
-        } else {
-            val result = providerImpl.generateText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params,
-            )
-            messages = messages.handleTextGenerationResult(result = result, model = model)
-                .withKnowledgeCitations(requestCitations)
-            onUpdateMessages(messages)
+        } finally {
+            processingStatus.value = previousProcessingStatus
         }
         return requestCitations
+    }
+
+    private fun resolveContentMediaSize(url: String): Long? {
+        if (!url.startsWith("content://", ignoreCase = true)) return null
+        val uri = Uri.parse(url)
+        val descriptorLength = runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                descriptor.length.takeIf { it >= 0L }
+            }
+        }.getOrNull()
+        if (descriptorLength != null) return descriptorLength
+
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0 && cursor.moveToFirst() && !cursor.isNull(sizeIndex)) {
+                    cursor.getLong(sizeIndex).takeIf { it >= 0L }
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
     }
 
     private fun List<UIMessage>.withKnowledgeCitations(
@@ -609,12 +761,12 @@ class GenerationHandler(
     }
 
     /** Text and argument deltas can arrive dozens of times per second. Structural state must stay immediate. */
-    private fun me.rerere.ai.ui.StreamChunk.requiresImmediateUiUpdate(): Boolean = when (this) {
-        is me.rerere.ai.ui.StreamChunk.TextDelta,
-        is me.rerere.ai.ui.StreamChunk.ReasoningDelta,
-        is me.rerere.ai.ui.StreamChunk.ToolCallDelta,
-        is me.rerere.ai.ui.StreamChunk.ServerToolInputDelta,
-        is me.rerere.ai.ui.StreamChunk.ImageDelta -> false
+    private fun StreamChunk.requiresImmediateUiUpdate(): Boolean = when (this) {
+        is StreamChunk.TextDelta,
+        is StreamChunk.ReasoningDelta,
+        is StreamChunk.ToolCallDelta,
+        is StreamChunk.ServerToolInputDelta,
+        is StreamChunk.ImageDelta -> false
         else -> true
     }
 
