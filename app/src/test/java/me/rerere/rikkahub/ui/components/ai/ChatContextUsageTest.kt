@@ -9,16 +9,18 @@ import org.junit.Test
 
 class ChatContextUsageTest {
     @Test
-    fun `uses all active conversation messages instead of the latest truncated request`() {
+    fun `uses provider prompt usage when it exceeds the lightweight local estimate`() {
         val usage = calculateChatContextUsage(
             messages = listOf(
                 UIMessage.user("A much longer request that would produce a different local estimate."),
-                UIMessage.assistant("OK").copy(usage = TokenUsage(promptTokens = 12_345)),
+                UIMessage.assistant("OK").copy(
+                    usage = TokenUsage(promptTokens = 12_345, completionTokens = 25),
+                ),
             ),
             capacityTokens = 32_768,
         )
 
-        assertTrue(usage.usedTokens < 12_345)
+        assertEquals(12_370, usage.usedTokens)
         assertEquals(32_768, usage.capacityTokens)
         assertTrue(usage.isEstimated)
     }
@@ -46,7 +48,7 @@ class ChatContextUsageTest {
         )
 
         assertTrue(usage.isEstimated)
-        assertTrue(usage.usedTokens < 12_345)
+        assertTrue(usage.usedTokens > 12_345)
     }
 
     @Test
@@ -76,11 +78,25 @@ class ChatContextUsageTest {
         val usage = calculateChatContextUsage(
             messages = messages,
             rollingContextSummary = summary,
-            rollingContextThresholdTokens = 1_000,
             capacityTokens = 8_000,
         )
 
         assertTrue(usage.usedTokens < 1_500)
         assertTrue(usage.remainingTokens!! > 6_500)
+    }
+
+    @Test
+    fun `does not display a future compression result before compression succeeds`() {
+        val messages = List(6) { index ->
+            if (index % 2 == 0) UIMessage.user("message $index ${"x".repeat(4_000)}")
+            else UIMessage.assistant("message $index ${"x".repeat(4_000)}")
+        }
+
+        val usage = calculateChatContextUsage(
+            messages = messages,
+            capacityTokens = 32_768,
+        )
+
+        assertTrue(usage.usedTokens > 5_000)
     }
 }
