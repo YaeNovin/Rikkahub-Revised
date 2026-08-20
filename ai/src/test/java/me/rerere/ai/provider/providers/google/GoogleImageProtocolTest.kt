@@ -6,8 +6,11 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.provider.ImageGenerationConstraints
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.ui.UIMessage
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -103,5 +106,29 @@ class GoogleImageProtocolTest {
         assertEquals("final", images.single().data)
         assertEquals("image/webp", images.single().mimeType)
         assertTrue(images.none { it.data == "draft" })
+    }
+
+    @Test
+    fun `chat request restores native image output for legacy Gemini model settings`() {
+        val provider = GoogleProvider(OkHttpClient())
+        val method = GoogleProvider::class.java.getDeclaredMethod(
+            "buildCompletionRequestBody",
+            List::class.java,
+            TextGenerationParams::class.java,
+        ).apply { isAccessible = true }
+        val body = method.invoke(
+            provider,
+            listOf(UIMessage.user("Draw a lighthouse")),
+            TextGenerationParams(
+                model = Model(
+                    modelId = "gemini-3.1-flash-image",
+                    outputModalities = listOf(Modality.TEXT),
+                ),
+            ),
+        ) as kotlinx.serialization.json.JsonObject
+
+        val responseModalities = body["generationConfig"]!!.jsonObject["responseModalities"]!!
+            .jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("TEXT", "IMAGE"), responseModalities)
     }
 }

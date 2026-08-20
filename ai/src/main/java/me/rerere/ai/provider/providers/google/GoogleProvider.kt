@@ -621,9 +621,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams,
         uploadedFiles: Map<String, UploadedGoogleFile>,
     ): JsonObject = buildJsonObject {
+        val supportsImageOutput = params.model.supportsGoogleNativeImageOutput()
         // System message if available
         val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
-        if (systemMessage != null && !params.model.outputModalities.contains(Modality.IMAGE)) {
+        if (systemMessage != null && !supportsImageOutput) {
             put("systemInstruction", buildJsonObject {
                 putJsonArray("parts") {
                     add(buildJsonObject {
@@ -641,7 +642,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             if (params.temperature != null) put("temperature", params.temperature)
             if (params.topP != null) put("topP", params.topP)
             if (params.maxTokens != null) put("maxOutputTokens", params.maxTokens)
-            if (params.model.outputModalities.contains(Modality.IMAGE)) {
+            if (supportsImageOutput) {
                 put("responseModalities", buildJsonArray {
                     add(JsonPrimitive("TEXT"))
                     add(JsonPrimitive("IMAGE"))
@@ -777,6 +778,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             MessageRole.TOOL -> "user" // google api中, tool结果是用户role发送的
         }
     }
+
+    private fun Model.supportsGoogleNativeImageOutput(): Boolean =
+        Modality.IMAGE in outputModalities ||
+            Modality.IMAGE in ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(modelId)
 
     private suspend fun uploadLargeMedia(
         providerSetting: ProviderSetting.Google,
