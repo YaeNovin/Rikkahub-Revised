@@ -2,6 +2,7 @@ package me.rerere.ai.registry
 
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -37,6 +38,14 @@ class ModelRegistryTest {
             listOf(Modality.TEXT),
             ModelRegistry.MODEL_OUTPUT_MODALITIES.getData("gemini-2.5-flash")
         )
+    }
+
+    @Test
+    fun testImageModelTypes() {
+        assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gemini-3-pro-image-preview"))
+        assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gemini-3.1-flash-image-preview"))
+        assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gpt-image-2"))
+        assertEquals(ModelType.EMBEDDING, ModelRegistry.MODEL_TYPE.getData("BAAI/bge-m3"))
     }
 
     @Test

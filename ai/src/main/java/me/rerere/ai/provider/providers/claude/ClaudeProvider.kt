@@ -43,6 +43,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
@@ -270,7 +271,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
+                .url("${providerSetting.baseUrl}/models?limit=1000")
                 .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
                 .addHeader("anthropic-version", ANTHROPIC_VERSION)
                 .get()
@@ -293,6 +294,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 Model(
                     modelId = id,
                     displayName = displayName,
+                    type = ModelRegistry.MODEL_TYPE.getData(id),
+                    inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id),
+                    outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id),
+                    abilities = ModelRegistry.MODEL_ABILITIES.getData(id),
                     contextWindowTokens = modelObj.contextWindowTokensOrNull(
                         modelId = id,
                         protocol = ModelDiscoveryProtocol.ANTHROPIC,

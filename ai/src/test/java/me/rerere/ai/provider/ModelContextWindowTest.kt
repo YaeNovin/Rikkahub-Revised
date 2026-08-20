@@ -26,6 +26,8 @@ class ModelContextWindowTest {
             "{\"limits\":{\"max_input_tokens\":200000}}" to 200_000,
             "{\"architecture\":{\"max_context_length\":65536}}" to 65_536,
             "{\"top_provider\":{\"context_length\":131072}}" to 131_072,
+            "{\"Model_Info\":{\"MAX_MODEL_LEN\":262144}}" to 262_144,
+            "{\"metadata\":{\"maxPositionEmbeddings\":32768}}" to 32_768,
         )
 
         values.forEach { (body, expected) ->
@@ -59,12 +61,28 @@ class ModelContextWindowTest {
             empty.contextWindowTokensOrNull("gpt-5", ModelDiscoveryProtocol.OPENAI),
         )
         assertEquals(
+            1_050_000,
+            empty.contextWindowTokensOrNull("gpt-5.6", ModelDiscoveryProtocol.OPENAI),
+        )
+        assertEquals(
+            400_000,
+            empty.contextWindowTokensOrNull("gpt-5.4-mini", ModelDiscoveryProtocol.OPENAI),
+        )
+        assertEquals(
             1_048_576,
             empty.contextWindowTokensOrNull("gemini-2.5-flash", ModelDiscoveryProtocol.GOOGLE),
         )
         assertEquals(
             200_000,
             empty.contextWindowTokensOrNull("claude-sonnet-4-5", ModelDiscoveryProtocol.ANTHROPIC),
+        )
+        assertEquals(
+            1_000_000,
+            empty.contextWindowTokensOrNull("claude-opus-4-6", ModelDiscoveryProtocol.ANTHROPIC),
+        )
+        assertEquals(
+            131_072,
+            empty.contextWindowTokensOrNull("gemini-3.1-flash-image-preview", ModelDiscoveryProtocol.GOOGLE),
         )
         assertEquals(
             64_000,
@@ -88,7 +106,7 @@ class ModelContextWindowTest {
             Model(modelId = "custom-deployment"),
         )
         val discovered = listOf(
-            Model(modelId = "gpt-5", contextWindowTokens = 400_000),
+            Model(modelId = "OPENAI/GPT-5", contextWindowTokens = 400_000),
             Model(modelId = "gpt-4o", contextWindowTokens = 128_000),
         )
 

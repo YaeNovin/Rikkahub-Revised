@@ -40,6 +40,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.inferModelTypeFromId
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
@@ -125,7 +126,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     override suspend fun listModels(providerSetting: ProviderSetting.Google): List<Model> =
         withContext(Dispatchers.IO) {
-            val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
+            val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=1000")
             val request = transformRequest(
                 providerSetting = providerSetting,
                 request = Request.Builder()
@@ -142,20 +143,27 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 models.mapNotNull {
                     val modelObject = it.jsonObject
 
-                    // 忽略非chat/embedding模型
                     val supportedGenerationMethods =
-                        modelObject["supportedGenerationMethods"]!!.jsonArray
-                            .map { method -> method.jsonPrimitive.content }
-                    if ("generateContent" !in supportedGenerationMethods && "embedContent" !in supportedGenerationMethods) {
+                        (modelObject["supportedGenerationMethods"] as? JsonArray)
+                            .orEmpty()
+                            .mapNotNull { method -> method.jsonPrimitive.contentOrNull }
+                    val fullModelId = modelObject["name"]?.jsonPrimitive?.contentOrNull
+                        ?: return@mapNotNull null
+                    val modelId = fullModelId.substringAfter("/")
+                    val modelType = inferGoogleModelType(modelId, supportedGenerationMethods)
+                    if (modelType == null) {
                         return@mapNotNull null
                     }
 
                     Model(
-                        modelId = modelObject["name"]!!.jsonPrimitive.content.substringAfter("/"),
-                        displayName = modelObject["displayName"]!!.jsonPrimitive.content,
-                        type = if ("generateContent" in supportedGenerationMethods) ModelType.CHAT else ModelType.EMBEDDING,
+                        modelId = modelId,
+                        displayName = modelObject["displayName"]?.jsonPrimitive?.contentOrNull ?: modelId,
+                        type = modelType,
+                        inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(modelId),
+                        outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(modelId),
+                        abilities = ModelRegistry.MODEL_ABILITIES.getData(modelId),
                         contextWindowTokens = modelObject.contextWindowTokensOrNull(
-                            modelId = modelObject["name"]!!.jsonPrimitive.content,
+                            modelId = fullModelId,
                             protocol = ModelDiscoveryProtocol.GOOGLE,
                         ),
                     )
@@ -875,5 +883,19 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             totalTokens = totalTokens,
             cachedTokens = cachedTokens
         )
+    }
+}
+
+internal fun inferGoogleModelType(
+    modelId: String,
+    supportedGenerationMethods: List<String>,
+): ModelType? = when (inferModelTypeFromId(modelId)) {
+    ModelType.IMAGE -> ModelType.IMAGE
+    ModelType.EMBEDDING -> ModelType.EMBEDDING
+    ModelType.CHAT -> when {
+        "embedContent" in supportedGenerationMethods && "generateContent" !in supportedGenerationMethods ->
+            ModelType.EMBEDDING
+        "generateContent" in supportedGenerationMethods -> ModelType.CHAT
+        else -> null
     }
 }

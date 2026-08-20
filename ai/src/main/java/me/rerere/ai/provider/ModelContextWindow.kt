@@ -22,6 +22,12 @@ private val CONTEXT_WINDOW_FIELDS = listOf(
     "max_input_tokens",
     "maxSequenceLength",
     "max_sequence_length",
+    "maxModelLength",
+    "max_model_len",
+    "maxPositionEmbeddings",
+    "max_position_embeddings",
+    "tokenLimit",
+    "token_limit",
 )
 
 private val CONTEXT_WINDOW_CONTAINERS = listOf(
@@ -34,6 +40,13 @@ private val CONTEXT_WINDOW_CONTAINERS = listOf(
     "top_provider",
 )
 
+private val NORMALIZED_CONTEXT_WINDOW_FIELDS = CONTEXT_WINDOW_FIELDS.mapTo(mutableSetOf()) {
+    it.normalizedMetadataKey()
+}
+private val NORMALIZED_CONTEXT_WINDOW_CONTAINERS = CONTEXT_WINDOW_CONTAINERS.mapTo(mutableSetOf()) {
+    it.normalizedMetadataKey()
+}
+
 internal enum class ModelDiscoveryProtocol {
     OPENAI,
     GOOGLE,
@@ -45,11 +58,15 @@ internal enum class ModelDiscoveryProtocol {
  * Providers that do not expose a capacity leave the value unset so it can still be configured manually.
  */
 internal fun JsonObject.contextWindowTokensOrNull(): Int? {
-    CONTEXT_WINDOW_FIELDS.forEach { field ->
-        this[field].contextWindowTokenCountOrNull()?.let { return it }
+    entries.forEach { (field, value) ->
+        if (field.normalizedMetadataKey() in NORMALIZED_CONTEXT_WINDOW_FIELDS) {
+            value.contextWindowTokenCountOrNull()?.let { return it }
+        }
     }
-    CONTEXT_WINDOW_CONTAINERS.forEach { container ->
-        (this[container] as? JsonObject)?.contextWindowTokensOrNull()?.let { return it }
+    entries.forEach { (container, value) ->
+        if (container.normalizedMetadataKey() in NORMALIZED_CONTEXT_WINDOW_CONTAINERS) {
+            (value as? JsonObject)?.contextWindowTokensOrNull()?.let { return it }
+        }
     }
     return null
 }
@@ -75,9 +92,9 @@ fun mergeDiscoveredContextWindows(
     configuredModels: List<Model>,
     discoveredModels: List<Model>,
 ): List<Model> {
-    val discoveredById = discoveredModels.associateBy(Model::modelId)
+    val discoveredById = discoveredModels.associateBy { it.modelId.normalizedModelId() }
     return configuredModels.map { configured ->
-        val discoveredTokens = discoveredById[configured.modelId]?.contextWindowTokens
+        val discoveredTokens = discoveredById[configured.modelId.normalizedModelId()]?.contextWindowTokens
         if (configured.contextWindowTokens == null && discoveredTokens != null) {
             configured.copy(contextWindowTokens = discoveredTokens)
         } else {
@@ -85,6 +102,12 @@ fun mergeDiscoveredContextWindows(
         }
     }
 }
+
+/** Returns a conservative known capacity for manual model configuration. */
+fun inferContextWindowTokens(modelId: String): Int? =
+    knownOpenAIContextWindowTokens(modelId)
+        ?: knownGoogleContextWindowTokens(modelId)
+        ?: knownAnthropicContextWindowTokens(modelId)
 
 /** Parses the compact K/M notation accepted by the manual context-window setting. */
 fun parseContextWindowTokens(value: String): Int? {
@@ -115,6 +138,8 @@ private fun JsonElement?.contextWindowTokenCountOrNull(): Int? {
 private fun knownOpenAIContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
+        id.startsWith("gpt-5.4-mini") || id.startsWith("gpt-5.4-nano") -> 400_000
+        id.startsWith("gpt-5.4") || id.startsWith("gpt-5.5") || id.startsWith("gpt-5.6") -> 1_050_000
         id.startsWith("gpt-5") -> 400_000
         id.startsWith("gpt-4.1") -> 1_047_576
         id.startsWith("o1") || id.startsWith("o3") || id.startsWith("o4") -> 200_000
@@ -132,6 +157,9 @@ private fun knownOpenAIContextWindowTokens(modelId: String): Int? {
 private fun knownGoogleContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
+        id.startsWith("gemini-3.1-flash-image") -> 131_072
+        id.startsWith("gemini-3-pro-image") -> 65_536
+        id.startsWith("gemini-2.5-flash-image") -> 65_536
         id.startsWith("gemini-1.5-pro") -> 2_097_152
         id == "gemini-pro" || id.startsWith("gemini-1.0-pro") -> 30_720
         id.startsWith("gemini-") -> 1_048_576
@@ -141,7 +169,14 @@ private fun knownGoogleContextWindowTokens(modelId: String): Int? {
 
 private fun knownAnthropicContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
+    val tokens = id.split(MODEL_ID_SEPARATOR).filter(String::isNotEmpty)
     return when {
+        tokens.matchesClaudeFamilyVersion("opus", major = "5") ||
+            tokens.matchesClaudeFamilyVersion("sonnet", major = "5") ||
+            tokens.matchesClaudeFamilyVersion("fable", major = "5") ||
+            tokens.matchesClaudeFamilyVersion("mythos", major = "5") ||
+            tokens.matchesClaudeFamilyVersion("opus", major = "4", minor = setOf("6", "7", "8")) ||
+            tokens.matchesClaudeFamilyVersion("sonnet", major = "4", minor = setOf("6")) -> 1_000_000
         id.startsWith("claude-2.1") -> 200_000
         id.startsWith("claude-2") || id.startsWith("claude-instant") -> 100_000
         id.startsWith("claude-") -> 200_000
@@ -151,5 +186,26 @@ private fun knownAnthropicContextWindowTokens(modelId: String): Int? {
 
 private fun String.normalizedModelId(): String = substringAfterLast('/').trim().lowercase()
 
+private fun String.normalizedMetadataKey(): String = filter(Char::isLetterOrDigit).lowercase()
+
+private fun List<String>.matchesClaudeFamilyVersion(
+    family: String,
+    major: String,
+    minor: Set<String>? = null,
+): Boolean {
+    if ("claude" !in this) return false
+    return if (minor == null) {
+        windowed(size = 2).any { it == listOf(family, major) || it == listOf(major, family) }
+    } else {
+        windowed(size = 3).any { tokens ->
+            minor.any { minorVersion ->
+                tokens == listOf(family, major, minorVersion) ||
+                    tokens == listOf(major, minorVersion, family)
+            }
+        }
+    }
+}
+
 private const val MAX_CONTEXT_WINDOW_TOKENS = 10_000_000L
 private val CONTEXT_WINDOW_INPUT = Regex("^(\\d+)([kKmM])?$")
+private val MODEL_ID_SEPARATOR = Regex("[-_.]+")
