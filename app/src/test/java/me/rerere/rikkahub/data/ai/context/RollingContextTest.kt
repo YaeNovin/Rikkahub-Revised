@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.data.ai.context
 
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -114,6 +116,71 @@ class RollingContextTest {
         assertTrue(startIndex < messages.lastIndex)
         assertEquals(MessageRole.USER, messages[startIndex].role)
         assertTrue(messages.drop(startIndex).size < messages.size)
+    }
+
+    @Test
+    fun `large prior turn can be compacted before four messages accumulate`() {
+        val messages = listOf(
+            UIMessage.user("document ${"x".repeat(20_000)}"),
+            UIMessage.assistant("I read the document."),
+            UIMessage.user("Continue."),
+        )
+
+        val plan = createRollingContextPlan(
+            messages = messages,
+            storedSummary = null,
+            thresholdTokens = 1_000,
+        )
+
+        assertNotNull(plan)
+        assertEquals(messages.take(2).map(UIMessage::id), plan!!.sourceMessageIds)
+        assertEquals(listOf(messages.last().id), messages.drop(plan.sourceMessageIds.size).map(UIMessage::id))
+    }
+
+    @Test
+    fun `reasoning and tool payloads are included in message estimate`() {
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Text("answer"),
+                UIMessagePart.Reasoning("r".repeat(400)),
+                UIMessagePart.Tool(
+                    toolCallId = "call-123",
+                    toolName = "inspect_file",
+                    input = "i".repeat(400),
+                    output = listOf(UIMessagePart.Text("o".repeat(400))),
+                ),
+            ),
+        )
+
+        assertTrue(estimateMessageTokens(message) > estimateMessageTokens(UIMessage.assistant("answer")) + 250)
+    }
+
+    @Test
+    fun `provider completion usage covers hidden model output`() {
+        val message = UIMessage.assistant("short answer").copy(
+            usage = TokenUsage(completionTokens = 2_000),
+        )
+
+        assertEquals(2_004, estimateMessageTokens(message))
+    }
+
+    @Test
+    fun `provider prompt usage can trigger automatic compression`() {
+        val messages = listOf(
+            UIMessage.assistant("Prior reply").copy(
+                usage = TokenUsage(promptTokens = 5_000, completionTokens = 100),
+            ),
+            UIMessage.user("Continue."),
+        )
+
+        assertNotNull(
+            createRollingContextPlan(
+                messages = messages,
+                storedSummary = null,
+                thresholdTokens = 4_000,
+            )
+        )
     }
 
     private fun messages(count: Int, contentLength: Int): List<UIMessage> = List(count) { index ->

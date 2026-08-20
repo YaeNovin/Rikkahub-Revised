@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.context
 import kotlinx.serialization.Serializable
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import kotlin.uuid.Uuid
 
 /** A persisted summary of a stable prefix of the active conversation branch. */
@@ -52,8 +53,7 @@ fun createRollingContextPlan(
     val coveredCount = storedSummary?.coveredMessageCount(messages) ?: 0
     val previousSummary = storedSummary?.takeIf { coveredCount > 0 }
     val unsummarizedMessages = messages.drop(coveredCount)
-    val workingTokens = estimateContextTokens(unsummarizedMessages) +
-        previousSummary.orEmptySummaryTokens()
+    val workingTokens = estimateActiveContextTokens(messages, previousSummary)
     if (!force && workingTokens < effectiveThreshold) return null
 
     val keepCount = unsummarizedMessages.recentWindowCount(
@@ -73,7 +73,40 @@ fun createRollingContextPlan(
 
 fun estimateContextTokens(messages: List<UIMessage>): Int = messages.sumOf(::estimateMessageTokens)
 
-fun estimateMessageTokens(message: UIMessage): Int = estimateTextTokens(message.toText()) + MESSAGE_OVERHEAD_TOKENS
+/**
+ * Estimates every token-bearing part retained in a message. Provider completion usage is used as
+ * a floor because it also captures hidden reasoning and protocol details absent from UI parts.
+ */
+@Suppress("DEPRECATION")
+fun estimateMessageTokens(message: UIMessage): Int {
+    val visibleTokens = message.parts.sumOf(::estimatePartTokens)
+    val producedTokens = message.usage?.completionTokens ?: 0
+    return maxOf(visibleTokens, producedTokens) + MESSAGE_OVERHEAD_TOKENS
+}
+
+/**
+ * Token estimate for the next provider request. A valid summary replaces its covered prefix; the
+ * latest provider prompt usage calibrates system prompts, documents and tool schemas that local
+ * tokenization may underestimate.
+ */
+fun estimateActiveContextTokens(
+    messages: List<UIMessage>,
+    storedSummary: RollingContextSummary?,
+): Int {
+    val coveredCount = storedSummary?.coveredMessageCount(messages) ?: 0
+    val validSummary = storedSummary?.takeIf { coveredCount > 0 }
+    val localEstimate = validSummary.orEmptySummaryTokens() +
+        estimateContextTokens(messages.drop(coveredCount))
+    val measuredMessageIndex = messages.indexOfLast { message ->
+        message.usage?.promptTokens?.let { it > 0 } == true &&
+            message.id !in validSummary?.sourceMessageIds.orEmpty()
+    }
+    val measuredEstimate = measuredMessageIndex.takeIf { it >= 0 }?.let { index ->
+        val usage = messages[index].usage ?: return@let null
+        usage.promptTokens + usage.completionTokens + estimateContextTokens(messages.drop(index + 1))
+    }
+    return maxOf(localEstimate, measuredEstimate ?: 0)
+}
 
 fun estimateTextTokens(text: String): Int {
     if (text.isBlank()) return 0
@@ -83,6 +116,32 @@ fun estimateTextTokens(text: String): Int {
 }
 
 private fun RollingContextSummary?.orEmptySummaryTokens(): Int = this?.content?.let(::estimateTextTokens) ?: 0
+
+@Suppress("DEPRECATION")
+private fun estimatePartTokens(part: UIMessagePart): Int = when (part) {
+    is UIMessagePart.Text -> estimateTextTokens(part.text)
+    is UIMessagePart.Reasoning -> estimateTextTokens(part.reasoning)
+    is UIMessagePart.Tool -> estimateTextTokens(part.toolCallId) +
+        estimateTextTokens(part.toolName) +
+        estimateTextTokens(part.input) +
+        part.output.sumOf(::estimatePartTokens)
+    is UIMessagePart.ServerTool -> estimateTextTokens(part.toolCallId) +
+        estimateTextTokens(part.toolName) +
+        estimateTextTokens(part.input?.toString().orEmpty()) +
+        estimateTextTokens(part.output?.toString().orEmpty())
+    is UIMessagePart.ToolCall -> estimateTextTokens(part.toolCallId) +
+        estimateTextTokens(part.toolName) +
+        estimateTextTokens(part.arguments)
+    is UIMessagePart.ToolResult -> estimateTextTokens(part.toolCallId) +
+        estimateTextTokens(part.toolName) +
+        estimateTextTokens(part.content.toString()) +
+        estimateTextTokens(part.arguments.toString())
+    is UIMessagePart.Image -> IMAGE_TOKEN_ESTIMATE
+    is UIMessagePart.Video -> VIDEO_TOKEN_ESTIMATE
+    is UIMessagePart.Audio -> AUDIO_TOKEN_ESTIMATE
+    is UIMessagePart.Document -> DOCUMENT_REFERENCE_TOKEN_ESTIMATE
+    UIMessagePart.Search -> 0
+}
 
 /**
  * Returns the first message index retained when a summary cannot be refreshed.
@@ -107,9 +166,10 @@ private fun List<UIMessage>.recentWindowCount(tokenBudget: Int): Int {
     }
 
     var startIndex = (size - count).coerceAtLeast(0)
-    // Tool outputs must retain the user turn that initiated their call.
-    while (startIndex > 0 && this[startIndex].role != MessageRole.USER) {
-        startIndex -= 1
+    // A request window should begin at the next complete user turn. Expanding backwards here can
+    // pull a very large document turn back into the request and defeat compression entirely.
+    while (startIndex < size && this[startIndex].role != MessageRole.USER) {
+        startIndex += 1
     }
     return size - startIndex
 }
@@ -119,8 +179,12 @@ private fun isCjkCharacter(character: Char): Boolean = character in '\u3040'..'\
     character in '\u4e00'..'\u9fff'
 
 private const val MESSAGE_OVERHEAD_TOKENS = 4
-private const val MIN_ROLLING_CONTEXT_MESSAGES = 4
-private const val MIN_RECENT_MESSAGE_COUNT = 4
+private const val DOCUMENT_REFERENCE_TOKEN_ESTIMATE = 32
+private const val IMAGE_TOKEN_ESTIMATE = 1_024
+private const val AUDIO_TOKEN_ESTIMATE = 4_096
+private const val VIDEO_TOKEN_ESTIMATE = 8_192
+private const val MIN_ROLLING_CONTEXT_MESSAGES = 1
+private const val MIN_RECENT_MESSAGE_COUNT = 1
 private const val RECENT_WINDOW_RATIO = 0.55f
 private const val SUMMARY_TARGET_DIVISOR = 4
 private const val MIN_SUMMARY_TOKENS = 512

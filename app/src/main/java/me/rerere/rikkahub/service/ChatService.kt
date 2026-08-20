@@ -553,6 +553,9 @@ class ChatService(
             } else {
                 conversation
             }
+            val contextGenerationMessages = DocumentAsPromptTransformer.transformDocumentContents(
+                generationMessages,
+            )
             val rollingSummary = preparedConversation.rollingContextSummary
                 ?.takeIf { it.coveredMessageCount(generationMessages) > 0 }
             val rollingSummaryMessageCount = rollingSummary?.coveredMessageCount(generationMessages) ?: 0
@@ -560,14 +563,14 @@ class ChatService(
                 assistant.rollingContextCompressionThresholdTokens,
             )
             val stillNeedsCompression = messageRange == null && createRollingContextPlan(
-                messages = generationMessages,
+                messages = contextGenerationMessages,
                 storedSummary = preparedConversation.rollingContextSummary,
                 thresholdTokens = rollingThresholdTokens,
             ) != null
             val requestMessageStartIndex = maxOf(
                 rollingSummaryMessageCount,
                 if (stillNeedsCompression) {
-                    rollingContextWindowStartIndex(generationMessages, rollingThresholdTokens)
+                    rollingContextWindowStartIndex(contextGenerationMessages, rollingThresholdTokens)
                 } else {
                     0
                 },
@@ -942,9 +945,12 @@ class ChatService(
         val thresholdTokens = effectiveRollingContextThreshold(
             assistant.rollingContextCompressionThresholdTokens,
         )
+        val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(
+            conversation.currentMessages,
+        )
         if (
             createRollingContextPlan(
-                messages = conversation.currentMessages,
+                messages = contextMessages,
                 storedSummary = conversation.rollingContextSummary,
                 thresholdTokens = thresholdTokens,
             ) == null
@@ -961,6 +967,7 @@ class ChatService(
                 assistant = assistant,
                 settings = settings,
                 force = false,
+                planningMessages = contextMessages,
             ) ?: conversation
         } catch (error: CancellationException) {
             throw error
@@ -984,9 +991,12 @@ class ChatService(
         force: Boolean,
         targetTokensOverride: Int? = null,
         additionalPrompt: String = "",
+        planningMessages: List<UIMessage>? = null,
     ): Conversation? {
+        val messagesForPlanning = planningMessages
+            ?: DocumentAsPromptTransformer.transformDocumentContents(conversation.currentMessages)
         val plan = createRollingContextPlan(
-            messages = conversation.currentMessages,
+            messages = messagesForPlanning,
             storedSummary = conversation.rollingContextSummary,
             thresholdTokens = effectiveRollingContextThreshold(
                 assistant.rollingContextCompressionThresholdTokens,

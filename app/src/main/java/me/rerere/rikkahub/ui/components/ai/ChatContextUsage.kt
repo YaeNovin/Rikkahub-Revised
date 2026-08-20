@@ -15,12 +15,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.ai.context.RollingContextSummary
-import me.rerere.rikkahub.data.ai.context.createRollingContextPlan
-import me.rerere.rikkahub.data.ai.context.estimateTextTokens
-import me.rerere.rikkahub.data.ai.context.effectiveRollingContextThreshold
-import me.rerere.rikkahub.data.ai.context.coveredMessageCount
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.ai.context.estimateContextTokens
+import me.rerere.rikkahub.data.ai.context.estimateActiveContextTokens
 
 /** Context usage reflects the rolling request, not the complete locally retained history. */
 data class ChatContextUsage(
@@ -39,27 +35,10 @@ data class ChatContextUsage(
 internal fun calculateChatContextUsage(
     messages: List<UIMessage>,
     rollingContextSummary: RollingContextSummary? = null,
-    rollingContextThresholdTokens: Int = 0,
     capacityTokens: Int?,
 ): ChatContextUsage {
-    val coveredCount = rollingContextSummary?.coveredMessageCount(messages) ?: 0
-    val validSummary = rollingContextSummary?.takeIf { coveredCount > 0 }
-    val plannedRefresh = createRollingContextPlan(
-        messages = messages,
-        storedSummary = validSummary,
-        thresholdTokens = effectiveRollingContextThreshold(rollingContextThresholdTokens),
-    )
-    val summaryTokens = when {
-        plannedRefresh != null -> plannedRefresh.targetTokens
-        validSummary != null -> estimateTextTokens(validSummary.content)
-        else -> 0
-    }
-    val windowMessages = when {
-        plannedRefresh != null -> messages.drop(plannedRefresh.sourceMessageIds.size)
-        else -> messages.drop(coveredCount)
-    }
     return ChatContextUsage(
-        usedTokens = summaryTokens + estimateContextTokens(windowMessages),
+        usedTokens = estimateActiveContextTokens(messages, rollingContextSummary),
         capacityTokens = capacityTokens?.takeIf { it > 0 },
         isEstimated = true,
     )

@@ -53,11 +53,13 @@ private val ALLOWED_FILE_EXTENSIONS = setOf(
     "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx",
     "rs", "cs", "markdown", "mdx",
     "toml", "ini", "env", "gradle", "kts", "properties",
-    "proto", "graphql", "gql", "yml", "yaml"
+    "proto", "graphql", "gql", "yml", "yaml",
+    "pdf", "docx", "xlsx", "pptx", "epub"
 )
 
 fun isAllowedFileType(fileName: String, mime: String): Boolean {
-    if (mime in ALLOWED_MIME_TYPES || mime.startsWith("text/")) return true
+    val normalizedMime = mime.substringBefore(';').trim().lowercase()
+    if (normalizedMime in ALLOWED_MIME_TYPES || normalizedMime.startsWith("text/")) return true
     val extension = fileName.substringAfterLast('.', "").lowercase()
     return extension in ALLOWED_FILE_EXTENSIONS
 }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -69,6 +70,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -293,11 +295,22 @@ private fun ChatPageContent(
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
-    val contextUsage = remember(conversation.currentMessages, currentChatModel?.contextWindowTokens) {
-        calculateChatContextUsage(
+    val contextUsage by produceState(
+        initialValue = calculateChatContextUsage(
             messages = conversation.currentMessages,
             rollingContextSummary = conversation.rollingContextSummary,
-            rollingContextThresholdTokens = assistant.rollingContextCompressionThresholdTokens,
+            capacityTokens = currentChatModel?.contextWindowTokens,
+        ),
+        conversation.currentMessages,
+        conversation.rollingContextSummary,
+        currentChatModel?.contextWindowTokens,
+    ) {
+        val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(
+            conversation.currentMessages,
+        )
+        value = calculateChatContextUsage(
+            messages = contextMessages,
+            rollingContextSummary = conversation.rollingContextSummary,
             capacityTokens = currentChatModel?.contextWindowTokens,
         )
     }

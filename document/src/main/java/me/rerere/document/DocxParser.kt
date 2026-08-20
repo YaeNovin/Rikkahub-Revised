@@ -2,9 +2,13 @@ package me.rerere.document
 
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import org.xml.sax.Attributes
+import org.xml.sax.helpers.DefaultHandler
 import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
+import javax.xml.parsers.SAXParserFactory
 
 private data class ListInfo(
     val level: Int,
@@ -19,13 +23,13 @@ private data class ParagraphProperties(
 
 object DocxParser {
     fun parse(file: File): String {
-        return try {
+        val primaryResult = try {
             file.inputStream().use { fileInputStream ->
                 ZipInputStream(fileInputStream).use { zipStream ->
                     var entry = zipStream.nextEntry
                     while (entry != null) {
                         if (entry.name == "word/document.xml") {
-                            return parseDocumentXml(zipStream)
+                            return@use parseDocumentXml(zipStream)
                         }
                         entry = zipStream.nextEntry
                     }
@@ -35,6 +39,61 @@ object DocxParser {
         } catch (e: Exception) {
             "Error parsing DOCX file: ${e.message}"
         }
+        if (primaryResult.isUsableDocumentText()) return primaryResult
+
+        return runCatching { parseDocumentXmlWithSax(file) }
+            .getOrElse { primaryResult }
+    }
+
+    private fun String.isUsableDocumentText(): Boolean = isNotBlank() &&
+        !startsWith("Error parsing", ignoreCase = true) &&
+        !startsWith("Unable to find", ignoreCase = true)
+
+    /** Plain-text fallback for vendor XML parser differences and malformed formatting metadata. */
+    private fun parseDocumentXmlWithSax(file: File): String = ZipFile(file).use { zip ->
+        val entry = zip.getEntry("word/document.xml")
+            ?: error("Unable to find document content in DOCX file")
+        val result = StringBuilder()
+        val paragraph = StringBuilder()
+        var inText = false
+        val factory = SAXParserFactory.newInstance().apply { isNamespaceAware = true }
+        runCatching { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) }
+        runCatching { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+        zip.getInputStream(entry).use { input ->
+            factory.newSAXParser().parse(input, object : DefaultHandler() {
+                override fun startElement(
+                    uri: String?,
+                    localName: String?,
+                    qName: String?,
+                    attributes: Attributes?,
+                ) {
+                    when (localName?.takeIf(String::isNotBlank) ?: qName.orEmpty().substringAfter(':')) {
+                        "t" -> inText = true
+                        "tab" -> paragraph.append('\t')
+                        "br", "cr" -> paragraph.append('\n')
+                    }
+                }
+
+                override fun characters(characters: CharArray, start: Int, length: Int) {
+                    if (inText) paragraph.append(characters, start, length)
+                }
+
+                override fun endElement(uri: String?, localName: String?, qName: String?) {
+                    when (localName?.takeIf(String::isNotBlank) ?: qName.orEmpty().substringAfter(':')) {
+                        "t" -> inText = false
+                        "p" -> {
+                            paragraph.toString().trim().takeIf(String::isNotBlank)?.let { text ->
+                                if (result.isNotEmpty()) result.appendLine()
+                                result.append(text)
+                            }
+                            paragraph.clear()
+                        }
+                    }
+                }
+            })
+        }
+        result.toString().trim().ifBlank { error("No readable text found in DOCX file") }
     }
 
     private fun parseDocumentXml(inputStream: InputStream): String {
