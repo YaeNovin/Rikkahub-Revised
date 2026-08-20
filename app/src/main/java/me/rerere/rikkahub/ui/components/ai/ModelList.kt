@@ -39,6 +39,8 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -110,6 +112,9 @@ class ModelListState internal constructor(
     var visible by mutableStateOf(false)
         private set
 
+    var presentationId by mutableIntStateOf(0)
+        private set
+
     val currentModel: Model?
         get() = modelId?.let { providers.findModelById(it) }
 
@@ -119,11 +124,14 @@ class ModelListState internal constructor(
         }
 
     fun open() {
+        presentationId++
         visible = true
     }
 
-    fun close() {
-        visible = false
+    fun close(expectedPresentationId: Int? = null) {
+        if (expectedPresentationId == null || expectedPresentationId == presentationId) {
+            visible = false
+        }
     }
 
     internal fun update(
@@ -249,15 +257,18 @@ fun ModelListSheet(
     if (!state.visible) return
 
     val coroutineScope = rememberCoroutineScope()
-    val sheetState = rememberBottomSheetState(
-        initialValue = SheetValue.Hidden,
-        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
-    )
+    val presentationId = state.presentationId
+    val sheetState = key(presentationId) {
+        rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
+        )
+    }
 
     fun dismiss() {
         coroutineScope.launch {
             sheetState.hide()
-            state.close()
+            state.close(presentationId)
         }
     }
 
@@ -304,9 +315,9 @@ private fun ColumnScope.ModelList(
         .collectAsStateWithLifecycle()
 
     val favoriteModels = settings.value.favoriteModels.mapNotNull { modelId ->
-        val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
+        val model = providers.findModelById(modelId) ?: return@mapNotNull null
         if (model.type != modelType) return@mapNotNull null
-        val provider = model.findProvider(providers = settings.value.providers, checkOverwrite = false) ?: return@mapNotNull null
+        val provider = model.findProvider(providers = providers, checkOverwrite = false) ?: return@mapNotNull null
         model to provider
     }
 

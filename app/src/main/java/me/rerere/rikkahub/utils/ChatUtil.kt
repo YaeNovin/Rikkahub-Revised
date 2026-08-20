@@ -35,6 +35,7 @@ fun Context.copyMessageToClipboard(message: UIMessage) {
 private val ALLOWED_MIME_TYPES = setOf(
     "text/plain", "text/html", "text/css", "text/javascript", "text/csv", "text/xml",
     "application/json", "application/javascript", "application/pdf",
+    "audio/midi", "audio/x-midi", "audio/mid",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.ms-excel",
@@ -53,9 +54,17 @@ private val ALLOWED_FILE_EXTENSIONS = setOf(
     "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx",
     "rs", "cs", "markdown", "mdx",
     "toml", "ini", "env", "gradle", "kts", "properties",
-    "proto", "graphql", "gql", "yml", "yaml",
+    "proto", "graphql", "gql", "yml", "yaml", "mid", "midi",
     "pdf", "docx", "xlsx", "pptx", "epub"
 )
+
+fun isMidiFileType(fileName: String, mime: String?): Boolean {
+    val normalizedMime = mime.orEmpty().substringBefore(';').trim().lowercase()
+    if (normalizedMime == "audio/midi" || normalizedMime == "audio/x-midi" || normalizedMime == "audio/mid") {
+        return true
+    }
+    return fileName.substringAfterLast('.', "").lowercase() in setOf("mid", "midi")
+}
 
 fun isAllowedFileType(fileName: String, mime: String): Boolean {
     val normalizedMime = mime.substringBefore(';').trim().lowercase()

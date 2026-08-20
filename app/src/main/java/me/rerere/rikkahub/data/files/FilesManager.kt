@@ -13,7 +13,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.Logging
@@ -24,6 +29,7 @@ import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.exportImageFile
 import me.rerere.rikkahub.utils.getActivity
+import me.rerere.rikkahub.utils.ImageUtils
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -104,46 +110,58 @@ class FilesManager(
     fun getFile(entity: ManagedFileEntity): File =
         File(context.filesDir, entity.relativePath)
 
-    fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
-        val newUris = mutableListOf<Uri>()
+    suspend fun createChatFilesByContents(uris: List<Uri>): List<Uri> = withContext(Dispatchers.IO) {
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
-        uris.forEach { uri ->
-            runCatching {
-                val sourceName = getFileNameFromUri(uri) ?: uri.lastPathSegment ?: "file"
-                val sourceMime = getFileMimeType(uri)
-                val fileName = buildUuidFileName(displayName = sourceName, mimeType = sourceMime)
-                val file = dir.resolve(fileName)
-                if (!file.exists()) {
-                    file.createNewFile()
-                }
-                val inputStream = context.contentResolver.openInputStream(uri)
-                    ?: error("Failed to open input stream for $uri")
-                inputStream.use { input ->
-                    file.outputStream().use { output ->
-                        input.copyTo(output)
+        dir.mkdirs()
+        val semaphore = Semaphore(2)
+        coroutineScope {
+            uris.map { uri ->
+                async {
+                    semaphore.withPermit {
+                        runCatching {
+                            val sourceName = getFileNameFromUri(uri) ?: uri.lastPathSegment ?: "file"
+                            val sourceMime = getFileMimeType(uri)
+                            val sourceSize = FileUtils.getFileSize(context, uri)
+                            val isLargeImage = sourceMime?.startsWith("image/") == true &&
+                                sourceMime != "image/gif" && sourceSize != null && sourceSize >= 10L * 1024L * 1024L
+                            val targetName = if (isLargeImage) {
+                                "${sourceName.substringBeforeLast('.', sourceName)}.jpg"
+                            } else {
+                                sourceName
+                            }
+                            val file = dir.resolve(buildUuidFileName(displayName = targetName, mimeType = sourceMime))
+                            val optimized = isLargeImage && ImageUtils.optimizeLargeImage(
+                                context = context,
+                                uri = uri,
+                                target = file,
+                                sourceSizeBytes = sourceSize,
+                            )
+                            if (!optimized) {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    file.outputStream().use { output ->
+                                        input.copyTo(output, bufferSize = 256 * 1024)
+                                    }
+                                } ?: error("Failed to open input stream for $uri")
+                            }
+                            val guessedMime = if (optimized) "image/jpeg" else sourceMime ?: guessMimeType(file, sourceName)
+                            trackManagedFile(
+                                folder = FileFolders.UPLOAD,
+                                file = file,
+                                displayName = sourceName,
+                                mimeType = guessedMime,
+                            )
+                            file.toUri()
+                        }.onFailure {
+                            Log.e(TAG, "createChatFilesByContents: Failed to save file from $uri", it)
+                            Logging.log(
+                                TAG,
+                                "createChatFilesByContents: Failed to save file from $uri ${it.message} | ${it.stackTraceToString()}"
+                            )
+                        }.getOrNull()
                     }
                 }
-                val guessedMime = sourceMime ?: guessMimeType(file, sourceName)
-                trackManagedFile(
-                    folder = FileFolders.UPLOAD,
-                    file = file,
-                    displayName = sourceName,
-                    mimeType = guessedMime
-                )
-                newUris.add(file.toUri())
-            }.onFailure {
-                it.printStackTrace()
-                Log.e(TAG, "createChatFilesByContents: Failed to save file from $uri", it)
-                Logging.log(
-                    TAG,
-                    "createChatFilesByContents: Failed to save file from $uri ${it.message} | ${it.stackTraceToString()}"
-                )
-            }
+            }.awaitAll().filterNotNull()
         }
-        return newUris
     }
 
     fun createChatFilesByByteArrays(byteArrays: List<ByteArray>): List<Uri> {
@@ -531,6 +549,8 @@ class FilesManager(
 
     fun getFileMimeType(uri: Uri): String? =
         FileUtils.getFileMimeType(context, uri)
+
+    fun getFileSize(uri: Uri): Long? = FileUtils.getFileSize(context, uri)
 
     private fun guessMimeType(file: File, fileName: String): String =
         FileUtils.guessMimeType(file, fileName)

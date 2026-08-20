@@ -3,6 +3,7 @@ package me.rerere.ai.provider
 import me.rerere.ai.provider.providers.openai.OpenAIProvider
 import me.rerere.ai.ui.StreamChunk
 import okhttp3.OkHttpClient
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,5 +29,31 @@ class ProviderCapabilityTest {
 
         assertFalse(unsupported.supports(ProviderCapability.BALANCE))
         assertTrue(OpenAIProvider(OkHttpClient()).supports(ProviderCapability.BALANCE))
+    }
+
+    @Test
+    fun `only OpenAI protocol exposes standalone image endpoints`() {
+        val provider = OpenAIProvider(OkHttpClient())
+
+        assertTrue(provider.supports(ProviderCapability.IMAGE_GENERATION))
+        assertTrue(provider.supports(ProviderCapability.IMAGE_EDIT))
+        assertFalse(provider.supports(ProviderCapability.PARTIAL_IMAGES))
+    }
+
+    @Test
+    fun `xAI image constraints follow documented batch and reference limits`() {
+        val provider = OpenAIProvider(OkHttpClient())
+        val setting = ProviderSetting.OpenAI(baseUrl = "https://api.x.ai/v1")
+        val constraints = provider.imageGenerationConstraints(
+            providerSetting = setting,
+            model = Model(modelId = "grok-imagine-image-2.0"),
+        )
+
+        assertTrue(constraints.supportsGeneration)
+        assertTrue(constraints.supportsEdit)
+        assertTrue(constraints.supportsSize)
+        assertEquals(10, constraints.maxOutputImages)
+        assertEquals(3, constraints.maxReferenceImages)
+        assertTrue("16:9" in constraints.supportedSizes.orEmpty())
     }
 }

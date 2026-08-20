@@ -54,4 +54,13 @@ class ProviderManager(client: OkHttpClient, context: Context) {
             is ProviderSetting.Claude -> getProvider("claude")
         } as Provider<T>
     }
+
+    fun supports(setting: ProviderSetting, capability: ProviderCapability): Boolean =
+        getProviderByType(setting).supports(capability)
+
+    fun imageGenerationConstraints(
+        setting: ProviderSetting,
+        model: Model,
+    ): ImageGenerationConstraints = getProviderByType(setting)
+        .imageGenerationConstraints(setting, model)
 }

@@ -100,6 +100,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.formatContextWindowTokens
+import me.rerere.ai.provider.inferContextWindowTokens
 import me.rerere.ai.provider.mergeDiscoveredContextWindows
 import me.rerere.ai.provider.parseContextWindowTokens
 import me.rerere.ai.registry.ModelRegistry
@@ -525,6 +526,7 @@ private fun ModelSettingsForm(
     val scope = rememberCoroutineScope()
 
     fun setModelId(id: String) {
+        val modelType = ModelRegistry.MODEL_TYPE.getData(id)
         val inputModality = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id)
         val outputModality = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id)
         val abilities = ModelRegistry.MODEL_ABILITIES.getData(id)
@@ -532,9 +534,11 @@ private fun ModelSettingsForm(
             model.copy(
                 modelId = id,
                 displayName = id,
+                type = modelType,
                 inputModalities = inputModality,
                 outputModalities = outputModality,
-                abilities = abilities
+                abilities = abilities,
+                contextWindowTokens = inferContextWindowTokens(id),
             )
         )
     }

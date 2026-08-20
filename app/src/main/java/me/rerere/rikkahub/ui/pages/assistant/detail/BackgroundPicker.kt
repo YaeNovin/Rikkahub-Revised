@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +31,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import org.koin.compose.koinInject
+import kotlinx.coroutines.launch
 
 @Composable
 fun BackgroundPicker(
@@ -39,6 +41,7 @@ fun BackgroundPicker(
     onUpdate: (String?) -> Unit
 ) {
     val filesManager: FilesManager = koinInject()
+    val scope = rememberCoroutineScope()
     var showPickOption by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
@@ -47,9 +50,11 @@ fun BackgroundPicker(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            val localUris = filesManager.createChatFilesByContents(listOf(it))
-            localUris.firstOrNull()?.let { localUri ->
-                onUpdate(localUri.toString())
+            scope.launch {
+                val localUris = filesManager.createChatFilesByContents(listOf(it))
+                localUris.firstOrNull()?.let { localUri ->
+                    onUpdate(localUri.toString())
+                }
             }
         }
     }
