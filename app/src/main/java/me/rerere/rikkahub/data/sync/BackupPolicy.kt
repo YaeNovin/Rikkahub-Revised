@@ -19,6 +19,7 @@ enum class BackupScope(
 
 object BackupPolicy {
     const val SETTINGS_ENTRY = "settings.json"
+    const val GENERATED_IMAGES_DIRECTORY = "images"
     const val WORKSPACES_DIRECTORY = "workspaces"
 
     private val workspaceRootName = Regex("[A-Za-z0-9._-]+")

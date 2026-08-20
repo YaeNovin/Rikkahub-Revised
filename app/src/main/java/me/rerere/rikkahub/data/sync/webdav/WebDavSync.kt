@@ -186,6 +186,16 @@ class WebDavSync(
                     Log.w(TAG, "prepareBackupFile: Upload folder does not exist or is not a directory")
                 }
 
+                val generatedImagesFolder = File(context.filesDir, BackupPolicy.GENERATED_IMAGES_DIRECTORY)
+                if (generatedImagesFolder.isDirectory) {
+                    addDirectoryToZip(
+                        zipOut = zipOut,
+                        rootDir = generatedImagesFolder,
+                        currentDir = generatedImagesFolder,
+                        entryPrefix = "${BackupPolicy.GENERATED_IMAGES_DIRECTORY}/",
+                    )
+                }
+
                 val skillsFolder = File(context.filesDir, FileFolders.SKILLS)
                 if (skillsFolder.exists() && skillsFolder.isDirectory) {
                     Log.i(TAG, "prepareBackupFile: Backing up skills from ${skillsFolder.absolutePath}")
@@ -332,6 +342,10 @@ class WebDavSync(
                                     }
                                 }
                             } else if (BackupPolicy.hasScope(config.items, BackupScope.ATTACHMENTS) &&
+                                zipEntry.name.startsWith("${BackupPolicy.GENERATED_IMAGES_DIRECTORY}/")
+                            ) {
+                                restoreGeneratedImageEntry(zipIn, zipEntry.name)
+                            } else if (BackupPolicy.hasScope(config.items, BackupScope.ATTACHMENTS) &&
                                 zipEntry.name.startsWith("${FileFolders.SKILLS}/")
                             ) {
                                 restoreSkillEntry(zipIn, zipEntry.name)
@@ -436,6 +450,20 @@ class WebDavSync(
             Log.e(TAG, "restoreFromBackupFile: Failed to restore skill file $entryName", e)
             throw Exception("Failed to restore skill file $entryName: ${e.message}")
         }
+    }
+
+    private fun restoreGeneratedImageEntry(zipIn: ZipInputStream, entryName: String) {
+        val relativePath = BackupPolicy.safeRelativePath(
+            entryName = entryName,
+            prefix = BackupPolicy.GENERATED_IMAGES_DIRECTORY,
+        ) ?: throw Exception("Invalid generated image path in backup: $entryName")
+        val imagesRoot = File(context.filesDir, BackupPolicy.GENERATED_IMAGES_DIRECTORY).apply { mkdirs() }
+        val targetFile = File(imagesRoot, relativePath)
+        targetFile.parentFile?.mkdirs()
+        FileOutputStream(targetFile).use { outputStream ->
+            zipIn.copyTo(outputStream)
+        }
+        Log.i(TAG, "restoreFromBackupFile: Restored generated image $entryName (${targetFile.length()} bytes)")
     }
 
     private fun addVirtualFileToZip(zipOut: ZipOutputStream, name: String, content: String) {
