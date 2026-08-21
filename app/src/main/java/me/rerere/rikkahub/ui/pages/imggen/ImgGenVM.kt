@@ -42,10 +42,20 @@ import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderRequestException
+import me.rerere.ai.provider.ProviderRetryController
+import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.ui.ImageGenSize
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.NetworkRecoveryCoordinator
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -456,7 +466,8 @@ class ImgGenVM(
 
                 val images = providerClient.generateImage(provider, params)
 
-                collectImageGeneration(
+                collectImageGenerationWithRetry(
+                    settings = settings,
                     images = images,
                     prompt = requestPrompt,
                     modelName = model.displayName,
@@ -513,7 +524,8 @@ class ImgGenVM(
 
                 val images = providerClient.editImage(provider, params)
 
-                collectImageGeneration(
+                collectImageGenerationWithRetry(
+                    settings = settings,
                     images = images,
                     prompt = requestPrompt,
                     modelName = model.displayName,
@@ -536,6 +548,68 @@ class ImgGenVM(
         cancelJob?.cancel()
     }
 
+    private suspend fun collectImageGenerationWithRetry(
+        settings: Settings,
+        images: Flow<ImageGenerationItem>,
+        prompt: String,
+        modelName: String,
+        providerName: String,
+        requestedSeed: Long?,
+        type: String = GenMediaEntity.TYPE_IMAGE_GENERATION,
+        sourcePaths: String? = null,
+    ) {
+        val retryController = ProviderRetryController(
+            maxRetries = settings.generationRetryMaxRetries.coerceIn(
+                MIN_GENERATION_RETRY_COUNT,
+                MAX_GENERATION_RETRY_COUNT,
+            ),
+            initialDelayMillis = settings.generationRetryInitialIntervalSeconds.coerceIn(
+                MIN_GENERATION_RETRY_INTERVAL_SECONDS,
+                MAX_GENERATION_RETRY_INTERVAL_SECONDS,
+            ) * 1_000L,
+            maxDurationMillis = settings.generationRetryMaxDurationSeconds.coerceIn(
+                MIN_GENERATION_RETRY_DURATION_SECONDS,
+                MAX_GENERATION_RETRY_DURATION_SECONDS,
+            ) * 1_000L,
+        )
+        var receivedFinalImage = false
+        val networkRecovery = NetworkRecoveryCoordinator(getApplication())
+        var attemptNetworkVersion = networkRecovery.snapshot()
+        try {
+            retryProviderRequest(
+                enabled = settings.enableGenerationRetry,
+                retryController = retryController,
+                canRetry = { !receivedFinalImage },
+                shouldRetry = { error ->
+                    networkRecovery.shouldRetry(error, attemptNetworkVersion)
+                },
+                onRetry = { retryNumber, delayMillis ->
+                    Log.w(TAG, "Image request retry #$retryNumber in ${delayMillis}ms")
+                },
+                delayBeforeRetry = { delayMillis ->
+                    networkRecovery.awaitNetworkAndBackoff(
+                        retryDelayMillis = delayMillis,
+                        remainingDurationMillis = retryController.remainingDurationMillis(),
+                    )
+                },
+            ) {
+                attemptNetworkVersion = networkRecovery.snapshot()
+                collectImageGeneration(
+                    images = images,
+                    prompt = prompt,
+                    modelName = modelName,
+                    providerName = providerName,
+                    requestedSeed = requestedSeed,
+                    type = type,
+                    sourcePaths = sourcePaths,
+                    onFinalImage = { receivedFinalImage = true },
+                )
+            }
+        } finally {
+            networkRecovery.close()
+        }
+    }
+
     private suspend fun collectImageGeneration(
         images: Flow<ImageGenerationItem>,
         prompt: String,
@@ -544,6 +618,7 @@ class ImgGenVM(
         requestedSeed: Long?,
         type: String = GenMediaEntity.TYPE_IMAGE_GENERATION,
         sourcePaths: String? = null,
+        onFinalImage: () -> Unit = {},
     ) {
         val finalImages = mutableListOf<GeneratedImage>()
         val previewFiles = mutableMapOf<Int, File>()
@@ -570,6 +645,7 @@ class ImgGenVM(
                             )
                         }
                 } else {
+                    onFinalImage()
                     val previewIndex = item.partialImageIndex
                     if (previewIndex != null) {
                         deleteFileOnIo(previewFiles.remove(previewIndex))
@@ -676,6 +752,7 @@ class ImgGenVM(
                 format = metadata.format,
                 seed = item.seed ?: requestedSeed,
                 fileSizeBytes = createdFile.length().coerceAtLeast(0L),
+                type = type,
             )
         } catch (e: Throwable) {
             createdFile.delete()
