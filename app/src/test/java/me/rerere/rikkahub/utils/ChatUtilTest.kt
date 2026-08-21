@@ -7,6 +7,7 @@ class ChatUtilTest {
     @Test
     fun `office extensions are accepted when picker returns a generic mime`() {
         assertTrue(isAllowedFileType("report.docx", "application/octet-stream"))
+        assertTrue(isAllowedFileType("legacy-report.doc", "application/octet-stream"))
         assertTrue(isAllowedFileType("budget.xlsx", "application/zip"))
         assertTrue(isAllowedFileType("slides.pptx", "application/octet-stream"))
     }

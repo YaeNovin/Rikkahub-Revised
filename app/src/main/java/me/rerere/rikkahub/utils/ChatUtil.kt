@@ -55,7 +55,7 @@ private val ALLOWED_FILE_EXTENSIONS = setOf(
     "rs", "cs", "markdown", "mdx",
     "toml", "ini", "env", "gradle", "kts", "properties",
     "proto", "graphql", "gql", "yml", "yaml", "mid", "midi",
-    "pdf", "docx", "xlsx", "pptx", "epub"
+    "pdf", "doc", "docx", "xlsx", "pptx", "epub"
 )
 
 fun isMidiFileType(fileName: String, mime: String?): Boolean {

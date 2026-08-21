@@ -15,6 +15,7 @@ import me.rerere.ai.provider.usesVolcengineMultimodalEmbeddingApi
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.document.DocxParser
+import me.rerere.document.DocParser
 import me.rerere.document.EpubParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
@@ -44,6 +45,7 @@ private val HEADING_REGEX = Regex("^(#{1,6})\\s+(.+)$")
 private val SLIDE_MARKER_REGEX = Regex("^Slide\\s+(\\d+)$", RegexOption.IGNORE_CASE)
 private val MIME_TYPES_BY_EXTENSION = mapOf(
     "pdf" to "application/pdf",
+    "doc" to "application/msword",
     "docx" to "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pptx" to "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "epub" to "application/epub+zip",
@@ -215,6 +217,7 @@ class KnowledgeDocumentImporter(
 
     private suspend fun readContent(file: File, mimeType: String, settings: me.rerere.rikkahub.data.datastore.Settings): String = when (mimeType) {
         "application/pdf" -> PdfParser.parserPdf(file)
+        "application/msword" -> DocParser.parse(file)
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> DocxParser.parse(file)
         "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> PptxParser.parse(file)
         "application/epub+zip" -> EpubParser.parse(file)

@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.document.DocxParser
+import me.rerere.document.DocParser
 import me.rerere.document.EpubParser
 import me.rerere.document.PdfParser
 import me.rerere.document.PptxParser
@@ -67,6 +68,10 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         return DocxParser.parse(file)
     }
 
+    private fun parseDocAsText(file: File): String {
+        return DocParser.parse(file)
+    }
+
     private fun parsePptxAsText(file: File): String {
         return PptxParser.parse(file)
     }
@@ -103,6 +108,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                 MidiToAbcConverter.convert(file).getOrThrow()
             } else when {
                 extension == "pdf" || mime == "application/pdf" -> parsePdfAsText(file)
+                extension == "doc" || mime == DOC_MIME -> parseDocAsText(file)
                 extension == "docx" || mime == DOCX_MIME -> parseDocxAsText(file)
                 extension == "xlsx" || mime == XLSX_MIME -> parseXlsxAsText(file)
                 extension == "pptx" || mime == PPTX_MIME -> parsePptxAsText(file)
@@ -131,6 +137,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         .replace(">", "&gt;")
 
     private const val MAX_CACHE_ENTRIES = 16
+    private const val DOC_MIME = "application/msword"
     private const val DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     private const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     private const val PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"

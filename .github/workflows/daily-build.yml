@@ -123,10 +123,13 @@ jobs:
             printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
           fi
 
-      - name: Gradle Build
+      - name: Validate Release R8
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew :app:minifyReleaseWithR8 --no-configuration-cache
+
+      - name: Gradle Build
+        run: ./gradlew assembleRelease --no-configuration-cache
 
       - name: Prepare nightly release
         run: |
