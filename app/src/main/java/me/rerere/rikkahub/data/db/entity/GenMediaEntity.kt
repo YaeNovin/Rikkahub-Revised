@@ -37,5 +37,6 @@ data class GenMediaEntity(
     companion object {
         const val TYPE_IMAGE_GENERATION = "image_generation"
         const val TYPE_IMAGE_EDIT = "image_edit"
+        const val TYPE_IMAGE_IMPORT = "image_import"
     }
 }

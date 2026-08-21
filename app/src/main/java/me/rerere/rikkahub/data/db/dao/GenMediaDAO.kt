@@ -46,10 +46,21 @@ interface GenMediaDAO {
     suspend fun insert(media: GenMediaEntity): Long
 
     @Insert
+    suspend fun insert(media: List<GenMediaEntity>): List<Long>
+
+    @Insert
     suspend fun insertFolder(folder: GenMediaFolderEntity)
 
     @Query("UPDATE genmediaentity SET folder_id = :folderId WHERE id = :mediaId")
     suspend fun moveToFolder(mediaId: Int, folderId: String?)
+
+    @Query("UPDATE genmediaentity SET folder_id = :folderId WHERE id IN (:mediaIds)")
+    suspend fun moveChunkToFolder(mediaIds: List<Int>, folderId: String?)
+
+    @Transaction
+    suspend fun moveManyToFolder(mediaIds: List<Int>, folderId: String?) {
+        mediaIds.chunked(SQLITE_BATCH_SIZE).forEach { moveChunkToFolder(it, folderId) }
+    }
 
     @Query("UPDATE genmediaentity SET folder_id = NULL WHERE folder_id = :folderId")
     suspend fun clearFolder(folderId: String)
@@ -77,4 +88,16 @@ interface GenMediaDAO {
 
     @Query("DELETE FROM genmediaentity WHERE id = :id")
     suspend fun delete(id: Int)
+
+    @Query("DELETE FROM genmediaentity WHERE id IN (:ids)")
+    suspend fun deleteChunk(ids: List<Int>)
+
+    @Transaction
+    suspend fun deleteMany(ids: List<Int>) {
+        ids.chunked(SQLITE_BATCH_SIZE).forEach { deleteChunk(it) }
+    }
+
+    companion object {
+        private const val SQLITE_BATCH_SIZE = 900
+    }
 }

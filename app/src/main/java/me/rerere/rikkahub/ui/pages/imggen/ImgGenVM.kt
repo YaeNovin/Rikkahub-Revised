@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.imggen
 
 import android.app.Application
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -71,6 +72,7 @@ data class GeneratedImage(
     val seed: Long? = null,
     val folderId: String? = null,
     val fileSizeBytes: Long = 0L,
+    val type: String = GenMediaEntity.TYPE_IMAGE_GENERATION,
 )
 
 private fun GenMediaEntity.toGeneratedImage(filesManager: FilesManager): GeneratedImage {
@@ -90,6 +92,7 @@ private fun GenMediaEntity.toGeneratedImage(filesManager: FilesManager): Generat
         seed = this.seed,
         folderId = this.folderId,
         fileSizeBytes = File(fullPath).length().coerceAtLeast(0L),
+        type = this.type,
     )
 }
 
@@ -143,6 +146,9 @@ class ImgGenVM(
     private val _selectedGalleryFolderId = MutableStateFlow<String?>(null)
     val selectedGalleryFolderId: StateFlow<String?> = _selectedGalleryFolderId
 
+    private val _isGalleryMutating = MutableStateFlow(false)
+    val isGalleryMutating: StateFlow<Boolean> = _isGalleryMutating
+
     val galleryFolders: StateFlow<List<GenMediaFolderEntity>> = genMediaRepository.getFolders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
@@ -190,9 +196,96 @@ class ImgGenVM(
     }
 
     fun moveImageToFolder(image: GeneratedImage, folderId: String?) {
-        if (image.id <= 0) return
+        moveImagesToFolder(listOf(image), folderId)
+    }
+
+    fun moveImagesToFolder(images: Collection<GeneratedImage>, folderId: String?) {
+        val ids = images.map(GeneratedImage::id).filter { it > 0 }.distinct()
+        if (ids.isEmpty()) return
         viewModelScope.launch {
-            genMediaRepository.moveMediaToFolder(image.id, folderId)
+            _isGalleryMutating.value = true
+            try {
+                genMediaRepository.moveMediaToFolder(ids, folderId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Gallery image move failed (${e::class.simpleName})")
+                _error.value = getApplication<Application>().getString(R.string.imggen_error_move_failed)
+            } finally {
+                _isGalleryMutating.value = false
+            }
+        }
+    }
+
+    fun importGalleryImages(uris: List<Uri>, folderId: String?) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _isGalleryMutating.value = true
+            try {
+                withContext(Dispatchers.IO) {
+                    importGalleryImagesIntoStorage(uris.distinct(), folderId)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Gallery image import failed (${e::class.simpleName})")
+                _error.value = getApplication<Application>().getString(R.string.imggen_error_import_failed)
+            } finally {
+                _isGalleryMutating.value = false
+            }
+        }
+    }
+
+    private suspend fun importGalleryImagesIntoStorage(uris: List<Uri>, folderId: String?) {
+        val context = getApplication<Application>()
+        val imagesDirectory = filesManager.getImagesDir().apply { mkdirs() }
+        val importedFiles = mutableListOf<File>()
+        val entities = mutableListOf<GenMediaEntity>()
+        try {
+            uris.forEachIndexed { index, uri ->
+                currentCoroutineContext().ensureActive()
+                val displayName = filesManager.getFileNameFromUri(uri)
+                    ?.takeIf(String::isNotBlank)
+                    ?: "image-${index + 1}"
+                val mimeType = filesManager.getFileMimeType(uri) ?: "application/octet-stream"
+                val destination = File(
+                    imagesDirectory,
+                    FileUtils.buildUuidFileName(displayName = displayName, mimeType = mimeType),
+                )
+                val stagingFile = File(imagesDirectory, ".${destination.name}.part")
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        stagingFile.outputStream().use { output ->
+                            input.copyTo(output, bufferSize = 256 * 1024)
+                        }
+                    } ?: error("Unable to read selected image")
+                    require(stagingFile.length() > 0L) { "Selected image is empty" }
+                    val metadata = readStoredImageMetadata(stagingFile, mimeType)
+                    require(metadata.width != null && metadata.height != null) {
+                        "Selected file is not a supported image"
+                    }
+                    check(stagingFile.renameTo(destination)) { "Unable to finalize imported image" }
+                    importedFiles += destination
+                    entities += GenMediaEntity(
+                        path = "images/${destination.name}",
+                        modelId = LOCAL_IMPORT_MODEL_ID,
+                        prompt = displayName,
+                        createAt = System.currentTimeMillis() + index,
+                        type = GenMediaEntity.TYPE_IMAGE_IMPORT,
+                        providerName = null,
+                        width = metadata.width,
+                        height = metadata.height,
+                        format = metadata.format,
+                        folderId = folderId,
+                    )
+                } finally {
+                    stagingFile.delete()
+                }
+            }
+            genMediaRepository.insertMedia(entities)
+        } catch (error: Throwable) {
+            importedFiles.forEach(File::delete)
+            throw error
         }
     }
 
@@ -673,12 +766,19 @@ class ImgGenVM(
     }
 
     fun deleteImage(image: GeneratedImage) {
-        if (image.id <= 0) return
+        deleteImages(listOf(image))
+    }
+
+    fun deleteImages(images: Collection<GeneratedImage>) {
+        val persistedImages = images.filter { it.id > 0 }.distinctBy(GeneratedImage::id)
+        if (persistedImages.isEmpty()) return
         viewModelScope.launch {
+            _isGalleryMutating.value = true
             try {
                 withContext(Dispatchers.IO) {
-                    deleteFilesWithRollback(listOf(File(image.filePath))) {
-                        genMediaRepository.deleteMedia(image.id)
+                    val files = persistedImages.map(::resolveGeneratedImageFile)
+                    deleteFilesWithRollback(files) {
+                        genMediaRepository.deleteMedia(persistedImages.map(GeneratedImage::id))
                     }
                 }
             } catch (e: CancellationException) {
@@ -686,8 +786,19 @@ class ImgGenVM(
             } catch (e: Exception) {
                 Log.e(TAG, "Image deletion failed (${e::class.simpleName})")
                 _error.value = getApplication<Application>().getString(R.string.imggen_error_delete_failed)
+            } finally {
+                _isGalleryMutating.value = false
             }
         }
+    }
+
+    private fun resolveGeneratedImageFile(image: GeneratedImage): File {
+        val imagesDirectory = filesManager.getImagesDir().canonicalFile
+        val imageFile = File(image.filePath).canonicalFile
+        check(imageFile.path.startsWith(imagesDirectory.path + File.separator)) {
+            "Stored image path is outside the gallery directory"
+        }
+        return imageFile
     }
 
     private fun deleteReferenceFiles(paths: List<String>) {
@@ -719,6 +830,7 @@ class ImgGenVM(
         private const val TAG = "ImgGenVM"
         private const val MAX_REFERENCE_IMAGES = 16
         private const val GALLERY_SEARCH_DEBOUNCE_MILLIS = 250L
+        private const val LOCAL_IMPORT_MODEL_ID = "local-import"
     }
 }
 

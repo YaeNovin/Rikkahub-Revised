@@ -19,10 +19,15 @@ class GenMediaRepository(private val dao: GenMediaDAO) {
 
     suspend fun insertMedia(media: GenMediaEntity): Long = dao.insert(media)
 
+    suspend fun insertMedia(media: List<GenMediaEntity>): List<Long> = dao.insert(media)
+
     suspend fun createFolder(folder: GenMediaFolderEntity) = dao.insertFolder(folder)
 
     suspend fun moveMediaToFolder(mediaId: Int, folderId: String?) =
         dao.moveToFolder(mediaId, folderId)
+
+    suspend fun moveMediaToFolder(mediaIds: List<Int>, folderId: String?) =
+        dao.moveManyToFolder(mediaIds, folderId)
 
     suspend fun getMediaInFolder(folderId: String): List<GenMediaEntity> =
         dao.getMediaInFolder(folderId)
@@ -33,4 +38,6 @@ class GenMediaRepository(private val dao: GenMediaDAO) {
         dao.deleteFolderWithContents(folderId)
 
     suspend fun deleteMedia(id: Int) = dao.delete(id)
+
+    suspend fun deleteMedia(ids: List<Int>) = dao.deleteMany(ids)
 }

@@ -5,7 +5,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -96,6 +98,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Colors
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
@@ -112,6 +115,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -137,7 +141,15 @@ fun ImageGenPage(
     val scope = rememberCoroutineScope()
 
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    val toaster = LocalToaster.current
     var showCancelDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(error) {
+        error?.let { errorMessage ->
+            toaster.show(message = errorMessage, type = ToastType.Error)
+            vm.clearError()
+        }
+    }
     BackHandler(isGenerating) {
         showCancelDialog = true
     }
@@ -263,7 +275,6 @@ private fun ImageGenScreen(
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val currentGeneratedImages by vm.currentGeneratedImages.collectAsStateWithLifecycle()
     val referenceImages by vm.referenceImages.collectAsStateWithLifecycle()
-    val error by vm.error.collectAsStateWithLifecycle()
     val settings by vm.settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val selectedModel = settings.findModelById(settings.imageGenerationModelId)
     val selectedProvider = selectedModel?.findProvider(settings.providers)
@@ -276,16 +287,8 @@ private fun ImageGenScreen(
     val maxReferenceImages = selectedConstraints?.takeIf { it.supportsEdit }?.maxReferenceImages ?: 0
     val supportedSizes = selectedConstraints?.supportedSizes
     val supportsSize = selectedConstraints?.supportsSize ?: true
-    val toaster = LocalToaster.current
     var showSettingsSheet by remember { mutableStateOf(false) }
     var settingsPresentationId by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(error) {
-        error?.let { errorMessage ->
-            toaster.show(message = errorMessage, type = ToastType.Error)
-            vm.clearError()
-        }
-    }
 
     LaunchedEffect(
         selectedModel?.id,
@@ -646,6 +649,7 @@ private fun ReferenceImagesRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImageGalleryScreen(
     vm: ImgGenVM,
@@ -660,13 +664,44 @@ private fun ImageGalleryScreen(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val pullToRefreshState = rememberPullToRefreshState()
+    val isGalleryMutating by vm.isGalleryMutating.collectAsStateWithLifecycle()
     val unknownValue = stringResource(R.string.imggen_page_metadata_unknown)
     var previewImage by remember { mutableStateOf<GeneratedImage?>(null) }
     var detailsImage by remember { mutableStateOf<GeneratedImage?>(null) }
-    var moveImage by remember { mutableStateOf<GeneratedImage?>(null) }
+    var imagesPendingMove by remember { mutableStateOf<List<GeneratedImage>?>(null) }
+    var imagesPendingDeletion by remember { mutableStateOf<List<GeneratedImage>?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedImages by remember { mutableStateOf<Map<Int, GeneratedImage>>(emptyMap()) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var folderPendingDeletion by remember { mutableStateOf<String?>(null) }
     var folderPendingDissolution by remember { mutableStateOf<String?>(null) }
+
+    val galleryImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { selectedUris ->
+        if (selectedUris.isNotEmpty()) {
+            vm.importGalleryImages(selectedUris, selectedFolderId)
+        }
+    }
+
+    fun clearSelection() {
+        selectedImages = emptyMap()
+        selectionMode = false
+    }
+
+    fun toggleSelection(image: GeneratedImage) {
+        selectionMode = true
+        selectedImages = if (image.id in selectedImages) {
+            selectedImages - image.id
+        } else {
+            selectedImages + (image.id to image)
+        }
+    }
+
+    BackHandler(selectionMode) { clearSelection() }
+    LaunchedEffect(galleryQuery, selectedFolderId) {
+        clearSelection()
+    }
 
     fun saveImage(image: GeneratedImage) {
         scope.launch {
@@ -688,6 +723,71 @@ private fun ImageGalleryScreen(
     Column(
         modifier = Modifier.fillMaxSize(),
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (selectionMode) {
+                    stringResource(R.string.imggen_page_gallery_selected_count, selectedImages.size)
+                } else {
+                    stringResource(R.string.imggen_page_gallery_manage)
+                },
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (isGalleryMutating) {
+                CircularWavyProgressIndicator(modifier = Modifier.size(28.dp))
+            } else if (selectionMode) {
+                if (selectedImages.isNotEmpty()) {
+                    Tooltip(tooltip = { Text(stringResource(R.string.imggen_page_gallery_move_selected)) }) {
+                        IconButton(onClick = { imagesPendingMove = selectedImages.values.toList() }) {
+                            Icon(
+                                HugeIcons.MoveTo,
+                                contentDescription = stringResource(R.string.imggen_page_gallery_move_selected),
+                            )
+                        }
+                    }
+                    Tooltip(tooltip = { Text(stringResource(R.string.imggen_page_gallery_delete_selected)) }) {
+                        IconButton(onClick = { imagesPendingDeletion = selectedImages.values.toList() }) {
+                            Icon(
+                                HugeIcons.Delete01,
+                                contentDescription = stringResource(R.string.imggen_page_gallery_delete_selected),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+                Tooltip(tooltip = { Text(stringResource(R.string.imggen_page_gallery_cancel_selection)) }) {
+                    IconButton(onClick = ::clearSelection) {
+                        Icon(
+                            HugeIcons.Cancel01,
+                            contentDescription = stringResource(R.string.imggen_page_gallery_cancel_selection),
+                        )
+                    }
+                }
+            } else {
+                Tooltip(tooltip = { Text(stringResource(R.string.imggen_page_gallery_add_images)) }) {
+                    IconButton(onClick = { galleryImportLauncher.launch("image/*") }) {
+                        Icon(
+                            HugeIcons.Add01,
+                            contentDescription = stringResource(R.string.imggen_page_gallery_add_images),
+                        )
+                    }
+                }
+                Tooltip(tooltip = { Text(stringResource(R.string.imggen_page_gallery_select_images)) }) {
+                    IconButton(onClick = { selectionMode = true }) {
+                        Icon(
+                            HugeIcons.CheckmarkCircle02,
+                            contentDescription = stringResource(R.string.imggen_page_gallery_select_images),
+                        )
+                    }
+                }
+            }
+        }
+
         OutlinedTextField(
             value = galleryQuery,
             onValueChange = vm::updateGalleryQuery,
@@ -827,15 +927,54 @@ private fun ImageGalleryScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(1f)
-                                    .clickable { previewImage = it },
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (selectionMode) toggleSelection(it) else previewImage = it
+                                        },
+                                        onLongClick = { toggleSelection(it) },
+                                    ),
                                 shape = RoundedCornerShape(4.dp),
+                                border = if (it.id in selectedImages) {
+                                    BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+                                } else {
+                                    null
+                                },
                             ) {
-                                AsyncImage(
-                                    model = File(it.filePath),
-                                    contentDescription = it.prompt,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop,
-                                )
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = File(it.filePath),
+                                        contentDescription = it.prompt,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    if (selectionMode) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(6.dp),
+                                            shape = CircleShape,
+                                            color = if (it.id in selectedImages) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceContainerHighest
+                                            },
+                                            contentColor = if (it.id in selectedImages) {
+                                                MaterialTheme.colorScheme.onPrimary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        ) {
+                                            Icon(
+                                                HugeIcons.CheckmarkCircle02,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .padding(4.dp)
+                                                    .size(20.dp),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -851,13 +990,16 @@ private fun ImageGalleryScreen(
             topEndAction = {
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    tonalElevation = 3.dp,
                 ) {
                     IconButton(onClick = { detailsImage = image }) {
                         Icon(
                             imageVector = HugeIcons.InformationCircle,
                             contentDescription = stringResource(R.string.imggen_page_image_details),
-                            tint = MaterialTheme.colorScheme.inverseOnSurface,
+                            tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
@@ -870,6 +1012,11 @@ private fun ImageGalleryScreen(
             ?: stringResource(R.string.imggen_page_gallery_unfiled)
         GalleryDetailsDialog(
             image = image,
+            modelName = if (image.type == GenMediaEntity.TYPE_IMAGE_IMPORT) {
+                stringResource(R.string.imggen_page_gallery_local_import)
+            } else {
+                image.model
+            },
             folderName = folderName,
             unknownValue = unknownValue,
             fileSize = Formatter.formatShortFileSize(context, image.fileSizeBytes),
@@ -884,7 +1031,7 @@ private fun ImageGalleryScreen(
             onSave = { saveImage(image) },
             onMove = {
                 detailsImage = null
-                moveImage = image
+                imagesPendingMove = listOf(image)
             },
             onDelete = {
                 detailsImage = null
@@ -894,15 +1041,45 @@ private fun ImageGalleryScreen(
         )
     }
 
-    moveImage?.let { image ->
+    imagesPendingMove?.let { images ->
+        val currentFolderIds = images.map(GeneratedImage::folderId).distinct()
         MoveImageToFolderDialog(
-            currentFolderId = image.folderId,
+            currentFolderId = currentFolderIds.singleOrNull(),
+            highlightCurrentFolder = currentFolderIds.size == 1,
             folders = folders.map { it.id to it.name },
-            onDismiss = { moveImage = null },
+            onDismiss = { imagesPendingMove = null },
             onMove = { folderId ->
-                vm.moveImageToFolder(image, folderId)
-                moveImage = null
+                vm.moveImagesToFolder(images, folderId)
+                imagesPendingMove = null
                 previewImage = null
+                clearSelection()
+            },
+        )
+    }
+
+    imagesPendingDeletion?.let { images ->
+        AlertDialog(
+            onDismissRequest = { imagesPendingDeletion = null },
+            title = { Text(stringResource(R.string.imggen_page_gallery_delete_selected)) },
+            text = {
+                Text(stringResource(R.string.imggen_page_gallery_delete_selected_message, images.size))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.deleteImages(images)
+                        imagesPendingDeletion = null
+                        previewImage = null
+                        clearSelection()
+                    },
+                ) {
+                    Text(stringResource(R.string.imggen_page_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { imagesPendingDeletion = null }) {
+                    Text(stringResource(R.string.imggen_page_cancel))
+                }
             },
         )
     }
@@ -967,6 +1144,7 @@ private fun ImageGalleryScreen(
 @Composable
 private fun GalleryDetailsDialog(
     image: GeneratedImage,
+    modelName: String,
     folderName: String,
     unknownValue: String,
     fileSize: String,
@@ -994,7 +1172,7 @@ private fun GalleryDetailsDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_model), image.model)
+                GalleryMetadataText(stringResource(R.string.imggen_page_metadata_model), modelName)
                 GalleryMetadataText(
                     stringResource(R.string.imggen_page_metadata_provider),
                     image.provider ?: unknownValue,
@@ -1055,6 +1233,7 @@ private fun GalleryDetailsDialog(
 @Composable
 private fun MoveImageToFolderDialog(
     currentFolderId: String?,
+    highlightCurrentFolder: Boolean = true,
     folders: List<Pair<String, String>>,
     onDismiss: () -> Unit,
     onMove: (String?) -> Unit,
@@ -1071,13 +1250,13 @@ private fun MoveImageToFolderDialog(
             ) {
                 GalleryFolderChoice(
                     name = stringResource(R.string.imggen_page_gallery_unfiled),
-                    selected = currentFolderId == null,
+                    selected = highlightCurrentFolder && currentFolderId == null,
                     onClick = { onMove(null) },
                 )
                 folders.forEach { (id, name) ->
                     GalleryFolderChoice(
                         name = name,
-                        selected = currentFolderId == id,
+                        selected = highlightCurrentFolder && currentFolderId == id,
                         onClick = { onMove(id) },
                     )
                 }
