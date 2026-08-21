@@ -340,50 +340,64 @@ class OpenAIProvider(
             }
         }
         validateEditImageFiles(params.model.modelId, constraints, imageFiles)
-        val requestBody = if (constraints.usesJsonImageEdit) {
-            buildXaiImageEditRequestBody(
+        val requestBody = when {
+            constraints.usesGenerationEndpointForEdit -> buildSeedreamImageEditRequestBody(
                 params = params,
                 constraints = constraints,
                 images = imageFiles.map { imageFile -> imageFile to imageFile.imageMediaType() },
             )
-        } else {
-            val bodyBuilder = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("model", params.model.modelId)
-                .addFormDataPart("prompt", params.prompt)
-                .addFormDataPart("n", outputCount.toString())
-            constraints.normalizedSize(params.size)?.let { normalizedSize ->
-                bodyBuilder.addFormDataPart(constraints.sizeRequestField, normalizedSize)
-            }
-            val imageFieldName = if (imageFiles.size == 1) "image" else "image[]"
-            imageFiles.forEach { imageFile ->
-                bodyBuilder.addFormDataPart(
-                    imageFieldName,
-                    imageFile.name,
-                    imageFile.asRequestBody(imageFile.imageMediaType().toMediaType())
-                )
-            }
-            val explicitOptions = params.explicitImageOptions(constraints)
-            params.customBody
-                .filter { customBody ->
-                    val field = customBody.key.lowercase()
-                    field !in RESERVED_IMAGE_EDIT_FIELDS &&
-                        field !in explicitOptions &&
-                        constraints.acceptsImageOption(customBody)
+            constraints.usesJsonImageEdit -> buildXaiImageEditRequestBody(
+                params = params,
+                constraints = constraints,
+                images = imageFiles.map { imageFile -> imageFile to imageFile.imageMediaType() },
+            )
+            else -> {
+                val bodyBuilder = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("model", params.model.modelId)
+                    .addFormDataPart("prompt", params.prompt)
+                if (constraints.supportsOutputCount) {
+                    bodyBuilder.addFormDataPart("n", outputCount.toString())
                 }
-                .forEach { customBody ->
-                    val value = when (val element = customBody.value) {
-                        is JsonPrimitive -> element.contentOrNull ?: element.toString()
-                        else -> element.toString()
+                constraints.normalizedSize(params.size)?.let { normalizedSize ->
+                    bodyBuilder.addFormDataPart(constraints.sizeRequestField, normalizedSize)
+                }
+                val imageFieldName = if (imageFiles.size == 1) "image" else "image[]"
+                imageFiles.forEach { imageFile ->
+                    bodyBuilder.addFormDataPart(
+                        imageFieldName,
+                        imageFile.name,
+                        imageFile.asRequestBody(imageFile.imageMediaType().toMediaType())
+                    )
+                }
+                val explicitOptions = params.explicitImageOptions(constraints)
+                params.customBody
+                    .filter { customBody ->
+                        val field = customBody.key.lowercase()
+                        field !in RESERVED_IMAGE_EDIT_FIELDS &&
+                            field !in explicitOptions &&
+                            constraints.acceptsImageOption(customBody)
                     }
-                    bodyBuilder.addFormDataPart(customBody.key, value)
-                }
-            explicitOptions.forEach { (field, value) -> bodyBuilder.addFormDataPart(field, value) }
-            bodyBuilder.build()
+                    .forEach { customBody ->
+                        val value = when (val element = customBody.value) {
+                            is JsonPrimitive -> element.contentOrNull ?: element.toString()
+                            else -> element.toString()
+                        }
+                        bodyBuilder.addFormDataPart(customBody.key, value)
+                    }
+                explicitOptions.forEach { (field, value) -> bodyBuilder.addFormDataPart(field, value) }
+                bodyBuilder.build()
+            }
         }
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/edits")
+            .url(
+                "${providerSetting.baseUrl}" + if (constraints.usesGenerationEndpointForEdit) {
+                    "/images/generations"
+                } else {
+                    "/images/edits"
+                }
+            )
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .post(requestBody)
@@ -538,10 +552,20 @@ class OpenAIProvider(
         val isGptImage = normalizedModel.contains("gpt-image")
         val isDallE3 = normalizedModel.contains("dall-e-3")
         val isDallE2 = normalizedModel.contains("dall-e-2")
+        val isSeedream = normalizedModel.contains("seedream")
+        val seedreamMajorVersion = SEEDREAM_VERSION.find(normalizedModel)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        val isEditableSeedream = isSeedream && (seedreamMajorVersion ?: 0) >= 4
         val isSingleOutputModel = SINGLE_OUTPUT_IMAGE_MODEL_MARKERS.any(normalizedModel::contains)
-        val supportsEdit = !isDallE3
+        val supportsEdit = when {
+            isSeedream -> isEditableSeedream
+            else -> !isDallE3
+        }
         val supportedSizes = when {
             isXaiImage -> XAI_IMAGE_ASPECT_RATIOS
+            isSeedream -> SEEDREAM_IMAGE_SIZES
             isGptImage2 -> GPT_IMAGE_2_PRESET_SIZES
             isGptImage -> GPT_IMAGE_SIZES
             isDallE3 -> DALL_E_3_SIZES
@@ -558,20 +582,30 @@ class OpenAIProvider(
                 isXaiImagineImage -> 10
                 else -> 4
             },
+            supportsOutputCount = !isSeedream,
             maxReferenceImages = when {
                 !supportsEdit -> 0
                 isGptImage -> 16
+                isEditableSeedream -> 10
                 isXaiImagineImage -> 3
                 else -> 1
             },
             supportsSize = true,
             supportedSizes = supportedSizes,
-            supportsCustomSize = isGptImage2 || supportedSizes == null,
+            supportsCustomSize = isGptImage2 || isSeedream || supportedSizes == null,
             customSizeMultiple = if (isGptImage2) 16 else null,
-            customSizeMaxDimension = if (isGptImage2) 3_839 else null,
+            customSizeMaxDimension = when {
+                isGptImage2 -> 3_839
+                isSeedream -> 4_096
+                else -> null
+            },
             customSizeMinPixels = if (isGptImage2) GPT_IMAGE_2_MIN_PIXELS else null,
             customSizeMaxPixels = if (isGptImage2) GPT_IMAGE_2_MAX_PIXELS else null,
-            customSizeMaxAspectRatio = if (isGptImage2) 3 else null,
+            customSizeMaxAspectRatio = when {
+                isGptImage2 -> 3
+                isSeedream -> 16
+                else -> null
+            },
             sizeRequestField = if (isXaiImage) "aspect_ratio" else "size",
             supportedQualityValues = when {
                 isXaiImage2 -> XAI_IMAGE_2_QUALITY
@@ -582,7 +616,7 @@ class OpenAIProvider(
             },
             supportedOutputFormats = when {
                 isGptImage -> GPT_IMAGE_OUTPUT_FORMATS
-                isXaiImage || isDallE2 || isDallE3 -> URL_OR_BASE64_FORMATS
+                isXaiImage || isSeedream || isDallE2 || isDallE3 -> URL_OR_BASE64_FORMATS
                 else -> emptySet()
             },
             supportedBackgroundValues = when {
@@ -593,6 +627,10 @@ class OpenAIProvider(
             supportsOutputCompression = isGptImage,
             supportedResolutionValues = if (isXaiImagineImage) XAI_IMAGE_RESOLUTIONS else emptySet(),
             blockedImageOptionKeys = when {
+                isSeedream -> setOf(
+                    "quality", "output_format", "output_compression", "background", "input_fidelity",
+                    "thinking", "resolution", "stream", "partial_images",
+                )
                 isGptImage2 -> setOf("thinking", "response_format", "input_fidelity", "stream", "partial_images")
                 isGptImage && normalizedModel.contains("mini") ->
                     setOf("thinking", "response_format", "input_fidelity", "stream", "partial_images")
@@ -607,7 +645,8 @@ class OpenAIProvider(
                 )
                 else -> emptySet()
             },
-            usesJsonImageEdit = isXaiImage,
+            usesJsonImageEdit = isXaiImage || isEditableSeedream,
+            usesGenerationEndpointForEdit = isEditableSeedream,
         )
     }
 
@@ -655,6 +694,12 @@ class OpenAIProvider(
         private val XAI_IMAGE_RESOLUTIONS = setOf("1k", "2k")
         private val XAI_IMAGE_2_QUALITY = setOf("low", "medium")
         private val XAI_IMAGE_MODEL_MARKERS = listOf("grok-imagine-image", "grok-2-image")
+        private val SEEDREAM_VERSION = Regex("seedream[-_.]?v?[-_.]?(\\d+)")
+        private val SEEDREAM_IMAGE_SIZES = linkedSetOf(
+            "2048x2048", "2560x1440", "1440x2560",
+            "2730x2048", "2048x2730", "3072x2048", "2048x3072",
+            "4096x4096", "4096x2304", "2304x4096",
+        )
         private val SINGLE_OUTPUT_IMAGE_MODEL_MARKERS = listOf(
             "dall-e-3",
             "flux",
@@ -687,7 +732,7 @@ internal fun buildOpenAIImageGenerationRequestBody(
         customFields.forEach { (key, value) -> put(key, value) }
         put("model", params.model.modelId)
         put("prompt", params.prompt)
-        put("n", outputCount)
+        if (constraints.supportsOutputCount) put("n", outputCount)
         constraints.normalizedSize(params.size)?.let { put(constraints.sizeRequestField, it) }
         explicitOptions.forEach { (key, value) ->
             if (key == "output_compression") put(key, value.toInt()) else put(key, value)
@@ -725,6 +770,34 @@ internal fun buildXaiImageEditRequestBody(
         }
     }
     return XaiImageEditRequestBody(metadata, images)
+}
+
+internal fun buildSeedreamImageEditRequestBody(
+    params: ImageEditParams,
+    constraints: ImageGenerationConstraints,
+    images: List<Pair<File, String>>,
+): RequestBody {
+    require(images.isNotEmpty()) { "At least one Seedream reference image is required" }
+    require(images.size <= constraints.maxReferenceImages) {
+        "Seedream image editing accepts at most ${constraints.maxReferenceImages} reference images"
+    }
+    val explicitOptions = params.explicitImageOptions(constraints)
+    val reservedFields = RESERVED_SEEDREAM_EDIT_FIELDS + constraints.sizeRequestField
+    val customFields = buildJsonObject {}
+        .mergeCustomBody(params.customBody)
+        .filter { (key, value) ->
+            key.lowercase() !in reservedFields &&
+                key.lowercase() !in explicitOptions &&
+                constraints.acceptsImageOption(CustomBody(key, value))
+        }
+    val metadata = buildJsonObject {
+        customFields.forEach { (key, value) -> put(key, value) }
+        put("model", params.model.modelId)
+        put("prompt", params.prompt)
+        constraints.normalizedSize(params.size)?.let { put(constraints.sizeRequestField, it) }
+        explicitOptions.forEach { (key, value) -> put(key, value) }
+    }
+    return SeedreamImageEditRequestBody(metadata, images)
 }
 
 private fun ImageGenerationConstraints.normalizedSize(requestedSize: String): String? {
@@ -862,18 +935,48 @@ private class XaiImageEditRequestBody(
     }
 
     private fun writeImage(sink: BufferedSink, image: Pair<File, String>) {
-        val (imageFile, imageMimeType) = image
-        sink.writeUtf8("{\"url\":\"data:")
-        sink.writeUtf8(imageMimeType)
-        sink.writeUtf8(";base64,")
-        val nonClosingOutput = object : FilterOutputStream(sink.outputStream()) {
-            override fun close() = flush()
-        }
-        Base64.getEncoder().wrap(nonClosingOutput).use { encodedOutput ->
-            imageFile.inputStream().use { input -> input.copyTo(encodedOutput, IMAGE_EDIT_COPY_BUFFER_BYTES) }
-        }
-        sink.writeUtf8("\",\"type\":\"image_url\"}")
+        sink.writeUtf8("{\"url\":")
+        writeImageDataUri(sink, image)
+        sink.writeUtf8(",\"type\":\"image_url\"}")
     }
+}
+
+private class SeedreamImageEditRequestBody(
+    private val metadata: JsonObject,
+    private val images: List<Pair<File, String>>,
+) : RequestBody() {
+    override fun contentType() = "application/json".toMediaType()
+
+    override fun writeTo(sink: BufferedSink) {
+        sink.writeUtf8("{")
+        metadata.entries.forEachIndexed { index, (key, value) ->
+            if (index > 0) sink.writeUtf8(",")
+            sink.writeUtf8(JsonPrimitive(key).toString())
+            sink.writeUtf8(":")
+            sink.writeUtf8(value.toString())
+        }
+        if (metadata.isNotEmpty()) sink.writeUtf8(",")
+        sink.writeUtf8("\"image\":[")
+        images.forEachIndexed { index, image ->
+            if (index > 0) sink.writeUtf8(",")
+            writeImageDataUri(sink, image)
+        }
+        sink.writeUtf8("]}")
+    }
+}
+
+private fun writeImageDataUri(sink: BufferedSink, image: Pair<File, String>) {
+    val (imageFile, imageMimeType) = image
+    sink.writeUtf8("\"data:")
+    sink.writeUtf8(imageMimeType)
+    sink.writeUtf8(";base64,")
+    val nonClosingOutput = object : FilterOutputStream(sink.outputStream()) {
+        override fun close() = flush()
+    }
+    Base64.getEncoder().wrap(nonClosingOutput).use { encodedOutput ->
+        imageFile.inputStream().use { input -> input.copyTo(encodedOutput, IMAGE_EDIT_COPY_BUFFER_BYTES) }
+    }
+    sink.writeUtf8("\"")
 }
 
 private val CUSTOM_IMAGE_SIZE_REGEX = Regex("^(\\d+)x(\\d+)$")
@@ -882,6 +985,8 @@ private val COMPRESSIBLE_IMAGE_FORMATS = setOf("jpeg", "webp")
 private val TRANSPARENCY_IMAGE_FORMATS = setOf(null, "png", "webp")
 private val URL_OR_BASE64_FORMATS = setOf("url", "b64_json")
 private val RESERVED_XAI_EDIT_FIELDS =
+    setOf("model", "prompt", "n", "image", "images", "image[]", "size", "aspect_ratio")
+private val RESERVED_SEEDREAM_EDIT_FIELDS =
     setOf("model", "prompt", "n", "image", "images", "image[]", "size", "aspect_ratio")
 private const val IMAGE_EDIT_COPY_BUFFER_BYTES = 256 * 1024
 

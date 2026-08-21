@@ -80,6 +80,7 @@ data class ImageGenerationConstraints(
     val supportsEdit: Boolean,
     val supportsPartialImages: Boolean,
     val maxOutputImages: Int = 1,
+    val supportsOutputCount: Boolean = true,
     val maxReferenceImages: Int = 0,
     val supportsSize: Boolean = true,
     val supportedSizes: Set<String>? = null,
@@ -97,6 +98,7 @@ data class ImageGenerationConstraints(
     val supportedResolutionValues: Set<String> = emptySet(),
     val blockedImageOptionKeys: Set<String> = emptySet(),
     val usesJsonImageEdit: Boolean = false,
+    val usesGenerationEndpointForEdit: Boolean = false,
 )
 
 @Serializable

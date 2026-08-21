@@ -200,6 +200,108 @@ class OpenAIImageRequestTest {
     }
 
     @Test
+    fun `Seedream generation uses documented size and extension fields without n`() {
+        val setting = ProviderSetting.OpenAI(baseUrl = "https://ark.cn-beijing.volces.com/api/v3")
+        val model = Model(modelId = "doubao-seedream-5-0-lite")
+        val constraints = provider.imageGenerationConstraints(setting, model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                numOfImages = 4,
+                size = "4096x2304",
+                quality = "high",
+                outputFormat = "url",
+                customBody = listOf(
+                    CustomBody("n", JsonPrimitive(9)),
+                    CustomBody("watermark", JsonPrimitive(false)),
+                    CustomBody("sequential_image_generation", JsonPrimitive("auto")),
+                    CustomBody("output_format", JsonPrimitive("png")),
+                ),
+            ),
+            constraints = constraints,
+        )
+
+        assertTrue(constraints.supportsGeneration)
+        assertTrue(constraints.supportsEdit)
+        assertEquals(10, constraints.maxReferenceImages)
+        assertFalse(constraints.supportsOutputCount)
+        assertTrue(constraints.usesGenerationEndpointForEdit)
+        assertNull(body["n"])
+        assertEquals("4096x2304", body["size"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("url", body["response_format"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("false", body["watermark"]?.jsonPrimitive?.content)
+        assertEquals("auto", body["sequential_image_generation"]?.jsonPrimitive?.contentOrNull)
+        assertNull(body["quality"])
+        assertNull(body["output_format"])
+
+        val oversized = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                size = "4097x2048",
+            ),
+            constraints = constraints,
+        )
+        assertNull(oversized["size"])
+    }
+
+    @Test
+    fun `Seedream 4 and 5 stream reference images through generations JSON`() {
+        val setting = ProviderSetting.OpenAI(baseUrl = "https://ark.cn-beijing.volces.com/api/v3")
+        listOf("doubao-seedream-4-5", "doubao-seedream-5-0-lite", "vendor/seedream-v4").forEach { modelId ->
+            val model = Model(modelId = modelId)
+            val constraints = provider.imageGenerationConstraints(setting, model)
+            val imageFiles = listOf(
+                File.createTempFile("seedream-edit", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) },
+                File.createTempFile("seedream-edit", ".jpg").apply { writeBytes(byteArrayOf(4, 5, 6)) },
+            )
+            try {
+                val requestBody = buildSeedreamImageEditRequestBody(
+                    params = ImageEditParams(
+                        model = model,
+                        prompt = "combine references",
+                        images = imageFiles.map(File::getAbsolutePath),
+                        size = "2048x2048",
+                        outputFormat = "b64_json",
+                        customBody = listOf(CustomBody("watermark", JsonPrimitive(true))),
+                    ),
+                    constraints = constraints,
+                    images = listOf(imageFiles[0] to "image/png", imageFiles[1] to "image/jpeg"),
+                )
+                val buffer = Buffer()
+                requestBody.writeTo(buffer)
+                val body = Json.parseToJsonElement(buffer.readUtf8()).jsonObject
+
+                assertTrue("model=$modelId", constraints.usesJsonImageEdit)
+                assertTrue("model=$modelId", constraints.usesGenerationEndpointForEdit)
+                assertNull(body["n"])
+                assertEquals("b64_json", body["response_format"]?.jsonPrimitive?.contentOrNull)
+                assertEquals("true", body["watermark"]?.jsonPrimitive?.content)
+                val images = body["image"]?.jsonArray
+                assertEquals(2, images?.size)
+                assertEquals("data:image/png;base64,AQID", images?.get(0)?.jsonPrimitive?.contentOrNull)
+                assertEquals("data:image/jpeg;base64,BAUG", images?.get(1)?.jsonPrimitive?.contentOrNull)
+            } finally {
+                imageFiles.forEach(File::delete)
+            }
+        }
+    }
+
+    @Test
+    fun `Seedream 3 remains generation only`() {
+        val constraints = provider.imageGenerationConstraints(
+            ProviderSetting.OpenAI(baseUrl = "https://ark.cn-beijing.volces.com/api/v3"),
+            Model(modelId = "doubao-seedream-3-0-t2i"),
+        )
+
+        assertTrue(constraints.supportsGeneration)
+        assertFalse(constraints.supportsEdit)
+        assertEquals(0, constraints.maxReferenceImages)
+        assertFalse(constraints.usesGenerationEndpointForEdit)
+    }
+
+    @Test
     fun `DALL-E 3 disables editing and drops unsupported sizes`() {
         val setting = ProviderSetting.OpenAI()
         val model = Model(modelId = "dall-e-3")

@@ -46,6 +46,15 @@ class ModelRegistryTest {
         assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gemini-3.1-flash-image-preview"))
         assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gpt-image-2"))
         assertEquals(ModelType.EMBEDDING, ModelRegistry.MODEL_TYPE.getData("BAAI/bge-m3"))
+        assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("doubao-seedream-5-0-lite"))
+        assertEquals(
+            listOf(Modality.TEXT, Modality.IMAGE),
+            ModelRegistry.MODEL_INPUT_MODALITIES.getData("doubao-seedream-5-0-lite")
+        )
+        assertEquals(
+            listOf(Modality.TEXT, Modality.IMAGE),
+            ModelRegistry.MODEL_OUTPUT_MODALITIES.getData("doubao-seedream-5-0-lite")
+        )
     }
 
     @Test
