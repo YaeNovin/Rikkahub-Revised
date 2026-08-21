@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.McpStatus
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
@@ -280,6 +282,7 @@ fun McpPicker(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     onUpdateAssistant: (Assistant) -> Unit
 ) {
+    val context = LocalContext.current
     val mcpManager = koinInject<McpManager>()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -324,13 +327,21 @@ fun McpPicker(
                         )
                         Text(
                             text = when (val s = status) {
-                                is McpStatus.Idle -> "Idle"
-                                is McpStatus.Connecting -> "Connecting"
-                                is McpStatus.Connected -> "Connected"
-                                is McpStatus.Reconnecting -> "Reconnecting (${s.attempt}/${s.maxAttempts})"
-                                is McpStatus.Error -> "Error: ${s.message}"
-                                is McpStatus.NeedsAuthorization -> "Needs authorization"
-                                is McpStatus.Authorizing -> "Authorizing"
+                                is McpStatus.Idle -> stringResource(R.string.setting_mcp_page_status_idle)
+                                is McpStatus.Connecting -> stringResource(R.string.setting_mcp_page_status_connecting)
+                                is McpStatus.Connected -> stringResource(R.string.setting_mcp_page_status_connected)
+                                is McpStatus.Reconnecting -> stringResource(
+                                    R.string.setting_mcp_page_status_reconnecting,
+                                    s.attempt,
+                                    s.maxAttempts,
+                                )
+                                is McpStatus.Error -> context.formatUserFacingError(s.message)
+                                is McpStatus.NeedsAuthorization -> stringResource(
+                                    R.string.setting_mcp_page_status_needs_authorization
+                                )
+                                is McpStatus.Authorizing -> stringResource(
+                                    R.string.setting_mcp_page_status_authorizing
+                                )
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = LocalContentColor.current.copy(alpha = 0.8f),

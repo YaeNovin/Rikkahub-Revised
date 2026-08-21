@@ -880,6 +880,9 @@
   <string name="setting_mcp_page_import_no_valid_config">No valid MCP Server configuration found</string>
   <string name="setting_mcp_page_import_parse_error">JSON parse failed: %1$s</string>
   <string name="setting_mcp_page_import_title">Import MCP Server</string>
+  <string name="setting_mcp_page_authorize_oauth">Authorize with OAuth</string>
+  <string name="setting_mcp_page_authorizing_hint">Authorization in progress. Complete it in the browser.</string>
+  <string name="setting_mcp_page_cancel_authorization">Cancel authorization</string>
   <string name="setting_mcp_page_name">Name</string>
   <string name="setting_mcp_page_name_desc">Display name for the MCP server</string>
   <string name="setting_mcp_page_name_placeholder">e.g.: My MCP Server</string>
@@ -887,6 +890,12 @@
   <string name="setting_mcp_page_no_mcp_servers_found">No MCP servers found</string>
   <string name="setting_mcp_page_save">Save</string>
   <string name="setting_mcp_page_server_url">Server URL</string>
+  <string name="setting_mcp_page_status_idle">Idle</string>
+  <string name="setting_mcp_page_status_connecting">Connecting</string>
+  <string name="setting_mcp_page_status_connected">Connected</string>
+  <string name="setting_mcp_page_status_reconnecting">Reconnecting (%1$d/%2$d)</string>
+  <string name="setting_mcp_page_status_needs_authorization">OAuth authorization required</string>
+  <string name="setting_mcp_page_status_authorizing">Authorizing</string>
   <string name="setting_mcp_page_sse_url_desc">URL address for SSE transport server</string>
   <string name="setting_mcp_page_sse_url_placeholder">https://example.com/sse</string>
   <string name="setting_mcp_page_streamable_http_url_desc">URL address for Streamable HTTP server</string>

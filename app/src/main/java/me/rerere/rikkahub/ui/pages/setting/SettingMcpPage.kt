@@ -100,6 +100,7 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.mcp.McpTool
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Switch
@@ -254,6 +255,7 @@ private fun McpServerItem(
     onDelete: () -> Unit,
     onEdit: (McpServerConfig) -> Unit,
 ) {
+    val context = LocalContext.current
     val mcpManager = koinInject<McpManager>()
     val status by mcpManager.getStatus(item).collectAsStateWithLifecycle(McpStatus.Idle)
     val dismissBoxState = rememberSwipeToDismissBoxState()
@@ -261,11 +263,10 @@ private fun McpServerItem(
     var errorDetail by remember { mutableStateOf<McpStatus.Error?>(null) }
 
     errorDetail?.let { error ->
-        val context = LocalContext.current
         val fullText = error.detail ?: error.message
         AlertDialog(
             onDismissRequest = { errorDetail = null },
-            title = { Text(item.commonOptions.name.ifBlank { "MCP" }) },
+            title = { Text(stringResource(R.string.error_diagnostic_details)) },
             text = {
                 SelectionContainer {
                     Text(
@@ -391,7 +392,7 @@ private fun McpServerItem(
                     if (status is McpStatus.Error) {
                         val error = status as McpStatus.Error
                         Text(
-                            text = error.message,
+                            text = context.formatUserFacingError(error.message),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                             maxLines = 3,
@@ -400,9 +401,8 @@ private fun McpServerItem(
                         )
                     }
                     if (status == McpStatus.NeedsAuthorization) {
-                        val context = LocalContext.current
                         Text(
-                            text = "需要 OAuth 授权",
+                            text = stringResource(R.string.setting_mcp_page_status_needs_authorization),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -410,19 +410,19 @@ private fun McpServerItem(
                             onClick = { mcpManager.startAuthorization(item, context) },
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                         ) {
-                            Text("OAuth 授权")
+                            Text(stringResource(R.string.setting_mcp_page_authorize_oauth))
                         }
                     }
                     if (status == McpStatus.Authorizing) {
                         Text(
-                            text = "正在授权，请在浏览器中完成…",
+                            text = stringResource(R.string.setting_mcp_page_authorizing_hint),
                             style = MaterialTheme.typography.labelSmall,
                         )
                         TextButton(
                             onClick = { mcpManager.cancelAuthorization(item) },
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                         ) {
-                            Text("取消授权")
+                            Text(stringResource(R.string.setting_mcp_page_cancel_authorization))
                         }
                     }
                 }
@@ -1037,10 +1037,10 @@ private fun McpImportModal(
     onDismiss: () -> Unit,
     onImport: (List<McpServerConfig>) -> Unit,
 ) {
+    val context = LocalContext.current
     var jsonText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val noValidConfigMsg = stringResource(R.string.setting_mcp_page_import_no_valid_config)
-    val parseErrorMsg = stringResource(R.string.setting_mcp_page_import_parse_error)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1090,7 +1090,7 @@ private fun McpImportModal(
                                 onImport(configs)
                             }
                         } catch (e: Exception) {
-                            errorMessage = parseErrorMsg.format(e.message ?: "")
+                            errorMessage = context.formatUserFacingError(e)
                         }
                     }
                 ) {
