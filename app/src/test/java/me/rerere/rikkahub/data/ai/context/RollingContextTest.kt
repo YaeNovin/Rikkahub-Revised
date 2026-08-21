@@ -49,6 +49,24 @@ class RollingContextTest {
     }
 
     @Test
+    fun `completed plan is committed only while its source prefix is unchanged`() {
+        val messages = messages(count = 8, contentLength = 120)
+        val plan = createRollingContextPlan(
+            messages = messages,
+            storedSummary = null,
+            thresholdTokens = 200,
+        )!!
+        val appended = messages + UIMessage.user("new turn")
+        val editedPrefix = messages.toMutableList().also {
+            it[0] = UIMessage.user("edited")
+        }
+
+        assertTrue(plan.isStillApplicableTo(messages))
+        assertTrue(plan.isStillApplicableTo(appended))
+        assertFalse(plan.isStillApplicableTo(editedPrefix))
+    }
+
+    @Test
     fun `manual plan can compact before the automatic threshold`() {
         val messages = messages(count = 6, contentLength = 8)
 
@@ -79,6 +97,38 @@ class RollingContextTest {
                 thresholdTokens = 0,
                 force = true,
             )
+        )
+    }
+
+    @Test
+    fun `model context safety threshold overrides an unsafe configured threshold`() {
+        assertEquals(
+            80_000,
+            effectiveRollingContextThreshold(
+                configuredThresholdTokens = 1_000_000,
+                modelContextWindowTokens = 100_000,
+                maxOutputTokens = 10_000,
+            ),
+        )
+        assertEquals(
+            32_000,
+            effectiveRollingContextThreshold(
+                configuredThresholdTokens = 32_000,
+                modelContextWindowTokens = 100_000,
+                maxOutputTokens = 10_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `small model still reserves half of its context when output budget is oversized`() {
+        assertEquals(
+            4_000,
+            effectiveRollingContextThreshold(
+                configuredThresholdTokens = 32_000,
+                modelContextWindowTokens = 8_000,
+                maxOutputTokens = 8_000,
+            ),
         )
     }
 
@@ -181,6 +231,24 @@ class RollingContextTest {
                 thresholdTokens = 4_000,
             )
         )
+    }
+
+    @Test
+    fun `compression text splitting preserves all content within each token budget`() {
+        val content = buildString {
+            appendLine("Conversation heading")
+            append("\u4e2d\u6587\u5185\u5bb9".repeat(200))
+            appendLine()
+            append("english content ".repeat(300))
+            append("\ud83d\ude00".repeat(50))
+        }
+
+        val chunks = splitTextForTokenBudget(content, maxTokens = 300)
+
+        assertTrue(chunks.size > 1)
+        assertEquals(content, chunks.joinToString(separator = ""))
+        assertTrue(chunks.all { estimateTextTokens(it) <= 300 })
+        assertTrue(chunks.none { it.lastOrNull()?.isHighSurrogate() == true })
     }
 
     private fun messages(count: Int, contentLength: Int): List<UIMessage> = List(count) { index ->

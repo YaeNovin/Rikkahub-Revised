@@ -32,7 +32,10 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.ProviderRetryController
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.inferContextWindowTokens
+import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -44,6 +47,13 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_COUNT
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_DURATION_SECONDS
+import me.rerere.rikkahub.data.ai.MIN_GENERATION_RETRY_INTERVAL_SECONDS
+import me.rerere.rikkahub.data.ai.NetworkRecoveryCoordinator
 import me.rerere.rikkahub.data.ai.markInterruptedToolsForContinuation
 import me.rerere.rikkahub.data.ai.shouldResumeInterruptedResponseAt
 import me.rerere.rikkahub.data.ai.context.RollingContextPlan
@@ -51,7 +61,10 @@ import me.rerere.rikkahub.data.ai.context.RollingContextSummary
 import me.rerere.rikkahub.data.ai.context.coveredMessageCount
 import me.rerere.rikkahub.data.ai.context.createRollingContextPlan
 import me.rerere.rikkahub.data.ai.context.effectiveRollingContextThreshold
+import me.rerere.rikkahub.data.ai.context.estimateTextTokens
+import me.rerere.rikkahub.data.ai.context.isStillApplicableTo
 import me.rerere.rikkahub.data.ai.context.rollingContextWindowStartIndex
+import me.rerere.rikkahub.data.ai.context.splitTextForTokenBudget
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
@@ -100,6 +113,12 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
 private const val STREAM_STATE_UPDATE_INTERVAL_MILLIS = 83L
+private const val DEFAULT_COMPRESSION_INPUT_BUDGET_TOKENS = 24_000
+private const val MIN_INTERMEDIATE_SUMMARY_TOKENS = 512
+private const val MAX_INTERMEDIATE_SUMMARY_TOKENS = 2_048
+private const val MAX_COMPRESSION_HIERARCHY_DEPTH = 4
+
+private class InvalidRollingSummaryException(message: String) : Exception(message)
 
 internal fun backgroundTextGenerationParams(
     model: Model,
@@ -561,6 +580,7 @@ class ChatService(
                     conversationId = conversationId,
                     conversation = conversation,
                     assistant = assistant,
+                    model = model,
                     settings = settings,
                     processingStatus = session.processingStatus,
                 )
@@ -575,6 +595,8 @@ class ChatService(
             val rollingSummaryMessageCount = rollingSummary?.coveredMessageCount(generationMessages) ?: 0
             val rollingThresholdTokens = effectiveRollingContextThreshold(
                 assistant.rollingContextCompressionThresholdTokens,
+                model.contextWindowTokens ?: inferContextWindowTokens(model.modelId),
+                assistant.maxTokens,
             )
             val stillNeedsCompression = messageRange == null && createRollingContextPlan(
                 messages = contextGenerationMessages,
@@ -961,11 +983,17 @@ class ChatService(
         val settings = settingsStore.settingsFlow.first()
         val assistant = settings.getAssistantById(conversation.assistantId)
             ?: settings.getCurrentAssistant()
+        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+        val thresholdTokens = effectiveRollingContextThreshold(
+            assistant.rollingContextCompressionThresholdTokens,
+            model?.let { it.contextWindowTokens ?: inferContextWindowTokens(it.modelId) },
+            assistant.maxTokens,
+        )
         refreshRollingContextSummary(
             conversationId = conversationId,
             conversation = conversation,
-            assistant = assistant,
             settings = settings,
+            thresholdTokens = thresholdTokens,
             force = true,
             targetTokensOverride = targetTokens,
             additionalPrompt = additionalPrompt,
@@ -976,11 +1004,14 @@ class ChatService(
         conversationId: Uuid,
         conversation: Conversation,
         assistant: Assistant,
+        model: Model,
         settings: me.rerere.rikkahub.data.datastore.Settings,
         processingStatus: MutableStateFlow<String?>,
     ): Conversation {
         val thresholdTokens = effectiveRollingContextThreshold(
             assistant.rollingContextCompressionThresholdTokens,
+            model.contextWindowTokens ?: inferContextWindowTokens(model.modelId),
+            assistant.maxTokens,
         )
         val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(
             conversation.currentMessages,
@@ -1001,8 +1032,8 @@ class ChatService(
             refreshRollingContextSummary(
                 conversationId = conversationId,
                 conversation = conversation,
-                assistant = assistant,
                 settings = settings,
+                thresholdTokens = thresholdTokens,
                 force = false,
                 planningMessages = contextMessages,
             ) ?: conversation
@@ -1023,8 +1054,8 @@ class ChatService(
     private suspend fun refreshRollingContextSummary(
         conversationId: Uuid,
         conversation: Conversation,
-        assistant: Assistant,
         settings: me.rerere.rikkahub.data.datastore.Settings,
+        thresholdTokens: Int,
         force: Boolean,
         targetTokensOverride: Int? = null,
         additionalPrompt: String = "",
@@ -1035,9 +1066,7 @@ class ChatService(
         val plan = createRollingContextPlan(
             messages = messagesForPlanning,
             storedSummary = conversation.rollingContextSummary,
-            thresholdTokens = effectiveRollingContextThreshold(
-                assistant.rollingContextCompressionThresholdTokens,
-            ),
+            thresholdTokens = thresholdTokens,
             force = force,
             targetTokensOverride = targetTokensOverride,
         ) ?: return null
@@ -1047,7 +1076,19 @@ class ChatService(
             targetTokens = plan.targetTokens,
             additionalPrompt = additionalPrompt,
         )
-        val updatedConversation = conversation.copy(
+        val latestConversation = getConversationFlow(conversationId).value
+        val latestPlanningMessages = DocumentAsPromptTransformer.transformDocumentContents(
+            latestConversation.currentMessages,
+        )
+        if (
+            latestConversation.rollingContextSummary != conversation.rollingContextSummary ||
+            !plan.isStillApplicableTo(latestPlanningMessages)
+        ) {
+            throw InvalidRollingSummaryException(
+                "Conversation changed while compression was running",
+            )
+        }
+        val updatedConversation = latestConversation.copy(
             rollingContextSummary = RollingContextSummary(
                 content = summary,
                 sourceMessageIds = plan.sourceMessageIds,
@@ -1073,21 +1114,94 @@ class ChatService(
             ?: throw IllegalStateException("No model available for compression")
         val provider = model.findProvider(settings.providers)
             ?: throw IllegalStateException("Provider not found")
-        val prompt = settings.compressPrompt.applyPlaceholders(
-            "content" to content,
-            "target_tokens" to targetTokens.toString(),
-            "additional_context" to additionalPrompt.takeIf(String::isNotBlank)
-                ?.let { "Additional instructions from user: $it" }
-                .orEmpty(),
-            "locale" to Locale.getDefault().displayName,
+        val contextWindow = model.contextWindowTokens ?: inferContextWindowTokens(model.modelId)
+        val compressionInputBudget = effectiveRollingContextThreshold(
+            configuredThresholdTokens = contextWindow ?: DEFAULT_COMPRESSION_INPUT_BUDGET_TOKENS,
+            modelContextWindowTokens = contextWindow,
+            maxOutputTokens = targetTokens,
         )
-        val result = providerManager.getProviderByType(provider).generateText(
-            providerSetting = provider,
-            messages = listOf(UIMessage.user(prompt)),
-            params = backgroundTextGenerationParams(model),
+        val retryController = ProviderRetryController(
+            maxRetries = settings.generationRetryMaxRetries.coerceIn(
+                MIN_GENERATION_RETRY_COUNT,
+                MAX_GENERATION_RETRY_COUNT,
+            ),
+            initialDelayMillis = settings.generationRetryInitialIntervalSeconds.coerceIn(
+                MIN_GENERATION_RETRY_INTERVAL_SECONDS,
+                MAX_GENERATION_RETRY_INTERVAL_SECONDS,
+            ) * 1_000L,
+            maxDurationMillis = settings.generationRetryMaxDurationSeconds.coerceIn(
+                MIN_GENERATION_RETRY_DURATION_SECONDS,
+                MAX_GENERATION_RETRY_DURATION_SECONDS,
+            ) * 1_000L,
         )
-        return result.message.toText().trim().takeIf(String::isNotBlank)
-            ?: throw IllegalStateException("Failed to generate compressed summary")
+        val networkRecovery = NetworkRecoveryCoordinator(context)
+        var attemptNetworkVersion = networkRecovery.snapshot()
+        return try {
+            suspend fun requestSummary(input: String, requestedTokens: Int): String {
+                val prompt = settings.compressPrompt.applyPlaceholders(
+                    "content" to input,
+                    "target_tokens" to requestedTokens.toString(),
+                    "additional_context" to additionalPrompt.takeIf(String::isNotBlank)
+                        ?.let { "Additional instructions from user: $it" }
+                        .orEmpty(),
+                    "locale" to Locale.getDefault().displayName,
+                )
+                return retryProviderRequest(
+                    enabled = settings.enableGenerationRetry,
+                    retryController = retryController,
+                    shouldRetry = { error ->
+                        error is InvalidRollingSummaryException ||
+                            networkRecovery.shouldRetry(error, attemptNetworkVersion)
+                    },
+                    onRetry = { retryNumber, delayMillis ->
+                        Log.w(TAG, "Rolling context retry #$retryNumber in ${delayMillis}ms")
+                    },
+                    delayBeforeRetry = { delayMillis ->
+                        networkRecovery.awaitNetworkAndBackoff(
+                            retryDelayMillis = delayMillis,
+                            remainingDurationMillis = retryController.remainingDurationMillis(),
+                        )
+                    },
+                ) {
+                    attemptNetworkVersion = networkRecovery.snapshot()
+                    val result = providerManager.getProviderByType(provider).generateText(
+                        providerSetting = provider,
+                        messages = listOf(UIMessage.user(prompt)),
+                        params = backgroundTextGenerationParams(model),
+                    )
+                    val summary = result.message.toText().trim().takeIf(String::isNotBlank)
+                        ?: throw InvalidRollingSummaryException("Compression returned an empty summary")
+                    val acceptedTokens = maxOf(
+                        requestedTokens.coerceAtLeast(1) * 2,
+                        requestedTokens + MIN_INTERMEDIATE_SUMMARY_TOKENS,
+                    )
+                    summary.takeIf { estimateTextTokens(it) <= acceptedTokens }
+                        ?: throw InvalidRollingSummaryException("Compression summary exceeded its target")
+                }
+            }
+
+            var segments = splitTextForTokenBudget(content, compressionInputBudget)
+            var depth = 0
+            while (segments.size > 1 && depth < MAX_COMPRESSION_HIERARCHY_DEPTH) {
+                val intermediateTarget = minOf(
+                    targetTokens.coerceAtLeast(MIN_INTERMEDIATE_SUMMARY_TOKENS),
+                    MAX_INTERMEDIATE_SUMMARY_TOKENS,
+                    (compressionInputBudget / 4).coerceAtLeast(MIN_INTERMEDIATE_SUMMARY_TOKENS),
+                )
+                val combined = segments.mapIndexed { index, segment ->
+                    "[Segment ${index + 1}/${segments.size}]\n" +
+                        requestSummary(segment, intermediateTarget)
+                }.joinToString("\n\n")
+                segments = splitTextForTokenBudget(combined, compressionInputBudget)
+                depth++
+            }
+            if (segments.size != 1) {
+                throw InvalidRollingSummaryException("Compression hierarchy did not converge")
+            }
+            requestSummary(segments.single(), targetTokens)
+        } finally {
+            networkRecovery.close()
+        }
     }
 
     private fun RollingContextPlan.toCompressionContent(): String = buildString {
@@ -1096,7 +1210,7 @@ class ChatService(
             appendLine(summary.content)
             appendLine()
         }
-        append(messagesToSummarize.joinToString("\n\n") { it.summaryAsText(maxLength = 2000) })
+        append(messagesToSummarize.joinToString("\n\n") { it.summaryAsText() })
     }
 
     // ---- 对话状态更新 ----

@@ -21,12 +21,38 @@ data class RollingContextPlan(
     val targetTokens: Int,
 )
 
+/** Revalidates a completed compaction against edits or branch changes made while it ran. */
+fun RollingContextPlan.isStillApplicableTo(messages: List<UIMessage>): Boolean =
+    sourceMessageIds.size <= messages.size &&
+        messages.take(sourceMessageIds.size).map(UIMessage::id) == sourceMessageIds
+
 const val MIN_ROLLING_CONTEXT_THRESHOLD_TOKENS = 4_000
 const val DEFAULT_ROLLING_CONTEXT_THRESHOLD_TOKENS = 32_000
 
-/** Normalizes legacy disabled settings now that rolling context is always active. */
-fun effectiveRollingContextThreshold(configuredThresholdTokens: Int): Int =
-    configuredThresholdTokens.takeIf { it > 0 } ?: DEFAULT_ROLLING_CONTEXT_THRESHOLD_TOKENS
+/**
+ * Normalizes legacy settings and keeps automatic compaction below the model's hard input limit.
+ * The reserve covers the next answer plus system prompts, tools and provider framing that are not
+ * represented by the visible conversation messages.
+ */
+fun effectiveRollingContextThreshold(
+    configuredThresholdTokens: Int,
+    modelContextWindowTokens: Int? = null,
+    maxOutputTokens: Int? = null,
+): Int {
+    val configuredThreshold = configuredThresholdTokens.takeIf { it > 0 }
+        ?: DEFAULT_ROLLING_CONTEXT_THRESHOLD_TOKENS
+    val contextWindow = modelContextWindowTokens?.takeIf { it > 0 } ?: return configuredThreshold
+    val protocolReserve = maxOf(MIN_CONTEXT_RESERVE_TOKENS, contextWindow / 10)
+    val outputReserve = maxOutputTokens
+        ?.coerceAtLeast(0)
+        ?.coerceAtMost(contextWindow)
+        ?: (contextWindow / 10)
+    val safeThreshold = maxOf(
+        contextWindow / 2,
+        contextWindow - protocolReserve - outputReserve,
+    ).coerceAtLeast(1)
+    return minOf(configuredThreshold, safeThreshold)
+}
 
 /**
  * The persisted summary is valid only when it still covers the exact current branch prefix.
@@ -115,6 +141,70 @@ fun estimateTextTokens(text: String): Int {
     return cjkCharacters + (otherCharacters + 3) / 4
 }
 
+/** Splits compression input without dropping content or exceeding the estimated token budget. */
+fun splitTextForTokenBudget(text: String, maxTokens: Int): List<String> {
+    require(maxTokens > 0) { "maxTokens must be positive" }
+    if (text.isEmpty()) return emptyList()
+    if (estimateTextTokens(text) <= maxTokens) return listOf(text)
+
+    val chunks = mutableListOf<String>()
+    val current = StringBuilder()
+    var currentTokens = 0
+
+    fun flushCurrent() {
+        if (current.isEmpty()) return
+        chunks += current.toString()
+        current.clear()
+        currentTokens = 0
+    }
+
+    fun appendPiece(piece: String) {
+        val pieceTokens = estimateTextTokens(piece)
+        if (pieceTokens <= maxTokens) {
+            if (currentTokens + pieceTokens > maxTokens) flushCurrent()
+            current.append(piece)
+            currentTokens += pieceTokens
+            return
+        }
+
+        flushCurrent()
+        var start = 0
+        while (start < piece.length) {
+            var low = start + 1
+            var high = piece.length
+            var bestEnd = low
+            while (low <= high) {
+                val middle = low + (high - low) / 2
+                if (estimateTextTokens(piece.substring(start, middle)) <= maxTokens) {
+                    bestEnd = middle
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+            if (bestEnd < piece.length &&
+                bestEnd > start &&
+                piece[bestEnd - 1].isHighSurrogate()
+            ) {
+                bestEnd--
+            }
+            if (bestEnd <= start) bestEnd = (start + 1).coerceAtMost(piece.length)
+            chunks += piece.substring(start, bestEnd)
+            start = bestEnd
+        }
+    }
+
+    var start = 0
+    while (start < text.length) {
+        val newline = text.indexOf('\n', start)
+        val end = if (newline >= 0) newline + 1 else text.length
+        appendPiece(text.substring(start, end))
+        start = end
+    }
+    flushCurrent()
+    return chunks
+}
+
 private fun RollingContextSummary?.orEmptySummaryTokens(): Int = this?.content?.let(::estimateTextTokens) ?: 0
 
 @Suppress("DEPRECATION")
@@ -179,6 +269,7 @@ private fun isCjkCharacter(character: Char): Boolean = character in '\u3040'..'\
     character in '\u4e00'..'\u9fff'
 
 private const val MESSAGE_OVERHEAD_TOKENS = 4
+private const val MIN_CONTEXT_RESERVE_TOKENS = 1_024
 private const val DOCUMENT_REFERENCE_TOKEN_ESTIMATE = 32
 private const val IMAGE_TOKEN_ESTIMATE = 1_024
 private const val AUDIO_TOKEN_ESTIMATE = 4_096
