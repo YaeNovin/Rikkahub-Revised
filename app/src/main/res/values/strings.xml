@@ -404,6 +404,10 @@
   <string name="imggen_page_copy_prompt">Copy prompt</string>
   <string name="imggen_page_custom_size">Custom size</string>
   <string name="imggen_page_custom_size_example">e.g. 1024x1024</string>
+  <string name="imggen_page_custom_size_invalid">Enter a size that meets the model limits.</string>
+  <string name="imggen_page_openai_size_requirements">Multiples of 16; ratio 1:3 to 3:1; 655,360-8,294,400 pixels; up to 3840 per edge. Sizes above 2560x1440 are experimental.</string>
+  <string name="imggen_page_standard_aspect_ratio">Standard aspect ratio</string>
+  <string name="imggen_page_standard_size">Standard size</string>
   <string name="imggen_page_delete">Delete</string>
   <string name="imggen_page_gallery">Gallery</string>
   <string name="imggen_page_gallery_all">All images</string>

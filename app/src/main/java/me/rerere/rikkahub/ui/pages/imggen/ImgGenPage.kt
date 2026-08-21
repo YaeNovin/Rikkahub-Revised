@@ -394,6 +394,12 @@ private fun ImageGenScreen(
                 supportsSize = supportsSize,
                 supportedSizes = supportedSizes,
                 supportsCustomSize = selectedConstraints?.supportsCustomSize ?: true,
+                groupSizesByAspectRatio = selectedConstraints?.groupSizesByAspectRatio == true,
+                customSizeMultiple = selectedConstraints?.customSizeMultiple,
+                customSizeMaxDimension = selectedConstraints?.customSizeMaxDimension,
+                customSizeMinPixels = selectedConstraints?.customSizeMinPixels,
+                customSizeMaxPixels = selectedConstraints?.customSizeMaxPixels,
+                customSizeMaxAspectRatio = selectedConstraints?.customSizeMaxAspectRatio,
                 sizeRequestField = selectedConstraints?.sizeRequestField ?: "size",
                 quality = quality,
                 outputFormat = outputFormat,
@@ -1165,6 +1171,59 @@ private fun imageAspectRatio(width: Int?, height: Int?): String? {
 private tailrec fun greatestCommonDivisor(left: Int, right: Int): Int =
     if (right == 0) left else greatestCommonDivisor(right, left % right)
 
+private val IMAGE_SIZE_PATTERN = Regex("(\\d+)x(\\d+)")
+
+private data class ImageSizePresetGroup(
+    val aspectRatio: String,
+    val sizes: List<String>,
+)
+
+private fun groupImageSizesByAspectRatio(sizes: Set<String>): List<ImageSizePresetGroup> = sizes
+    .asSequence()
+    .filterNot { it == ImageGenSize.AUTO.value }
+    .mapNotNull { value ->
+        val match = IMAGE_SIZE_PATTERN.matchEntire(value) ?: return@mapNotNull null
+        val width = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
+        val height = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+        val divisor = greatestCommonDivisor(width, height)
+        val reducedRatio = "${width / divisor}:${height / divisor}"
+        val displayRatio = when (reducedRatio) {
+            "8:5" -> "16:10"
+            "5:8" -> "10:16"
+            "7:3" -> "21:9"
+            "3:7" -> "9:21"
+            else -> reducedRatio
+        }
+        displayRatio to value
+    }
+    .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+    .map { (aspectRatio, values) -> ImageSizePresetGroup(aspectRatio, values) }
+
+private fun isValidCustomImageSize(
+    value: String,
+    multiple: Int?,
+    maxDimension: Int?,
+    minPixels: Long?,
+    maxPixels: Long?,
+    maxAspectRatio: Int?,
+): Boolean {
+    val match = IMAGE_SIZE_PATTERN.matchEntire(value.trim().lowercase()) ?: return false
+    val width = match.groupValues[1].toIntOrNull() ?: return false
+    val height = match.groupValues[2].toIntOrNull() ?: return false
+    if (width <= 0 || height <= 0) return false
+    if (multiple != null && (width % multiple != 0 || height % multiple != 0)) return false
+    if (maxDimension != null && (width > maxDimension || height > maxDimension)) return false
+    val pixels = width.toLong() * height.toLong()
+    if (minPixels != null && pixels < minPixels) return false
+    if (maxPixels != null && pixels > maxPixels) return false
+    if (maxAspectRatio != null) {
+        val longEdge = maxOf(width, height).toLong()
+        val shortEdge = minOf(width, height).toLong()
+        if (longEdge > shortEdge * maxAspectRatio) return false
+    }
+    return true
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsBottomSheet(
@@ -1175,6 +1234,12 @@ private fun SettingsBottomSheet(
     supportsSize: Boolean,
     supportedSizes: Set<String>?,
     supportsCustomSize: Boolean,
+    groupSizesByAspectRatio: Boolean,
+    customSizeMultiple: Int?,
+    customSizeMaxDimension: Int?,
+    customSizeMinPixels: Long?,
+    customSizeMaxPixels: Long?,
+    customSizeMaxAspectRatio: Int?,
     sizeRequestField: String,
     quality: String?,
     outputFormat: String?,
@@ -1235,29 +1300,137 @@ private fun SettingsBottomSheet(
                         )
                     }
                 ) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val sizeOptions = supportedSizes ?: ImageGenSize.entries
-                            .mapTo(linkedSetOf()) { it.value }
-                        sizeOptions.forEach { sizeOption ->
-                            FilterChip(
-                                selected = size == sizeOption,
-                                onClick = { vm.updateSize(sizeOption) },
-                                label = { Text(sizeOption) }
+                    val sizeOptions = supportedSizes ?: ImageGenSize.entries
+                        .mapTo(linkedSetOf()) { it.value }
+                    if (groupSizesByAspectRatio) {
+                        val presetGroups = remember(sizeOptions) {
+                            groupImageSizesByAspectRatio(sizeOptions)
+                        }
+                        val selectedSizeGroup = presetGroups.firstOrNull { size in it.sizes }
+                        var selectedAspectRatio by remember(presetGroups) {
+                            mutableStateOf(selectedSizeGroup?.aspectRatio ?: presetGroups.firstOrNull()?.aspectRatio)
+                        }
+                        LaunchedEffect(size, presetGroups) {
+                            presetGroups.firstOrNull { size in it.sizes }?.let {
+                                selectedAspectRatio = it.aspectRatio
+                            }
+                        }
+
+                        Text(
+                            text = stringResource(R.string.imggen_page_standard_aspect_ratio),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (ImageGenSize.AUTO.value in sizeOptions) {
+                                FilterChip(
+                                    selected = size == ImageGenSize.AUTO.value,
+                                    onClick = { vm.updateSize(ImageGenSize.AUTO.value) },
+                                    label = { Text(stringResource(R.string.imggen_page_model_default)) },
+                                )
+                            }
+                            presetGroups.forEach { group ->
+                                FilterChip(
+                                    selected = size in group.sizes,
+                                    onClick = {
+                                        selectedAspectRatio = group.aspectRatio
+                                        vm.updateSize(group.sizes.first())
+                                    },
+                                    label = { Text(group.aspectRatio) },
+                                )
+                            }
+                        }
+
+                        presetGroups.firstOrNull { it.aspectRatio == selectedAspectRatio }?.let { group ->
+                            Text(
+                                text = stringResource(R.string.imggen_page_standard_size),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
                             )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                group.sizes.forEach { sizeOption ->
+                                    FilterChip(
+                                        selected = size == sizeOption,
+                                        onClick = { vm.updateSize(sizeOption) },
+                                        label = { Text(sizeOption) },
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            sizeOptions.forEach { sizeOption ->
+                                FilterChip(
+                                    selected = size == sizeOption,
+                                    onClick = { vm.updateSize(sizeOption) },
+                                    label = {
+                                        Text(
+                                            if (sizeOption == ImageGenSize.AUTO.value) {
+                                                stringResource(R.string.imggen_page_model_default)
+                                            } else {
+                                                sizeOption
+                                            }
+                                        )
+                                    },
+                                )
+                            }
                         }
                     }
 
                     if (supportsCustomSize) {
                         Spacer(modifier = Modifier.height(8.dp))
-
+                        var customSizeText by remember {
+                            mutableStateOf(size.takeUnless { it in sizeOptions }.orEmpty())
+                        }
+                        LaunchedEffect(size, sizeOptions) {
+                            if (size in sizeOptions) customSizeText = ""
+                        }
+                        val hasCustomConstraints = customSizeMultiple != null ||
+                            customSizeMaxDimension != null || customSizeMinPixels != null ||
+                            customSizeMaxPixels != null || customSizeMaxAspectRatio != null
+                        val customSizeValid = customSizeText.isBlank() || !hasCustomConstraints ||
+                            isValidCustomImageSize(
+                                value = customSizeText,
+                                multiple = customSizeMultiple,
+                                maxDimension = customSizeMaxDimension,
+                                minPixels = customSizeMinPixels,
+                                maxPixels = customSizeMaxPixels,
+                                maxAspectRatio = customSizeMaxAspectRatio,
+                            )
                         OutlinedTextField(
-                            value = size,
-                            onValueChange = vm::updateSize,
+                            value = customSizeText,
+                            onValueChange = { value ->
+                                customSizeText = value
+                                vm.updateSize(value.trim())
+                            },
                             label = { Text(stringResource(R.string.imggen_page_custom_size)) },
                             placeholder = { Text(stringResource(R.string.imggen_page_custom_size_example)) },
+                            supportingText = if (groupSizesByAspectRatio) {
+                                {
+                                    Text(
+                                        stringResource(
+                                            if (customSizeValid) {
+                                                R.string.imggen_page_openai_size_requirements
+                                            } else {
+                                                R.string.imggen_page_custom_size_invalid
+                                            }
+                                        )
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            isError = !customSizeValid,
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             textStyle = MaterialTheme.typography.bodySmall,

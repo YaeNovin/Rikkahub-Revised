@@ -85,6 +85,7 @@ data class ImageGenerationConstraints(
     val supportsSize: Boolean = true,
     val supportedSizes: Set<String>? = null,
     val supportsCustomSize: Boolean = true,
+    val groupSizesByAspectRatio: Boolean = false,
     val customSizeMultiple: Int? = null,
     val customSizeMaxDimension: Int? = null,
     val customSizeMinPixels: Long? = null,

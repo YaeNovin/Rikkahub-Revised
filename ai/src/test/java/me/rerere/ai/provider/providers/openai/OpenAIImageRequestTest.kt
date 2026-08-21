@@ -371,10 +371,10 @@ class OpenAIImageRequestTest {
 
         assertTrue(constraints.supportsCustomSize)
         assertEquals(16, constraints.customSizeMultiple)
-        assertEquals(3_839, constraints.customSizeMaxDimension)
+        assertEquals(3_840, constraints.customSizeMaxDimension)
         assertTrue(
             constraints.supportedSizes.orEmpty().containsAll(
-                setOf("2048x2048", "2560x1440", "1440x2560", "3824x2144", "2144x3824")
+                setOf("2048x2048", "2560x1440", "1440x2560", "3840x2160", "2160x3840")
             )
         )
         assertEquals("2048x1152", (body["size"] as? JsonPrimitive)?.contentOrNull)
@@ -390,13 +390,24 @@ class OpenAIImageRequestTest {
     }
 
     @Test
-    fun `GPT Image 2 accepts QHD and rounded experimental UHD presets`() {
+    fun `GPT Image 2 presets cover standard ratios and satisfy official limits`() {
         val constraints = provider.imageGenerationConstraints(
             ProviderSetting.OpenAI(),
             Model(modelId = "gpt-image-2"),
         )
 
-        listOf("2560x1440", "1440x2560", "3824x2144", "2144x3824").forEach { size ->
+        assertTrue(constraints.groupSizesByAspectRatio)
+        val ratios = mutableSetOf<String>()
+        constraints.supportedSizes.orEmpty().filterNot { it == "auto" }.forEach { size ->
+            val (width, height) = size.split('x').map(String::toInt)
+            val divisor = greatestCommonDivisor(width, height)
+            ratios += "${width / divisor}:${height / divisor}"
+            assertEquals("width=$width", 0, width % 16)
+            assertEquals("height=$height", 0, height % 16)
+            assertTrue("size=$size", width <= 3_840 && height <= 3_840)
+            assertTrue("size=$size", width.toLong() * height >= 655_360L)
+            assertTrue("size=$size", width.toLong() * height <= 8_294_400L)
+            assertTrue("size=$size", maxOf(width, height).toLong() <= minOf(width, height).toLong() * 3L)
             val body = buildOpenAIImageGenerationRequestBody(
                 params = ImageGenerationParams(
                     model = Model(modelId = "gpt-image-2"),
@@ -406,6 +417,43 @@ class OpenAIImageRequestTest {
                 constraints = constraints,
             )
             assertEquals(size, (body["size"] as? JsonPrimitive)?.contentOrNull)
+        }
+        assertEquals(
+            setOf(
+                "1:1", "4:3", "3:4", "3:2", "2:3", "8:5", "5:8", "16:9", "9:16",
+                "7:4", "4:7", "5:4", "4:5", "2:1", "1:2", "7:3", "3:7", "3:1", "1:3",
+            ),
+            ratios,
+        )
+    }
+
+    @Test
+    fun `GPT Image 2 aliases preserve arbitrary size and high quality options`() {
+        val setting = ProviderSetting.OpenAI(baseUrl = "https://third-party.example/v1")
+
+        listOf(
+            "gpt-image-2",
+            "gpt-image2",
+            "gpt_image_2",
+            "gpt image 2",
+            "openai/gpt.image.2-latest",
+        ).forEach { modelId ->
+            val model = Model(modelId = modelId)
+            val constraints = provider.imageGenerationConstraints(setting, model)
+            val body = buildOpenAIImageGenerationRequestBody(
+                params = ImageGenerationParams(
+                    model = model,
+                    prompt = "prompt",
+                    size = "3840x2160",
+                    quality = "high",
+                ),
+                constraints = constraints,
+            )
+
+            assertTrue("model=$modelId", constraints.supportsCustomSize)
+            assertEquals("model=$modelId", 3_840, constraints.customSizeMaxDimension)
+            assertEquals("model=$modelId", "3840x2160", body["size"]?.jsonPrimitive?.contentOrNull)
+            assertEquals("model=$modelId", "high", body["quality"]?.jsonPrimitive?.contentOrNull)
         }
     }
 
@@ -417,7 +465,6 @@ class OpenAIImageRequestTest {
 
         listOf(
             "2048x1150", // not divisible by 16
-            "3840x2160", // the documented edge limit is exclusive
             "3840x3840", // too many pixels
             "3200x800", // aspect ratio above 3:1
             "512x512", // too few pixels
@@ -441,4 +488,7 @@ class OpenAIImageRequestTest {
             assertNull(body["output_compression"])
         }
     }
+
+    private tailrec fun greatestCommonDivisor(left: Int, right: Int): Int =
+        if (right == 0) left else greatestCommonDivisor(right, left % right)
 }

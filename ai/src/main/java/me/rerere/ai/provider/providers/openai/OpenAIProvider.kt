@@ -519,7 +519,7 @@ class OpenAIProvider(
         if (constraints.usesJsonImageEdit) return
         val normalizedModel = modelId.lowercase()
         when {
-            normalizedModel.contains("gpt-image") -> imageFiles.forEach { imageFile ->
+            GPT_IMAGE_MODEL_PATTERN.containsMatchIn(normalizedModel) -> imageFiles.forEach { imageFile ->
                 require(imageFile.length() < GPT_IMAGE_MAX_INPUT_BYTES) {
                     "GPT Image reference images must be smaller than 50 MB"
                 }
@@ -548,8 +548,8 @@ class OpenAIProvider(
             XAI_IMAGE_MODEL_MARKERS.any(normalizedModel::contains)
         val isXaiImagineImage = normalizedModel.contains("grok-imagine-image")
         val isXaiImage2 = isXaiImagineImage && normalizedModel.contains("grok-imagine-image-2")
-        val isGptImage2 = normalizedModel.contains("gpt-image-2")
-        val isGptImage = normalizedModel.contains("gpt-image")
+        val isGptImage2 = GPT_IMAGE_2_MODEL_PATTERN.containsMatchIn(normalizedModel)
+        val isGptImage = GPT_IMAGE_MODEL_PATTERN.containsMatchIn(normalizedModel)
         val isDallE3 = normalizedModel.contains("dall-e-3")
         val isDallE2 = normalizedModel.contains("dall-e-2")
         val isSeedream = normalizedModel.contains("seedream")
@@ -593,9 +593,10 @@ class OpenAIProvider(
             supportsSize = true,
             supportedSizes = supportedSizes,
             supportsCustomSize = isGptImage2 || isSeedream || supportedSizes == null,
+            groupSizesByAspectRatio = isGptImage2,
             customSizeMultiple = if (isGptImage2) 16 else null,
             customSizeMaxDimension = when {
-                isGptImage2 -> 3_839
+                isGptImage2 -> 3_840
                 isSeedream -> 4_096
                 else -> null
             },
@@ -670,11 +671,35 @@ class OpenAIProvider(
         )
         private val GPT_IMAGE_2_PRESET_SIZES = linkedSetOf(
             "auto",
-            "1024x1024", "1536x1024", "1024x1536",
-            "2048x2048", "2048x1152", "1152x2048",
-            "2048x1536", "1536x2048", "2304x1536", "1536x2304",
-            "2560x1440", "1440x2560",
-            "3824x2144", "2144x3824",
+            // Square
+            "1024x1024", "1536x1536", "2048x2048", "2560x2560", "2880x2880",
+            // 4:3 and 3:4
+            "1024x768", "1536x1152", "2048x1536", "2560x1920", "3072x2304", "3264x2448",
+            "768x1024", "1152x1536", "1536x2048", "1920x2560", "2304x3072", "2448x3264",
+            // 3:2 and 2:3
+            "1152x768", "1536x1024", "2304x1536", "3072x2048", "3456x2304",
+            "768x1152", "1024x1536", "1536x2304", "2048x3072", "2304x3456",
+            // 16:10 and 10:16
+            "1280x800", "1920x1200", "2560x1600", "3200x2000", "3584x2240",
+            "800x1280", "1200x1920", "1600x2560", "2000x3200", "2240x3584",
+            // 16:9 and 9:16
+            "1280x720", "1536x864", "2048x1152", "2560x1440", "3072x1728", "3840x2160",
+            "720x1280", "864x1536", "1152x2048", "1440x2560", "1728x3072", "2160x3840",
+            // 7:4 and 4:7, including the legacy 1792x1024 standard
+            "1792x1024", "2240x1280", "2688x1536", "3136x1792", "3584x2048",
+            "1024x1792", "1280x2240", "1536x2688", "1792x3136", "2048x3584",
+            // 5:4 and 4:5
+            "1280x1024", "1920x1536", "2560x2048", "3200x2560",
+            "1024x1280", "1536x1920", "2048x2560", "2560x3200",
+            // 2:1 and 1:2
+            "1280x640", "2048x1024", "2560x1280", "3072x1536", "3584x1792", "3840x1920",
+            "640x1280", "1024x2048", "1280x2560", "1536x3072", "1792x3584", "1920x3840",
+            // 21:9 and 9:21
+            "1344x576", "2016x864", "2688x1152", "3360x1440", "3696x1584",
+            "576x1344", "864x2016", "1152x2688", "1440x3360", "1584x3696",
+            // Maximum supported aspect ratios, 3:1 and 1:3
+            "1536x512", "2304x768", "3072x1024", "3456x1152", "3840x1280",
+            "512x1536", "768x2304", "1024x3072", "1152x3456", "1280x3840",
         )
         private const val GPT_IMAGE_2_MIN_PIXELS = 655_360L
         private const val GPT_IMAGE_2_MAX_PIXELS = 8_294_400L
@@ -683,6 +708,10 @@ class OpenAIProvider(
         private val GPT_IMAGE_2_BACKGROUNDS = setOf("auto", "opaque")
         private val GPT_IMAGE_BACKGROUNDS = setOf("auto", "opaque", "transparent")
         private val GPT_IMAGE_SIZES = linkedSetOf("auto", "1024x1024", "1536x1024", "1024x1536")
+        private val GPT_IMAGE_MODEL_PATTERN = Regex("(?:^|[^a-z0-9])gpt[^a-z0-9]*image")
+        private val GPT_IMAGE_2_MODEL_PATTERN = Regex(
+            "(?:^|[^a-z0-9])gpt[^a-z0-9]*image[^a-z0-9]*2(?:[^0-9]|$)"
+        )
         private val DALL_E_3_SIZES = linkedSetOf("auto", "1024x1024", "1792x1024", "1024x1792")
         private val DALL_E_2_SIZES = linkedSetOf("auto", "256x256", "512x512", "1024x1024")
         private val DALL_E_3_QUALITY = setOf("standard", "hd")
