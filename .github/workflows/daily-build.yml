@@ -79,13 +79,11 @@ jobs:
         working-directory: web-ui
         run: pnpm install --frozen-lockfile
 
-      - name: Gradle cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+      # Gradle's official action restores and saves dependency caches even when
+      # a build fails, so a transient repository outage does not leave every
+      # subsequent run with an empty cache.
+      - name: Gradle setup and cache
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare build files
         env:
@@ -126,7 +124,27 @@ jobs:
       - name: Validate Release R8
         run: |
           chmod +x gradlew
-          ./gradlew :app:minifyReleaseWithR8 --no-configuration-cache
+          set -o pipefail
+          for attempt in 1 2 3; do
+            log_file="${RUNNER_TEMP}/release-r8-${attempt}.log"
+            set +e
+            ./gradlew :app:minifyReleaseWithR8 --no-configuration-cache 2>&1 | tee "$log_file"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+
+            # Retry only dependency/network resolution failures. Source or R8
+            # errors should fail immediately and remain visible to developers.
+            if ! grep -Eqi 'plugin .* was not found|could not resolve|could not get resource|connection reset|connection timed out|unknownhost|temporary failure|failed to connect' "$log_file"; then
+              exit "$status"
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 15))
+            fi
+          done
+          exit "$status"
 
       - name: Gradle Build
         run: ./gradlew assembleRelease --no-configuration-cache
