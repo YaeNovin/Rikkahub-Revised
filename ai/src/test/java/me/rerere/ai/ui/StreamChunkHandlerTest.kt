@@ -9,6 +9,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.TextGenerationResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
@@ -30,6 +31,24 @@ class StreamChunkHandlerTest {
         assertEquals(MessageRole.ASSISTANT, messages.last().role)
         assertEquals("hello", messages.last().toText())
         assertEquals(model.id, messages.last().modelId)
+        assertNotNull(messages.last().finishedAt)
+    }
+
+    @Test
+    fun `finish should clear interrupted state after appending continuation`() {
+        var messages = listOf(
+            UIMessage.user("hello"),
+            UIMessage.assistant("partial").copy(interrupted = true),
+        )
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.TextStart("continuation"))
+        messages = handler.handle(messages, StreamChunk.TextDelta("continuation", " response"))
+        messages = handler.handle(messages, StreamChunk.Finish(finishReason = "stop"))
+
+        assertEquals(2, messages.size)
+        assertEquals(listOf("partial", " response"), messages.last().parts.map { (it as UIMessagePart.Text).text })
+        assertFalse(messages.last().interrupted)
         assertNotNull(messages.last().finishedAt)
     }
 

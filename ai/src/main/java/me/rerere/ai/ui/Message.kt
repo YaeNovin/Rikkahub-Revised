@@ -22,7 +22,8 @@ data class UIMessage(
     val finishedAt: LocalDateTime? = null,
     val modelId: Uuid? = null,
     val usage: TokenUsage? = null,
-    val translation: String? = null
+    val translation: String? = null,
+    val interrupted: Boolean = false,
 ) {
     fun summaryAsText(maxLength: Int = Int.MAX_VALUE): String {
         val text = "[${role.name}]: " + parts.joinToString(separator = "\n") { part ->
@@ -195,7 +196,8 @@ fun UIMessage.finishPendingTools(
 
     return copy(
         parts = updatedParts,
-        finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+        interrupted = false,
     ).finishReasoning()
 }
 

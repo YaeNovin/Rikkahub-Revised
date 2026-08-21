@@ -743,12 +743,12 @@
   <string name="setting_display_page_create_new_conversation_on_start_title">New chat on launch</string>
   <string name="setting_general_page_generation_retry_title">Automatic reconnection</string>
   <string name="setting_general_page_generation_retry_enabled_title">Enable automatic reconnection</string>
-  <string name="setting_general_page_generation_retry_desc">Retry temporary network and server failures before output, and continue an interrupted plain-text response when safe. Tool calls, generated images, and server-side tools are never replayed.</string>
+  <string name="setting_general_page_generation_retry_desc">Wait for validated internet after Wi-Fi, mobile-data, or SIM changes, retry temporary failures before output, and continue interrupted plain-text responses when safe. Tool calls, generated images, and server-side tools are never replayed.</string>
   <string name="setting_general_page_generation_retry_count_title">Maximum retry count</string>
   <string name="setting_general_page_generation_retry_count_desc">Maximum retries shared by the entire request. The hard limit is 7.</string>
   <string name="setting_general_page_generation_retry_count_value">%1$d retries</string>
   <string name="setting_general_page_generation_retry_interval_title">Initial retry interval</string>
-  <string name="setting_general_page_generation_retry_interval_desc">Initial wait before reconnecting. Later waits increase exponentially unless the provider supplies Retry-After.</string>
+  <string name="setting_general_page_generation_retry_interval_desc">Initial wait before reconnecting. Later waits use capped exponential backoff with jitter unless the provider supplies Retry-After.</string>
   <string name="setting_general_page_generation_retry_duration_title">Maximum reconnect duration</string>
   <string name="setting_general_page_generation_retry_duration_desc">Stop reconnecting after this total time from the first request, even if retries remain.</string>
   <string name="setting_general_page_generation_retry_seconds_value">%1$d s</string>

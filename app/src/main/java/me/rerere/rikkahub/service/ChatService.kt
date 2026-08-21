@@ -37,7 +37,6 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
-import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
@@ -45,6 +44,8 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.markInterruptedToolsForContinuation
+import me.rerere.rikkahub.data.ai.shouldResumeInterruptedResponseAt
 import me.rerere.rikkahub.data.ai.context.RollingContextPlan
 import me.rerere.rikkahub.data.ai.context.RollingContextSummary
 import me.rerere.rikkahub.data.ai.context.coveredMessageCount
@@ -399,7 +400,19 @@ class ChatService(
                     if (regenerateAssistantMsg) {
                         val node = conversation.getMessageNodeByMessage(message)
                         val nodeIndex = conversation.messageNodes.indexOf(node)
-                        handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
+                        val resumeInterruptedResponse =
+                            conversation.shouldResumeInterruptedResponseAt(message)
+                        if (resumeInterruptedResponse) {
+                            // A passive network failure may leave a partial tool call without the
+                            // cancellation marker written by stopGeneration. Make it inert before
+                            // constructing the provider-only continuation request.
+                            markInterruptedToolsForContinuation(conversationId)
+                        }
+                        handleMessageComplete(
+                            conversationId,
+                            messageRange = if (resumeInterruptedResponse) 0..nodeIndex else 0..<nodeIndex,
+                            resumeInterruptedResponse = resumeInterruptedResponse,
+                        )
                     } else {
                         saveConversation(conversationId, conversation)
                     }
@@ -481,7 +494,8 @@ class ChatService(
 
     private suspend fun handleMessageComplete(
         conversationId: Uuid,
-        messageRange: ClosedRange<Int>? = null
+        messageRange: ClosedRange<Int>? = null,
+        resumeInterruptedResponse: Boolean = false,
     ) {
         val settings = settingsStore.settingsFlow.first()
         val initialConversation = getConversationFlow(conversationId).value
@@ -588,6 +602,7 @@ class ChatService(
                 workspaceCwd = conversation.workspaceCwd,
                 rollingContextSummary = rollingSummary?.content,
                 requestMessageStartIndex = requestMessageStartIndex,
+                resumeInterruptedResponse = resumeInterruptedResponse,
                 memories = if (assistant.useGlobalMemory) {
                     memoryRepository.getGlobalMemories()
                 } else {
@@ -649,15 +664,29 @@ class ChatService(
                         )
                     }
                 },
-            ).onCompletion {
+            ).onCompletion { cause ->
                 // The last chunk can arrive inside the throttle window. Publish it before
                 // finishing reasoning and notifications so the persisted state stays complete.
                 publishPendingStreamMessages(force = true)
 
                 // 可能被取消了，或者意外结束，兜底更新
-                val updatedConversation = getConversationFlow(conversationId).value.copy(
-                    messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
-                        node.copy(messages = node.messages.map { it.finishReasoning() })
+                val latestConversation = getConversationFlow(conversationId).value
+                val interruptedMessageId = if (cause != null) {
+                    latestConversation.currentMessages.lastOrNull()
+                        ?.takeIf { it.role == MessageRole.ASSISTANT && it.finishedAt == null }
+                        ?.id
+                } else {
+                    null
+                }
+                val updatedConversation = latestConversation.copy(
+                    messageNodes = latestConversation.messageNodes.map { node ->
+                        node.copy(messages = node.messages.map { message ->
+                            if (message.id == interruptedMessageId) {
+                                message.markInterruptedToolsForContinuation()
+                            } else {
+                                message.finishReasoning()
+                            }
+                        })
                     },
                     updateAt = Instant.now()
                 )
@@ -691,6 +720,7 @@ class ChatService(
                 }
             }
         }.onFailure {
+            saveConversation(conversationId, getConversationFlow(conversationId).value)
             // 兜底取消 Live Update 通知（生成开始前失败时 onCompletion 不会执行）
             appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
 
@@ -774,22 +804,11 @@ class ChatService(
         updateConversation(conversationId, conversation.copy(messageNodes = messagesNodes))
     }
 
-    private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
-        return tool.copy(
-            output = listOf(
-                UIMessagePart.Text(
-                    """{"status":"cancelled","error":"Generation cancelled by user before tool execution completed."}"""
-                )
-            ),
-            approvalState = ToolApprovalState.Denied("Generation cancelled by user")
-        )
-    }
-
     private suspend fun finishInterruptedPendingTools(conversationId: Uuid) {
         val currentConversation = getConversationFlow(conversationId).value
         val lastNode = currentConversation.messageNodes.lastOrNull() ?: return
         val lastMessage = lastNode.currentMessage
-        val updatedMessage = lastMessage.finishPendingTools(::cancelToolByUser)
+        val updatedMessage = lastMessage.markInterruptedToolsForContinuation()
         if (updatedMessage == lastMessage) {
             return
         }
@@ -802,6 +821,24 @@ class ChatService(
             )
         )
         saveConversation(conversationId, updatedConversation)
+    }
+
+    private suspend fun markInterruptedToolsForContinuation(conversationId: Uuid) {
+        val currentConversation = getConversationFlow(conversationId).value
+        val lastNode = currentConversation.messageNodes.lastOrNull() ?: return
+        val lastMessage = lastNode.currentMessage
+        val updatedMessage = lastMessage.markInterruptedToolsForContinuation()
+        if (updatedMessage == lastMessage) return
+        saveConversation(
+            conversationId,
+            currentConversation.copy(
+                messageNodes = currentConversation.messageNodes.dropLast(1) + lastNode.copy(
+                    messages = lastNode.messages.map { message ->
+                        if (message.id == lastMessage.id) updatedMessage else message
+                    },
+                ),
+            ),
+        )
     }
 
     // ---- 生成标题 ----
@@ -1407,5 +1444,6 @@ class ChatService(
         job.cancel()
         runCatching { job.join() }
         finishInterruptedPendingTools(conversationId)
+        saveConversation(conversationId, getConversationFlow(conversationId).value)
     }
 }

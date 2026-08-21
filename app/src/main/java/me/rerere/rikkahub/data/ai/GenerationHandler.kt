@@ -6,6 +6,8 @@ import android.provider.OpenableColumns
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -25,7 +27,9 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.CustomBody
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
@@ -34,7 +38,6 @@ import me.rerere.ai.provider.ProviderRetryController
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.crossesRequestReplayBoundary
-import me.rerere.ai.provider.isRetryableProviderFailure
 import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunk
@@ -112,6 +115,7 @@ class GenerationHandler(
         workspaceCwd: String? = null,
         rollingContextSummary: String? = null,
         requestMessageStartIndex: Int = 0,
+        resumeInterruptedResponse: Boolean = false,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -132,6 +136,7 @@ class GenerationHandler(
             ragEnabledCount = ragEnabledKnowledgeBaseIds.size,
         )
 
+        var needsInterruptedResponseContinuation = resumeInterruptedResponse
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
@@ -205,6 +210,12 @@ class GenerationHandler(
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
+                if (messages.lastOrNull()?.role == MessageRole.ASSISTANT &&
+                    messages.last().finishedAt != null
+                ) {
+                    messages = messages.dropLast(1) + messages.last().copy(finishedAt = null)
+                    emit(GenerationChunk.Messages(messages))
+                }
                 val requestCitations = generateInternal(
                     assistant = assistant,
                     settings = settings,
@@ -248,7 +259,9 @@ class GenerationHandler(
                     workspaceCwd = workspaceCwd,
                     nonToolCapabilityPrompt = nonToolCapabilityPrompt,
                     rollingContextSummary = rollingContextSummary,
+                    resumeInterruptedResponse = needsInterruptedResponseContinuation,
                 )
+                needsInterruptedResponseContinuation = false
                 messages = messages.withKnowledgeCitations(requestCitations)
                 val generatedTools = messages.last().getTools().filter { !it.isExecuted }
                 messages = messages.visualTransforms(
@@ -267,7 +280,8 @@ class GenerationHandler(
                 )
                 messages = messages.slice(0 until messages.lastIndex) + messages.last().copy(
                     finishedAt = Clock.System.now()
-                        .toLocalDateTime(TimeZone.currentSystemDefault())
+                        .toLocalDateTime(TimeZone.currentSystemDefault()),
+                    interrupted = false,
                 )
                 conversationId?.let { id ->
                     messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.let { assistantMessage ->
@@ -460,6 +474,7 @@ class GenerationHandler(
         workspaceCwd: String? = null,
         nonToolCapabilityPrompt: String = "",
         rollingContextSummary: String? = null,
+        resumeInterruptedResponse: Boolean = false,
     ): List<UIMessageAnnotation.KnowledgeCitation> {
         val internalMessages = buildList {
             val system = buildString {
@@ -511,7 +526,17 @@ class GenerationHandler(
         ).compactHistoricalMediaForRequest(
             mediaSizeBytes = ::resolveContentMediaSize,
         )
-        val requestCitations = internalMessages.currentRequestKnowledgeCitations()
+        val initialProviderMessages = if (resumeInterruptedResponse) {
+            buildInterruptedStreamContinuation(
+                requestMessages = internalMessages,
+                currentMessages = messages,
+                hasClientTools = tools.isNotEmpty(),
+                hasServerTools = model.tools.any { it != BuiltInTools.ImageGeneration },
+            ) ?: internalMessages
+        } else {
+            internalMessages
+        }
+        val requestCitations = initialProviderMessages.currentRequestKnowledgeCitations()
             .plus(
                 messages.lastOrNull()
                     ?.getTools()
@@ -539,8 +564,11 @@ class GenerationHandler(
         )
         val previousProcessingStatus = processingStatus.value
         var receivedEffectiveOutput = false
-        var providerMessages = internalMessages
-        var streamRecoveryAttempted = false
+        var providerMessages = initialProviderMessages
+        var streamRecoveryCount = 0
+        val nativeImageOutputEnabled = BuiltInTools.ImageGeneration in model.tools ||
+            Modality.IMAGE in model.outputModalities
+        val hasReplayUnsafeBuiltInTools = model.tools.any { it != BuiltInTools.ImageGeneration }
         val retryController = ProviderRetryController(
             maxRetries = settings.generationRetryMaxRetries.coerceIn(
                 MIN_GENERATION_RETRY_COUNT,
@@ -555,13 +583,18 @@ class GenerationHandler(
                 MAX_GENERATION_RETRY_DURATION_SECONDS,
             ) * 1_000L,
         )
+        val networkRecovery = NetworkRecoveryCoordinator(context)
+        var attemptNetworkVersion = networkRecovery.snapshot()
         try {
             while (true) {
                 try {
                     retryProviderRequest(
-                        enabled = settings.enableGenerationRetry && model.tools.isEmpty(),
+                        enabled = settings.enableGenerationRetry,
                         retryController = retryController,
                         canRetry = { !receivedEffectiveOutput },
+                        shouldRetry = { error ->
+                            networkRecovery.shouldRetry(error, attemptNetworkVersion)
+                        },
                         onRetry = { retryNumber, delayMillis ->
                             Log.w(
                                 TAG,
@@ -573,13 +606,13 @@ class GenerationHandler(
                             )
                         },
                         delayBeforeRetry = { delayMillis ->
-                            waitForNetworkBeforeRetry(
-                                context = context,
+                            networkRecovery.awaitNetworkAndBackoff(
                                 retryDelayMillis = delayMillis,
                                 remainingDurationMillis = retryController.remainingDurationMillis(),
                             )
                         },
                     ) {
+                        attemptNetworkVersion = networkRecovery.snapshot()
                         receivedEffectiveOutput = false
                         if (stream) {
                             val streamChunkHandler = StreamChunkHandler(model)
@@ -613,7 +646,10 @@ class GenerationHandler(
                             ).collect { chunk ->
                                 if (!receivedEffectiveOutput) {
                                     preBoundaryChunks += chunk
-                                    if (chunk.crossesRequestReplayBoundary()) {
+                                    if (chunk.crossesRequestReplayBoundary(
+                                            reasoningIsReplaySafe = nativeImageOutputEnabled,
+                                        )
+                                    ) {
                                         receivedEffectiveOutput = true
                                         processingStatus.value = previousProcessingStatus
                                         for (pendingChunk in preBoundaryChunks) {
@@ -647,7 +683,7 @@ class GenerationHandler(
                             onUpdateMessages(messages)
                         }
                     }
-                    if (streamRecoveryAttempted) {
+                    if (streamRecoveryCount > 0 || resumeInterruptedResponse) {
                         val mergedMessages = messages.mergeLastAssistantTextParts()
                         if (mergedMessages !== messages) {
                             messages = mergedMessages
@@ -655,21 +691,26 @@ class GenerationHandler(
                         }
                     }
                     break
-                } catch (error: CancellationException) {
-                    throw error
                 } catch (error: Throwable) {
-                    val continuationMessages = if (
+                    if (error is CancellationException) currentCoroutineContext().ensureActive()
+                    val canContinueInterruptedStream =
                         stream &&
                         settings.enableGenerationRetry &&
-                        !streamRecoveryAttempted &&
                         receivedEffectiveOutput &&
-                        error.isRetryableProviderFailure()
-                    ) {
+                        networkRecovery.shouldRetry(error, attemptNetworkVersion)
+                    val continuationMessages = if (canContinueInterruptedStream) {
+                        val inertMessages = messages.mapLastAssistant(
+                            UIMessage::markInterruptedToolsForContinuation,
+                        )
+                        if (inertMessages != messages) {
+                            messages = inertMessages
+                            onUpdateMessages(messages)
+                        }
                         buildInterruptedStreamContinuation(
                             requestMessages = internalMessages,
                             currentMessages = messages,
                             hasClientTools = tools.isNotEmpty(),
-                            hasServerTools = model.tools.isNotEmpty(),
+                            hasServerTools = hasReplayUnsafeBuiltInTools,
                         )
                     } else {
                         null
@@ -689,8 +730,7 @@ class GenerationHandler(
                             )
                         },
                         delayBeforeRetry = { delayMillis ->
-                            waitForNetworkBeforeRetry(
-                                context = context,
+                            networkRecovery.awaitNetworkAndBackoff(
                                 retryDelayMillis = delayMillis,
                                 remainingDurationMillis = retryController.remainingDurationMillis(),
                             )
@@ -698,14 +738,23 @@ class GenerationHandler(
                     )
                     if (!reconnectScheduled) throw error
 
-                    streamRecoveryAttempted = true
+                    streamRecoveryCount++
                     providerMessages = continuationMessages
                 }
             }
         } finally {
+            networkRecovery.close()
             processingStatus.value = previousProcessingStatus
         }
         return requestCitations
+    }
+
+    private fun List<UIMessage>.mapLastAssistant(
+        transform: (UIMessage) -> UIMessage,
+    ): List<UIMessage> {
+        val lastMessage = lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT } ?: return this
+        val updated = transform(lastMessage)
+        return if (updated == lastMessage) this else dropLast(1) + updated
     }
 
     private fun resolveContentMediaSize(url: String): Long? {
