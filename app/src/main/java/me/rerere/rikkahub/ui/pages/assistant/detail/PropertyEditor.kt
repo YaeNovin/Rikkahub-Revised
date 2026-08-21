@@ -32,6 +32,7 @@ import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.highlight.LocalCodeHighlighter
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeVisualTransformation
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
@@ -167,11 +168,7 @@ fun CustomBodies(customBodies: List<CustomBody>, onUpdate: (List<CustomBody>) ->
                                         onUpdate(updatedBodies)
                                         jsonParseError = null
                                     } catch (e: Exception) {
-                                        jsonParseError =
-                                            context.getString(
-                                                R.string.assistant_page_invalid_json,
-                                                e.message?.take(100) ?: ""
-                                            )
+                                        jsonParseError = context.formatUserFacingError(e)
                                     }
                                 },
                                 label = { Text(stringResource(R.string.assistant_page_body_value)) },

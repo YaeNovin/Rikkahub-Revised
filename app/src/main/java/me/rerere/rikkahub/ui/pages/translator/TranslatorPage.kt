@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +56,7 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -71,12 +73,13 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
     val translating by vm.translating.collectAsStateWithLifecycle()
     val clipboard = LocalClipboard.current
     val toaster = LocalToaster.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     // 处理错误
     LaunchedEffect(Unit) {
         vm.errorFlow.collect { error ->
-            toaster.show(error.message ?: "错误", type = ToastType.Error)
+            toaster.show(context.formatUserFacingError(error), type = ToastType.Error)
         }
     }
 

@@ -16,13 +16,16 @@ internal data class RailroadSpec(
  * Converts common EBNF productions to the JSON grammar understood by railroad-diagrams.js.
  * JSON input is left untouched so the existing explicit railroad AST remains supported.
  */
-internal fun normalizeRailroadSource(source: String): String {
+internal fun normalizeRailroadSource(
+    source: String,
+    errorMessage: String = "Unable to render this content.",
+): String {
     val trimmed = source.trim()
     if (runCatching { Json.parseToJsonElement(trimmed) }.isSuccess) return trimmed
 
     val spec = runCatching { EbnfRailroadParser(trimmed).parse() }
-        .getOrElse { error ->
-            RailroadSpec(type = "comment", text = "Invalid EBNF: ${error.message.orEmpty()}")
+        .getOrElse {
+            RailroadSpec(type = "comment", text = errorMessage)
         }
     return Json.encodeToString(spec)
 }

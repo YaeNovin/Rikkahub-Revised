@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -36,6 +37,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import me.rerere.rikkahub.ui.components.table.DataTable
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.utils.escapeHtml
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -46,9 +49,10 @@ fun SimpleHtmlBlock(
     html: String,
     modifier: Modifier = Modifier
 ) {
-    val document = remember(html) {
+    val parseErrorMessage = stringResource(R.string.error_message_html_processing)
+    val document = remember(html, parseErrorMessage) {
         runCatching { Jsoup.parse(html) }.getOrElse {
-            Jsoup.parse("<p>Error parsing HTML: ${it.message}</p>")
+            Jsoup.parse("<p>${parseErrorMessage.escapeHtml()}</p>")
         }
     }
 

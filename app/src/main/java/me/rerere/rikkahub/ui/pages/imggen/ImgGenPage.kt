@@ -112,6 +112,7 @@ import me.rerere.hugeicons.stroke.MoveTo
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -713,7 +714,7 @@ private fun ImageGalleryScreen(
                 )
             } catch (e: Exception) {
                 toaster.show(
-                    message = context.getString(R.string.imggen_page_save_failed, e.message),
+                    message = context.formatUserFacingError(e),
                     type = ToastType.Error,
                 )
             }

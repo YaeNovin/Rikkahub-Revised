@@ -32,6 +32,7 @@ import com.dokar.sonner.ToastType
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
@@ -401,9 +402,12 @@ private fun ProviderConfigureGoogle(
                     privateKey = json["private_key"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.privateKey,
                 )
             )
-            toaster.show("Service account imported", type = ToastType.Success)
+            toaster.show(
+                context.getString(R.string.setting_provider_page_import_success),
+                type = ToastType.Success,
+            )
         } catch (e: Exception) {
-            toaster.show("Failed to import: ${e.message}", type = ToastType.Error)
+            toaster.show(context.formatUserFacingError(e), type = ToastType.Error)
         }
     }
 

@@ -12,11 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.web.startWebServer
 import java.net.ServerSocket
 
@@ -73,7 +75,9 @@ class WebServerManager(
                 Log.i(TAG, "Starting web server on $host:$port")
                 if (!isPortAvailable(port)) {
                     Log.w(TAG, "Port $port is already in use")
-                    _state.value = baseState.copy(error = "Port $port is already in use")
+                    _state.value = baseState.copy(
+                        error = context.getString(R.string.error_message_web_server_port_in_use, port)
+                    )
                     return@launch
                 }
                 server = startWebServer(port = port, host = host) {
@@ -102,13 +106,17 @@ class WebServerManager(
                 Log.i(TAG, "Web server started successfully on $host:$port")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start web server", e)
-                _state.value = baseState.copy(error = e.message)
+                _state.value = baseState.copy(error = context.formatUserFacingError(e))
             }
         }
     }
 
-    fun reportError(message: String) {
-        _state.value = _state.value.copy(isRunning = false, isLoading = false, error = message)
+    fun reportError(error: Throwable) {
+        _state.value = _state.value.copy(
+            isRunning = false,
+            isLoading = false,
+            error = context.formatUserFacingError(error),
+        )
     }
 
     fun stop() {
@@ -128,7 +136,10 @@ class WebServerManager(
                 Log.i(TAG, "Web server stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to stop web server", e)
-                _state.value = _state.value.copy(isLoading = false, error = e.message)
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    error = context.formatUserFacingError(e),
+                )
             }
         }
     }

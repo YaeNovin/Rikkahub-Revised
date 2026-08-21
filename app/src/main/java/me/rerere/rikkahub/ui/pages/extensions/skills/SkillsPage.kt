@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
@@ -89,7 +90,7 @@ fun SkillsPage() {
             if (success) {
                 toaster.show(context.getString(R.string.skills_page_import_success, message))
             } else {
-                toaster.show(context.getString(R.string.skills_page_import_failed, message))
+                toaster.show(context.formatUserFacingError(message))
             }
         }
     }
@@ -208,7 +209,7 @@ fun SkillsPage() {
                     if (success) {
                         toaster.show(context.getString(R.string.skills_page_import_success, message))
                     } else {
-                        toaster.show(context.getString(R.string.skills_page_import_failed, message))
+                        toaster.show(context.formatUserFacingError(message))
                     }
                 }
             },

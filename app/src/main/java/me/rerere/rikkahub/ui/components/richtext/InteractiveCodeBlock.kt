@@ -7,11 +7,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_ASSET_URL
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
+import me.rerere.rikkahub.utils.escapeHtml
 import me.rerere.rikkahub.utils.toCssHex
 
 private const val MAX_INTERACTIVE_RENDER_SOURCE_CHARS = 128 * 1024
@@ -42,8 +45,9 @@ internal fun InteractiveCodeBlock(
     modifier: Modifier = Modifier,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val html = remember(renderer, code, colorScheme) {
-        buildInteractiveRendererHtml(renderer, code, colorScheme)
+    val renderErrorMessage = stringResource(R.string.error_message_rich_content_render)
+    val html = remember(renderer, code, colorScheme, renderErrorMessage) {
+        buildInteractiveRendererHtml(renderer, code, colorScheme, renderErrorMessage)
     }
     val webViewState = rememberWebViewState(
         data = html,
@@ -74,6 +78,7 @@ internal fun buildInteractiveRendererHtml(
     renderer: InteractiveCodeRenderer,
     code: String,
     colorScheme: ColorScheme,
+    renderErrorMessage: String = "Unable to render this content.",
 ): String {
     val scriptPath = when (renderer) {
         InteractiveCodeRenderer.ECHARTS -> "renderers/echarts.min.js"
@@ -93,7 +98,7 @@ internal fun buildInteractiveRendererHtml(
         InteractiveCodeRenderer.RAILROAD -> railroadRendererScript()
     }
     val sourceCode = if (renderer == InteractiveCodeRenderer.RAILROAD) {
-        normalizeRailroadSource(code)
+        normalizeRailroadSource(code, renderErrorMessage)
     } else {
         code
     }
@@ -121,15 +126,18 @@ internal fun buildInteractiveRendererHtml(
         <body>
             <div id="renderer"></div>
             <pre id="render-error"></pre>
+            <span id="localized-render-error" hidden>${renderErrorMessage.escapeHtml()}</span>
             <script>
                 (function() {
                     const source = $source;
                     const root = document.getElementById('renderer');
                     const errorView = document.getElementById('render-error');
+                    const localizedRenderError = document.getElementById('localized-render-error').textContent;
                     function fail(error) {
+                        console.error(error);
                         root.style.display = 'none';
                         errorView.style.display = 'block';
-                        errorView.textContent = String(error && error.message ? error.message : error);
+                        errorView.textContent = localizedRenderError;
                     }
                     try {
                         $rendererScript

@@ -86,10 +86,12 @@ fun Mermaid(
     }
 
     val normalizedCode = remember(code) { normalizeMermaidCode(code) }
-    val html = remember(normalizedCode, colorScheme, darkMode) {
+    val renderErrorMessage = stringResource(R.string.error_message_rich_content_render)
+    val html = remember(normalizedCode, colorScheme, darkMode, renderErrorMessage) {
         buildMermaidHtml(
             code = normalizedCode,
             colorScheme = colorScheme,
+            renderErrorMessage = renderErrorMessage,
         )
     }
 
@@ -177,6 +179,7 @@ internal fun normalizeMermaidCode(code: String): String {
 internal fun buildMermaidHtml(
     code: String,
     colorScheme: ColorScheme,
+    renderErrorMessage: String = "Unable to render this content.",
 ): String {
     val primaryColor = colorScheme.primaryContainer.toCssHex()
     val secondaryColor = colorScheme.secondaryContainer.toCssHex()
@@ -216,13 +219,16 @@ internal fun buildMermaidHtml(
             </style>
         </head>
         <body>
-            <div id="diagram-container">
+             <div id="diagram-container">
                 <pre class="mermaid">${code.escapeHtml()}</pre>
             </div>
+            <span id="localized-render-error" hidden>${renderErrorMessage.escapeHtml()}</span>
             <script>
               const mermaidNode = document.querySelector('.mermaid');
+              const localizedRenderError = document.getElementById('localized-render-error').textContent;
               function showRenderError(error) {
-                  mermaidNode.textContent = String(error && error.message ? error.message : error);
+                  console.error(error);
+                  mermaidNode.textContent = localizedRenderError;
                   mermaidNode.classList.remove('mermaid');
                   mermaidNode.style.whiteSpace = 'pre-wrap';
               }

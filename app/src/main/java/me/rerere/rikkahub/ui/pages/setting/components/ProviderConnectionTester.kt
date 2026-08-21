@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +52,8 @@ import me.rerere.ai.provider.withDetectedCapabilities
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
+import me.rerere.rikkahub.service.toDiagnosticMessage
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.UiState
@@ -266,6 +269,7 @@ private fun DiagnosticResultItem(
     detail: String? = null,
     error: String? = null,
 ) {
+    val context = LocalContext.current
     var showErrorSheet by remember(error) { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -279,7 +283,7 @@ private fun DiagnosticResultItem(
         )
         when (status) {
             ProviderDiagnosticStatus.SUCCESS -> Text(
-                text = detail ?: "OK",
+                text = detail ?: stringResource(R.string.status_ok),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.extendColors.green6,
             )
@@ -289,7 +293,8 @@ private fun DiagnosticResultItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ProviderDiagnosticStatus.FAILURE -> Text(
-                text = error ?: "Error",
+                text = error?.let { context.formatUserFacingError(it) }
+                    ?: stringResource(R.string.error_message_generic),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.extendColors.red6,
                 maxLines = 2,
@@ -308,28 +313,70 @@ private fun DiagnosticResultItem(
             onDismissRequest = { showErrorSheet = false },
             sheetState = sheetState,
         ) {
-            Text(
-                text = error,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.7f)
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()),
-            )
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.error_diagnostic_details),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                SelectionContainer {
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun DiagnosticErrorItem(error: Throwable) {
+    val context = LocalContext.current
+    var showErrorSheet by remember(error) { mutableStateOf(false) }
     Text(
-        text = error.message ?: "Error",
+        text = context.formatUserFacingError(error),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.extendColors.red6,
         maxLines = 3,
         overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.clickable { showErrorSheet = true },
     )
+    if (showErrorSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showErrorSheet = false },
+            sheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            ),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.7f)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.error_diagnostic_details),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                SelectionContainer {
+                    Text(
+                        text = error.toDiagnosticMessage(),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -361,7 +408,11 @@ private fun ProtocolTraceSheet(
             )
             Text(
                 text = "${stringResource(R.string.setting_provider_page_trace_regression)}: " +
-                    if (passed) "OK" else "Failed",
+                    if (passed) {
+                        stringResource(R.string.status_ok)
+                    } else {
+                        stringResource(R.string.status_failed)
+                    },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (passed) MaterialTheme.extendColors.green6 else MaterialTheme.extendColors.red6,
             )

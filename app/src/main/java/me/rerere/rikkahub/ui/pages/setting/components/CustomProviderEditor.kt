@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonPrimitive
@@ -31,6 +32,7 @@ import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 @Composable
@@ -40,6 +42,7 @@ fun CustomProviderEditor(
     modifier: Modifier = Modifier,
 ) {
     if (provider.builtIn) return
+    val context = LocalContext.current
 
     var showEditor by remember { mutableStateOf(false) }
     OutlinedButton(
@@ -54,7 +57,6 @@ fun CustomProviderEditor(
             mutableStateOf(CustomProviderConfigCodec.export(provider))
         }
         var error by remember { mutableStateOf<String?>(null) }
-        val genericConfigurationError = stringResource(R.string.setting_provider_page_configuration_error)
         val sheetState = rememberBottomSheetState(
             initialValue = SheetValue.Hidden,
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
@@ -117,7 +119,7 @@ fun CustomProviderEditor(
                                 onApply(parsed)
                                 showEditor = false
                             }.onFailure { throwable ->
-                                error = throwable.message ?: genericConfigurationError
+                                error = context.formatUserFacingError(throwable)
                             }
                         },
                     ) {

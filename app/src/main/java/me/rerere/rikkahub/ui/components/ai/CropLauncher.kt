@@ -18,6 +18,7 @@ import com.yalantis.ucrop.UCrop
 import com.yalantis.ucrop.UCropActivity
 import me.rerere.common.android.Logging
 import me.rerere.common.android.appTempFolder
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.context.LocalToaster
 import java.io.File
 
@@ -49,7 +50,7 @@ internal fun useCropLauncher(
                     "crop failed: ${error?.message} | ${error?.stackTraceToString()}"
                 )
                 toaster.show(
-                    "Failed to crop image: ${error?.message ?: "unknown error"}",
+                    context.formatUserFacingError(error ?: IllegalStateException("Image crop failed")),
                     type = ToastType.Error
                 )
             }

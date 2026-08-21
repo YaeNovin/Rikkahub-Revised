@@ -23,6 +23,7 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import me.rerere.rikkahub.R
 
 import java.io.File
 import java.io.FileOutputStream
@@ -71,7 +72,7 @@ fun Context.writeClipboardText(text: String) {
         Log.i(TAG, "writeClipboardText: $text")
     }.onFailure {
         Log.e(TAG, "writeClipboardText: $text", it)
-        Toast.makeText(this, "Failed to write text into clipboard", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.error_message_clipboard_write), Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -124,7 +125,7 @@ fun Context.openUrl(url: String) {
         intent.launchUrl(this, url.toUri())
     }.onFailure {
         it.printStackTrace()
-        Toast.makeText(this, "Failed to open URL: $url", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.error_message_open_url), Toast.LENGTH_SHORT).show()
     }
 }
 

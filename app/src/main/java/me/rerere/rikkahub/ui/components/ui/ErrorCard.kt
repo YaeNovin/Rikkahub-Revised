@@ -112,11 +112,12 @@ fun ErrorCard(
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     val checkTitleModelSettings = stringResource(R.string.chat_page_check_title_model_settings)
+    val diagnosticDetailsLabel = stringResource(R.string.error_diagnostic_details)
     val linkColor = MaterialTheme.colorScheme.primary
 
-    // 5 秒后自动消失
+    // Keep diagnostics visible long enough to read or copy without leaving stale cards behind.
     LaunchedEffect(error.id) {
-        delay(5000)
+        delay(ERROR_CARD_AUTO_DISMISS_MILLIS)
         onDismiss()
     }
 
@@ -147,7 +148,7 @@ fun ErrorCard(
                     )
                 }
                 Text(
-                    text = error.error.message ?: "Unknown error",
+                    text = error.displayMessage,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                     overflow = TextOverflow.Ellipsis,
@@ -183,7 +184,10 @@ fun ErrorCard(
                     scope.launch {
                         clipboard.setClipEntry(
                             ClipEntry(
-                                clipData = ClipData.newPlainText("Error", error.error.message ?: "Unknown error")
+                                clipData = ClipData.newPlainText(
+                                    diagnosticDetailsLabel,
+                                    error.diagnosticMessage,
+                                )
                             )
                         )
                     }
@@ -192,7 +196,7 @@ fun ErrorCard(
             ) {
                 Icon(
                     imageVector = HugeIcons.Copy01,
-                    contentDescription = "Copy error message",
+                    contentDescription = stringResource(R.string.error_copy_diagnostic_details),
                     tint = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.size(18.dp),
                 )
@@ -211,3 +215,5 @@ fun ErrorCard(
         }
     }
 }
+
+private const val ERROR_CARD_AUTO_DISMISS_MILLIS = 12_000L

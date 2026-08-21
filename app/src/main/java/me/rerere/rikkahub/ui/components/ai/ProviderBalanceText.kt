@@ -13,12 +13,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.MoneyBag02
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.utils.SimpleCache
 import me.rerere.rikkahub.utils.toDp
 import org.koin.compose.koinInject
@@ -41,6 +43,7 @@ fun ProviderBalanceText(
     }
 
     val providerManager = koinInject<ProviderManager>()
+    val context = LocalContext.current
 
     val value = produceState(initialValue = "~", key1 = providerSetting.id, key2 = providerSetting.balanceOption) {
         // Check cache first
@@ -55,10 +58,8 @@ fun ProviderBalanceText(
                 cache.put("${providerSetting.id},${providerSetting.balanceOption.hashCode()}", balance)
                 value = balance
             }.onFailure {
-                // Handle error
-                val errorMsg = "Error: ${it.message}"
                 // Don't cache error messages
-                value = errorMsg
+                value = context.formatUserFacingError(it)
             }
         }
     }

@@ -43,6 +43,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import org.koin.compose.koinInject
 
 @Composable
@@ -86,7 +87,7 @@ private fun SillyTavernImporter(
                         )
                     }.onFailure { exception ->
                         exception.printStackTrace()
-                        toaster.show(exception.message ?: context.getString(R.string.assistant_importer_import_failed))
+                        toaster.show(context.formatUserFacingError(exception))
                     }
                 } finally {
                     isLoading = false
@@ -112,7 +113,7 @@ private fun SillyTavernImporter(
                         )
                     }.onFailure { exception ->
                         exception.printStackTrace()
-                        toaster.show(exception.message ?: context.getString(R.string.assistant_importer_import_failed))
+                        toaster.show(context.formatUserFacingError(exception))
                     }
                 } finally {
                     isLoading = false
@@ -284,7 +285,7 @@ private suspend fun importAssistantFromUri(
     } catch (exception: Exception) {
         exception.printStackTrace()
         toaster.show(
-            message = exception.message ?: context.getString(R.string.assistant_importer_import_failed),
+                    message = context.formatUserFacingError(exception),
             type = ToastType.Error
         )
     }

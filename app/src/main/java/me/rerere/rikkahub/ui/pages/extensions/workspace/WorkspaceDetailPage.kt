@@ -72,6 +72,7 @@ import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
@@ -273,7 +274,7 @@ fun WorkspaceDetailPage(id: String) {
         AlertDialog(
             onDismissRequest = vm::dismissInstallError,
             title = { Text(stringResource(R.string.workspace_detail_rootfs_install_failed)) },
-            text = { Text(message) },
+            text = { Text(context.formatUserFacingError(message)) },
             confirmButton = {
                 TextButton(onClick = vm::dismissInstallError) {
                     Text(stringResource(R.string.common_confirm))
@@ -591,6 +592,7 @@ private fun WorkspaceFilesPage(
     onExport: (WorkspaceFileEntry) -> Unit,
     onShare: (WorkspaceFileEntry) -> Unit,
 ) {
+    val context = LocalContext.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = contentPadding + PaddingValues(16.dp),
@@ -613,7 +615,7 @@ private fun WorkspaceFilesPage(
 
         state.error?.let { error ->
             item {
-                ErrorCard(error)
+                ErrorCard(context.formatUserFacingError(error))
             }
         }
 

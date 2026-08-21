@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.model.Sponsor
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -123,6 +124,7 @@ private fun DonateMethodsCardGroup() {
 
 @Composable
 private fun Sponsors(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val sponsorAPI = koinInject<SponsorAPI>()
     val sponsors by produceState<UiState<List<Sponsor>>>(UiState.Idle) {
         value = UiState.Loading
@@ -168,7 +170,7 @@ private fun Sponsors(modifier: Modifier = Modifier) {
             CircularWavyProgressIndicator(modifier = Modifier.align(Alignment.Center))
         }.onError {
             Text(
-                text = it.message ?: it.javaClass.simpleName,
+                text = context.formatUserFacingError(it),
                 modifier = Modifier.align(Alignment.Center)
             )
         }

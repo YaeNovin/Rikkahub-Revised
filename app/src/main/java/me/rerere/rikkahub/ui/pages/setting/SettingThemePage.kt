@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
@@ -72,6 +73,7 @@ import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.PlusSign
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -494,6 +496,7 @@ private fun ImportThemeDialog(
     onDismiss: () -> Unit,
     onImport: (CustomTheme) -> Unit,
 ) {
+    val context = LocalContext.current
     var jsonText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -524,7 +527,7 @@ private fun ImportThemeDialog(
                         val theme = themeJson.decodeFromString<CustomTheme>(jsonText)
                         onImport(theme)
                     } catch (e: Exception) {
-                        errorMessage = e.message
+                        errorMessage = context.formatUserFacingError(e)
                     }
                 },
                 enabled = jsonText.isNotBlank()

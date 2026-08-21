@@ -63,7 +63,7 @@ fun LogPage() {
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("Logs") },
+                title = { Text(stringResource(R.string.log_page_title)) },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(
@@ -72,7 +72,10 @@ fun LogPage() {
                             logs = Logging.getRecentLogs()
                         }
                     ) {
-                        Icon(HugeIcons.Delete01, null)
+                        Icon(
+                            imageVector = HugeIcons.Delete01,
+                            contentDescription = stringResource(R.string.log_page_clear),
+                        )
                     }
                 },
                 scrollBehavior = scrollBehavior,
@@ -103,7 +106,7 @@ private fun UnifiedLogList(
     onRequestLoggingChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedLog by remember { mutableStateOf<LogEntry.RequestLog?>(null) }
+    var selectedLog by remember { mutableStateOf<LogEntry?>(null) }
     val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
     val scope = rememberCoroutineScope()
     val sortedLogs = remember(logs) { logs.sortedByDescending { it.timestamp } }
@@ -130,6 +133,14 @@ private fun UnifiedLogList(
                     }
                 )
 
+                is LogEntry.ErrorLog -> ErrorLogCard(
+                    log = log,
+                    onClick = {
+                        selectedLog = log
+                        scope.launch { sheetState.show() }
+                    },
+                )
+
                 is LogEntry.TextLog -> TextLogCard(log = log)
             }
         }
@@ -140,7 +151,117 @@ private fun UnifiedLogList(
             onDismissRequest = { selectedLog = null },
             sheetState = sheetState
         ) {
-            RequestLogDetail(log)
+            when (log) {
+                is LogEntry.RequestLog -> RequestLogDetail(log)
+                is LogEntry.ErrorLog -> ErrorLogDetail(log)
+                is LogEntry.TextLog -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorLogCard(log: LogEntry.ErrorLog, onClick: () -> Unit) {
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = log.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = dateFormat.format(Date(log.timestamp)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = log.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorLogDetail(log: LogEntry.ErrorLog) {
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+
+    SelectionContainer {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Text(
+                    text = stringResource(R.string.log_page_error_details),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            item { DetailSection(stringResource(R.string.log_page_name), log.name) }
+            item {
+                DetailSection(
+                    stringResource(R.string.log_page_time),
+                    dateFormat.format(Date(log.timestamp)),
+                )
+            }
+            item { DetailSection(stringResource(R.string.log_page_summary), log.summary) }
+            item {
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = stringResource(R.string.log_page_complete_log),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                clipboard.setClipEntry(
+                                    ClipEntry(
+                                        ClipData.newPlainText(log.name, log.details)
+                                    )
+                                )
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Copy01,
+                            contentDescription = stringResource(R.string.log_page_copy_complete_log),
+                        )
+                    }
+                }
+                Text(
+                    text = log.details,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = JetbrainsMono,
+                )
+            }
         }
     }
 }
@@ -223,7 +344,7 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
             ) {
                 log.responseCode?.let { code ->
                     Text(
-                        text = "Status: $code",
+                        text = stringResource(R.string.log_page_status_value, code),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (code in 200..299) {
                             MaterialTheme.colorScheme.primary
@@ -234,7 +355,7 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
                 }
                 log.durationMs?.let { duration ->
                     Text(
-                        text = "${duration}ms",
+                        text = stringResource(R.string.log_page_duration_millis, duration),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -243,7 +364,7 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
 
             log.error?.let { error ->
                 Text(
-                    text = "Error: $error",
+                    text = stringResource(R.string.log_page_diagnostic_error, error),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -257,6 +378,7 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    val requestBodyLabel = stringResource(R.string.log_page_request_body)
 
     SelectionContainer {
         LazyColumn(
@@ -266,39 +388,48 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
         ) {
             item {
                 Text(
-                    text = "Request Details",
+                    text = stringResource(R.string.log_page_request_details),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             }
 
             item {
-                DetailSection("Time", dateFormat.format(Date(log.timestamp)))
+                DetailSection(
+                    stringResource(R.string.log_page_time),
+                    dateFormat.format(Date(log.timestamp)),
+                )
             }
 
             item {
-                DetailSection("URL", log.url)
+                DetailSection(stringResource(R.string.log_page_url), log.url)
             }
 
             item {
-                DetailSection("Method", log.method)
+                DetailSection(stringResource(R.string.log_page_method), log.method)
             }
 
             log.responseCode?.let { code ->
                 item {
-                    DetailSection("Status Code", code.toString())
+                    DetailSection(stringResource(R.string.log_page_status_code), code.toString())
                 }
             }
 
             log.durationMs?.let { duration ->
                 item {
-                    DetailSection("Duration", "${duration}ms")
+                    DetailSection(
+                        stringResource(R.string.log_page_duration),
+                        stringResource(R.string.log_page_duration_millis, duration),
+                    )
                 }
             }
 
             log.error?.let { error ->
                 item {
-                    DetailSection("Error", error)
+                    DetailSection(
+                        stringResource(R.string.log_page_diagnostic_error_label),
+                        error,
+                    )
                 }
             }
 
@@ -306,7 +437,7 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                 item {
                     HorizontalDivider()
                     Text(
-                        text = "Request Headers",
+                        text = stringResource(R.string.log_page_request_headers),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 8.dp)
@@ -327,7 +458,7 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Request Body",
+                            text = requestBodyLabel,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 8.dp)
@@ -336,7 +467,7 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                             onClick = {
                                 scope.launch {
                                     clipboard.setClipEntry(
-                                        ClipEntry(ClipData.newPlainText("Request Body", body))
+                                        ClipEntry(ClipData.newPlainText(requestBodyLabel, body))
                                     )
                                 }
                             }
@@ -370,7 +501,7 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                 item {
                     HorizontalDivider()
                     Text(
-                        text = "Response Headers",
+                        text = stringResource(R.string.log_page_response_headers),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 8.dp)

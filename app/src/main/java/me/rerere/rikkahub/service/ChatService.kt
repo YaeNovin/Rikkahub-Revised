@@ -138,6 +138,8 @@ data class ChatError(
     val id: Uuid = Uuid.random(),
     val title: String? = null,
     val error: Throwable,
+    val displayMessage: String,
+    val diagnosticMessage: String,
     val conversationId: Uuid? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val solution: ChatErrorSolution? = null,
@@ -202,9 +204,26 @@ class ChatService(
         solution: ChatErrorSolution? = null,
     ) {
         if (error is CancellationException) return
+        val errorName = title ?: context.getString(R.string.error_title_operation)
+        val displayMessage = context.formatChatError(error)
+        val diagnosticMessage = error.toDiagnosticMessage()
+        val chatError = ChatError(
+            title = title,
+            error = error,
+            displayMessage = displayMessage,
+            diagnosticMessage = diagnosticMessage,
+            conversationId = conversationId,
+            solution = solution,
+        )
         _errors.update {
-            it + ChatError(title = title, error = error, conversationId = conversationId, solution = solution)
+            it + chatError
         }
+        Logging.logError(
+            name = errorName,
+            summary = displayMessage,
+            details = diagnosticMessage,
+            tag = TAG,
+        )
     }
 
     fun dismissError(id: Uuid) {

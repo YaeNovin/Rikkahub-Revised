@@ -47,6 +47,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.FullScreen
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.modifier.onClick
 
@@ -99,7 +100,7 @@ fun TextArea(
                     toaster.show(context.getString(R.string.text_area_import_success), type = ToastType.Success)
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    val errorMessage = e.message ?: context.getString(R.string.text_area_import_failed)
+                    val errorMessage = context.formatUserFacingError(e)
                     onImportError?.invoke(errorMessage) ?: toaster.show(
                         message = errorMessage,
                         type = ToastType.Error

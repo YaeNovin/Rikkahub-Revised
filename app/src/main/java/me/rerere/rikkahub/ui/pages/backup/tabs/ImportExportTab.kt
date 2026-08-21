@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.StickyHeader
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -78,7 +79,7 @@ fun ImportExportTab(
                 }.onFailure { e ->
                     e.printStackTrace()
                     toaster.show(
-                        context.getString(R.string.backup_page_restore_failed, e.message ?: ""),
+                        context.formatUserFacingError(e),
                         type = ToastType.Error
                     )
                 }
@@ -159,7 +160,7 @@ fun ImportExportTab(
                 }.onFailure { e ->
                     e.printStackTrace()
                     toaster.show(
-                        context.getString(R.string.backup_page_restore_failed, e.message ?: ""),
+                        context.formatUserFacingError(e),
                         type = ToastType.Error
                     )
                 }

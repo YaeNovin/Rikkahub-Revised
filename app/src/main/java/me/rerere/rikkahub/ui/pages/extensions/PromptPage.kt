@@ -73,6 +73,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -83,6 +84,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.export.LorebookSerializer
 import me.rerere.rikkahub.data.export.ModeInjectionSerializer
 import me.rerere.rikkahub.data.export.rememberExporter
@@ -188,13 +190,13 @@ private fun ModeInjectionTab(
         }
     }
     val importSuccessMsg = stringResource(R.string.export_import_success)
-    val importFailedMsg = stringResource(R.string.export_import_failed)
+    val context = LocalContext.current
     val importer = rememberImporter(ModeInjectionSerializer) { result ->
         result.onSuccess { imported ->
             onUpdate(currentModeInjections + imported)
             toaster.show(importSuccessMsg)
         }.onFailure { error ->
-            toaster.show(importFailedMsg.format(error.message))
+            toaster.show(context.formatUserFacingError(error))
         }
     }
 
@@ -600,13 +602,13 @@ private fun LorebookTab(
         }
     }
     val importSuccessMsg = stringResource(R.string.export_import_success)
-    val importFailedMsg = stringResource(R.string.export_import_failed)
+    val context = LocalContext.current
     val importer = rememberImporter(LorebookSerializer) { result ->
         result.onSuccess { imported ->
             onUpdate(currentLorebooks + imported)
             toaster.show(importSuccessMsg)
         }.onFailure { error ->
-            toaster.show(importFailedMsg.format(error.message))
+            toaster.show(context.formatUserFacingError(error))
         }
     }
 

@@ -46,6 +46,7 @@ import me.rerere.ai.provider.ProviderRetryController
 import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.ui.ImageGenSize
 import me.rerere.ai.ui.ImageGenerationItem
+import me.rerere.common.android.Logging
 import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.MAX_GENERATION_RETRY_COUNT
@@ -64,6 +65,7 @@ import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.GenMediaRepository
+import me.rerere.rikkahub.service.toDiagnosticMessage
 import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.uuid.Uuid
@@ -476,8 +478,10 @@ class ImgGenVM(
                 )
             } catch (e: Exception) {
                 if(e is CancellationException) return@launch
-                Log.e(TAG, "Image generation failed (${e::class.simpleName})")
-                _error.value = userFacingError(e)
+                Log.e(TAG, "Image generation failed", e)
+                val displayMessage = userFacingError(e)
+                _error.value = displayMessage
+                logImageError(R.string.imggen_error_generation_title, displayMessage, e)
             } finally {
                 _isGenerating.value = false
             }
@@ -536,8 +540,10 @@ class ImgGenVM(
                 )
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
-                Log.e(TAG, "Image editing failed (${e::class.simpleName})")
-                _error.value = userFacingError(e)
+                Log.e(TAG, "Image editing failed", e)
+                val displayMessage = userFacingError(e)
+                _error.value = displayMessage
+                logImageError(R.string.imggen_error_edit_title, displayMessage, e)
             } finally {
                 _isGenerating.value = false
             }
@@ -901,6 +907,15 @@ class ImgGenVM(
                 context.getString(R.string.imggen_error_invalid_configuration)
             else -> context.getString(R.string.imggen_error_generic)
         }
+    }
+
+    private fun logImageError(titleRes: Int, summary: String, error: Throwable) {
+        Logging.logError(
+            name = getApplication<Application>().getString(titleRes),
+            summary = summary,
+            details = error.toDiagnosticMessage(),
+            tag = TAG,
+        )
     }
 
     companion object {

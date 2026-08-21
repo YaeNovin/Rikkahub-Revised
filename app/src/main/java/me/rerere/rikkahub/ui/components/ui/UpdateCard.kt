@@ -37,6 +37,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useThrottle
@@ -71,7 +72,7 @@ fun UpdateCard(vm: ChatVM) {
                     color = MaterialTheme.colorScheme.error,
                 )
                 Text(
-                    text = it.message ?: stringResource(R.string.update_card_unknown_error),
+                    text = context.formatUserFacingError(it),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )

@@ -41,12 +41,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.ChevronRight
@@ -66,6 +68,7 @@ import org.koin.androidx.compose.koinViewModel
 
 @Composable
 fun SkillDetailPage(skillName: String) {
+    val context = LocalContext.current
     val vm = koinViewModel<SkillDetailVM>()
     LaunchedEffect(skillName) { vm.init(skillName) }
 
@@ -134,7 +137,7 @@ fun SkillDetailPage(skillName: String) {
             onConfirm = { content ->
                 vm.saveFile(skillFile.relativePath, content) { error ->
                     if (error == null) editingFile = null
-                    else toaster.show(error)
+                    else toaster.show(context.formatUserFacingError(error))
                 }
             },
         )
@@ -146,7 +149,7 @@ fun SkillDetailPage(skillName: String) {
             onConfirm = { fileName, content ->
                 vm.saveFile(fileName, content) { error ->
                     if (error == null) showAddDialog = false
-                    else toaster.show(error)
+                    else toaster.show(context.formatUserFacingError(error))
                 }
             },
         )

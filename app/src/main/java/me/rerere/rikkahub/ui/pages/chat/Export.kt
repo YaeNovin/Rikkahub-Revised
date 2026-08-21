@@ -81,6 +81,7 @@ import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.ai.util.encodeBase64
 import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.model.Conversation
@@ -216,7 +217,7 @@ fun ChatExportSheet(
                                         }.onFailure {
                                             it.printStackTrace()
                                             toaster.show(
-                                                message = "Failed to export image: ${it.message}",
+                                                message = context.formatUserFacingError(it),
                                                 type = ToastType.Error
                                             )
                                         }
@@ -391,7 +392,11 @@ private suspend fun exportToImage(
     val activity = context.getActivity()
     if (activity == null) {
         withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Failed to get activity", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                context.formatUserFacingError("Activity unavailable for image export"),
+                Toast.LENGTH_SHORT,
+            ).show()
         }
         return
     }
@@ -438,7 +443,7 @@ private suspend fun exportToImage(
     } catch (e: Exception) {
         e.printStackTrace()
         withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Failed to export image: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.formatUserFacingError(e), Toast.LENGTH_SHORT).show()
         }
     } finally {
         bitmap.recycle()

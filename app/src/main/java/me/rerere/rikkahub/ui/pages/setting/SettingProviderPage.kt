@@ -70,6 +70,7 @@ import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.RECOMMENDED_PROVIDERS
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -467,10 +468,8 @@ private fun handleQRResult(
         when (result) {
             is QRResult.QRError -> {
                 toaster.show(
-                    context.getString(
-                        R.string.setting_provider_page_scan_error,
-                        result
-                    ), type = ToastType.Error
+                    context.getString(R.string.error_message_invalid_data),
+                    type = ToastType.Error,
                 )
             }
 
@@ -494,7 +493,7 @@ private fun handleQRResult(
         }
     }.onFailure { error ->
         toaster.show(
-            context.getString(R.string.setting_provider_page_qr_decode_failed, error.message ?: ""),
+            context.formatUserFacingError(error),
             type = ToastType.Error
         )
     }
@@ -526,7 +525,7 @@ private fun handleImageQRCode(
         )
     }.onFailure { error ->
         toaster.show(
-            context.getString(R.string.setting_provider_page_image_qr_decode_failed, error.message ?: ""),
+            context.formatUserFacingError(error),
             type = ToastType.Error
         )
     }

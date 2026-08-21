@@ -394,10 +394,7 @@ fun Route.conversationRoutes(
                     errors
                         .asSequence()
                         .filter { it.conversationId == uuid && knownErrorIds.add(it.id) }
-                        .map { chatError ->
-                            chatError.error.message?.takeIf { it.isNotBlank() }
-                                ?: chatError.error.toString()
-                        }
+                        .map { chatError -> chatError.displayMessage }
                         .toList()
                 }.map { events ->
                     ConversationStreamPayload.BatchErrors(events)

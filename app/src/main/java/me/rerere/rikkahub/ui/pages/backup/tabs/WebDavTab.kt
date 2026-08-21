@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.sync.BackupPolicy
 import me.rerere.rikkahub.data.sync.BackupScope
@@ -256,10 +257,7 @@ fun WebDavTab(
                         } catch (e: Exception) {
                             e.printStackTrace()
                             toaster.show(
-                                context.getString(
-                                    R.string.backup_page_connection_failed,
-                                    e.message ?: ""
-                                ),
+                                context.formatUserFacingError(e),
                                 type = ToastType.Error
                             )
                         }
@@ -290,7 +288,7 @@ fun WebDavTab(
                         }.onFailure {
                             it.printStackTrace()
                             toaster.show(
-                                it.message ?: context.getString(R.string.backup_page_unknown_error),
+                                context.formatUserFacingError(it),
                                 type = ToastType.Error
                             )
                         }
@@ -359,10 +357,7 @@ fun WebDavTab(
                                         }.onFailure { err ->
                                             err.printStackTrace()
                                             toaster.show(
-                                                context.getString(
-                                                    R.string.backup_page_delete_failed,
-                                                    err.message ?: ""
-                                                ),
+                                                context.formatUserFacingError(err),
                                                 type = ToastType.Error
                                             )
                                         }
@@ -382,10 +377,7 @@ fun WebDavTab(
                                         }.onFailure { err ->
                                             err.printStackTrace()
                                             toaster.show(
-                                                context.getString(
-                                                    R.string.backup_page_restore_failed,
-                                                    err.message ?: ""
-                                                ),
+                                                context.formatUserFacingError(err),
                                                 type = ToastType.Error
                                             )
                                         }
@@ -401,7 +393,7 @@ fun WebDavTab(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = stringResource(R.string.backup_page_loading_failed, it.message ?: ""),
+                            text = context.formatUserFacingError(it),
                             color = MaterialTheme.colorScheme.error
                         )
                     }

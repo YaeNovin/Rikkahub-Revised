@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -59,6 +60,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
@@ -72,6 +74,7 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
     val assistants by vm.assistants.collectAsStateWithLifecycle()
     val documentPreview by vm.documentPreview.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -109,7 +112,7 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = stringResource(R.string.knowledge_base_page_import_error, error),
+                                text = context.formatUserFacingError(error),
                                 modifier = Modifier.weight(1f),
                                 color = androidx.compose.material3.MaterialTheme.colorScheme.error,
                             )
@@ -363,6 +366,7 @@ private fun KnowledgeDocumentRow(
     onPreview: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -383,7 +387,7 @@ private fun KnowledgeDocumentRow(
             )
             document.errorMessage?.takeIf { document.status == KnowledgeDocumentEntity.STATUS_FAILED }?.let { error ->
                 Text(
-                    text = stringResource(R.string.knowledge_base_page_import_error, error),
+                    text = context.formatUserFacingError(error),
                     style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                     color = androidx.compose.material3.MaterialTheme.colorScheme.error,
                 )
@@ -409,6 +413,7 @@ private fun KnowledgeDocumentPreviewSheet(
     preview: KnowledgeDocumentPreviewUiState,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -477,10 +482,7 @@ private fun KnowledgeDocumentPreviewSheet(
                     }
 
                     preview.error != null -> Text(
-                        text = stringResource(
-                            R.string.knowledge_base_page_preview_failed,
-                            preview.error,
-                        ),
+                        text = context.formatUserFacingError(preview.error),
                         color = MaterialTheme.colorScheme.error,
                     )
 
