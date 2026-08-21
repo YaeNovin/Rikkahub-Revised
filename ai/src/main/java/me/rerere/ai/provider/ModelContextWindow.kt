@@ -83,6 +83,9 @@ internal fun JsonObject.contextWindowTokensOrNull(
     ModelDiscoveryProtocol.OPENAI -> knownOpenAIContextWindowTokens(modelId)
         ?: knownGoogleContextWindowTokens(modelId)
         ?: knownAnthropicContextWindowTokens(modelId)
+        ?: knownQwenContextWindowTokens(modelId)
+        ?: knownDeepSeekContextWindowTokens(modelId)
+        ?: knownDoubaoContextWindowTokens(modelId)
     ModelDiscoveryProtocol.GOOGLE -> knownGoogleContextWindowTokens(modelId)
     ModelDiscoveryProtocol.ANTHROPIC -> knownAnthropicContextWindowTokens(modelId)
 }
@@ -108,6 +111,9 @@ fun inferContextWindowTokens(modelId: String): Int? =
     knownOpenAIContextWindowTokens(modelId)
         ?: knownGoogleContextWindowTokens(modelId)
         ?: knownAnthropicContextWindowTokens(modelId)
+        ?: knownQwenContextWindowTokens(modelId)
+        ?: knownDeepSeekContextWindowTokens(modelId)
+        ?: knownDoubaoContextWindowTokens(modelId)
 
 /** Parses the compact K/M notation accepted by the manual context-window setting. */
 fun parseContextWindowTokens(value: String): Int? {
@@ -184,6 +190,66 @@ private fun knownAnthropicContextWindowTokens(modelId: String): Int? {
     }
 }
 
+private fun knownQwenContextWindowTokens(modelId: String): Int? {
+    val id = modelId.normalizedModelId()
+    return when {
+        id.startsWith("qwen-long") -> 10_000_000
+        id.startsWith("qwen3.8-max") -> 1_000_000
+        id.startsWith("qwen3.7-") -> 1_000_000
+        id.startsWith("qwen3.6-plus") || id.startsWith("qwen3.6-flash") -> 1_000_000
+        id.startsWith("qwen3.6-max") -> 256_000
+        id.startsWith("qwen3.5-plus") || id.startsWith("qwen3.5-flash") -> 1_000_000
+        QWEN_3_5_OPEN_SOURCE.matchesPrefix(id) -> 256_000
+        id.startsWith("qwen3-coder-plus") || id.startsWith("qwen3-coder-flash") -> 1_000_000
+        id.startsWith("qwen3-coder-next") ||
+            id.startsWith("qwen3-coder-480b") ||
+            id.startsWith("qwen3-coder-30b") -> 256_000
+        id.startsWith("qwen3-max") -> 256_000
+        QWEN_3_OPEN_SOURCE.matchesPrefix(id) -> 256_000
+        id.startsWith("qwen2.5-") -> 1_000_000
+        id.startsWith("qwen-plus-character") -> 32_000
+        id.startsWith("qwen-flash-character") -> 8_000
+        id == "qwen-plus" || id.startsWith("qwen-plus-") -> 1_000_000
+        id == "qwen-flash" || id.startsWith("qwen-flash-") -> 1_000_000
+        id == "qwen-turbo" || id.startsWith("qwen-turbo-") -> 1_000_000
+        id.startsWith("qwen-mt-") -> 16_000
+        id.startsWith("qwen-omni-turbo") -> 32_000
+        id.startsWith("qwen-vl-max") -> 131_072
+        id == "qwen-max" || id.startsWith("qwen-max-") -> 128_000
+        id.startsWith("qwq-plus") || id.startsWith("qvq-max") -> 128_000
+        else -> null
+    }
+}
+
+private fun knownDeepSeekContextWindowTokens(modelId: String): Int? {
+    val id = modelId.normalizedModelId()
+    return when {
+        id.startsWith("deepseek-v4") -> 1_000_000
+        id.startsWith("deepseek-v3") -> 128_000
+        id.startsWith("deepseek-r1") || id == "deepseek-chat" || id == "deepseek-reasoner" -> 128_000
+        else -> null
+    }
+}
+
+private fun knownDoubaoContextWindowTokens(modelId: String): Int? {
+    val id = modelId.normalizedModelId()
+    DOUBAO_DECLARED_CONTEXT.find(id)?.let { match ->
+        return match.groupValues[1].toIntOrNull()?.times(1_000)
+    }
+    return when {
+        id.startsWith("doubao-seed-evolving") -> 1_024_000
+        id.startsWith("doubao-seed-code") -> 256_000
+        id.startsWith("doubao-seed-1-6") || id.startsWith("doubao-seed-1.6") -> 256_000
+        id.startsWith("doubao-seed-1-8") || id.startsWith("doubao-seed-1.8") -> 256_000
+        id.startsWith("doubao-seed-2-1") || id.startsWith("doubao-seed-2.1") -> 256_000
+        id.startsWith("ark-code") -> 256_000
+        id.startsWith("doubao-1-5-vision-pro") || id.startsWith("doubao-1.5-vision-pro") -> 128_000
+        else -> null
+    }
+}
+
+private fun Set<String>.matchesPrefix(modelId: String): Boolean = any(modelId::startsWith)
+
 private fun String.normalizedModelId(): String = substringAfterLast('/').trim().lowercase()
 
 private fun String.normalizedMetadataKey(): String = filter(Char::isLetterOrDigit).lowercase()
@@ -209,3 +275,21 @@ private fun List<String>.matchesClaudeFamilyVersion(
 private const val MAX_CONTEXT_WINDOW_TOKENS = 10_000_000L
 private val CONTEXT_WINDOW_INPUT = Regex("^(\\d+)([kKmM])?$")
 private val MODEL_ID_SEPARATOR = Regex("[-_.]+")
+private val DOUBAO_DECLARED_CONTEXT = Regex("(?:^|[-_.])(32|128|256)k(?:$|[-_.])")
+private val QWEN_3_5_OPEN_SOURCE = setOf(
+    "qwen3.5-397b-a17b",
+    "qwen3.5-122b-a10b",
+    "qwen3.5-35b-a3b",
+    "qwen3.5-27b",
+)
+private val QWEN_3_OPEN_SOURCE = setOf(
+    "qwen3-235b-a22b",
+    "qwen3-next-80b-a3b",
+    "qwen3-32b",
+    "qwen3-30b-a3b",
+    "qwen3-14b",
+    "qwen3-8b",
+    "qwen3-4b",
+    "qwen3-1.7b",
+    "qwen3-0.6b",
+)

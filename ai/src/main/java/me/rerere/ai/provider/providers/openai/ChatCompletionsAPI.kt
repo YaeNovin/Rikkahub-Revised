@@ -74,6 +74,61 @@ import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
 
+private fun isAlibabaModelStudioHost(host: String): Boolean =
+    host == "dashscope.aliyuncs.com" ||
+        host.endsWith(".dashscope.aliyuncs.com") ||
+        host.endsWith(".maas.aliyuncs.com")
+
+private fun isVolcengineArkHost(host: String): Boolean =
+    host.startsWith("ark.") && host.endsWith(".volces.com")
+
+private fun String.normalizedReasoningModelId(): String =
+    substringAfterLast('/').trim().lowercase().replace(REASONING_MODEL_SEPARATOR, "-")
+
+private fun String.isQwenFamily(): Boolean =
+    startsWith("qwen") || startsWith("qwq") || startsWith("qvq")
+
+private fun String.isQwenThinkingOnlyModel(): Boolean =
+    startsWith("qwq-") ||
+        startsWith("qvq-") ||
+        (startsWith("qwen3-") && contains("-thinking")) ||
+        this == "qwen3-7-max-preview" ||
+        startsWith("qwen3-7-max-2026-05-17")
+
+private fun String.isDeepSeekFamily(): Boolean = startsWith("deepseek")
+
+private fun String.isDeepSeekV4Model(): Boolean = startsWith("deepseek-v4")
+
+private fun String.isDeepSeekThinkingOnlyModel(): Boolean =
+    startsWith("deepseek-r1") || this == "deepseek-reasoner"
+
+private fun String.isDoubaoFamily(): Boolean = startsWith("doubao")
+
+private fun String.supportsVolcengineReasoningEffort(): Boolean =
+    startsWith("doubao-seed-1-6") && contains("lite")
+
+private fun ReasoningLevel.deepSeekReasoningEffort(): String = when (this) {
+    ReasoningLevel.LOW -> "low"
+    ReasoningLevel.MAX -> "max"
+    ReasoningLevel.MEDIUM,
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH -> "high"
+    ReasoningLevel.OFF,
+    ReasoningLevel.AUTO -> error("Reasoning effort requires an explicit enabled level")
+}
+
+private fun ReasoningLevel.volcengineReasoningEffort(): String = when (this) {
+    ReasoningLevel.LOW -> "low"
+    ReasoningLevel.MEDIUM -> "medium"
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH,
+    ReasoningLevel.MAX -> "high"
+    ReasoningLevel.OFF,
+    ReasoningLevel.AUTO -> error("Reasoning effort requires an explicit enabled level")
+}
+
+private val REASONING_MODEL_SEPARATOR = Regex("[._]+")
+
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
     private val keyRoulette: KeyRoulette
@@ -271,8 +326,8 @@ class ChatCompletionsAPI(
 
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
-                when (host) {
-                    "openrouter.ai" -> {
+                when {
+                    host == "openrouter.ai" -> {
                         // https://openrouter.ai/docs/use-cases/reasoning-tokens
                         put("reasoning", buildJsonObject {
                             when (level) {
@@ -283,33 +338,61 @@ class ChatCompletionsAPI(
                         })
                     }
 
-                    "dashscope.aliyuncs.com" -> {
-                        // 阿里云百炼
-                        // https://bailian.console.aliyun.com/console?tab=doc#/doc/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2870973.html&renderType=iframe
-                        put("enable_thinking", level.isEnabled)
-                        level.cappedBudget(ReasoningLevel.MAX.budgetTokens)?.let {
-                            put("thinking_budget", it)
+                    isAlibabaModelStudioHost(host) -> {
+                        // Chat Completions uses enable_thinking/thinking_budget for Qwen.
+                        // Alibaba-hosted DeepSeek V4 uses reasoning_effort instead of a token budget.
+                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        when {
+                            modelId.isDeepSeekThinkingOnlyModel() -> Unit
+                            modelId.isDeepSeekFamily() -> {
+                                put("enable_thinking", level.isEnabled)
+                                if (
+                                    modelId.isDeepSeekV4Model() &&
+                                    level.isEnabled &&
+                                    level != ReasoningLevel.AUTO
+                                ) {
+                                    put("reasoning_effort", level.effort)
+                                }
+                            }
+                            modelId.isQwenThinkingOnlyModel() -> {
+                                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                                    put("thinking_budget", level.cappedBudget(ReasoningLevel.MAX.budgetTokens)!!)
+                                }
+                            }
+                            else -> {
+                                put("enable_thinking", level.isEnabled)
+                                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                                    put("thinking_budget", level.cappedBudget(ReasoningLevel.MAX.budgetTokens)!!)
+                                }
+                            }
                         }
                     }
 
-                    "ark.cn-beijing.volces.com" -> {
-                        // 豆包 (火山)
+                    isVolcengineArkHost(host) -> {
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
+                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        if (
+                            level.isEnabled &&
+                            level != ReasoningLevel.AUTO &&
+                            modelId.supportsVolcengineReasoningEffort()
+                        ) {
+                            put("reasoning_effort", level.volcengineReasoningEffort())
+                        }
                     }
 
-                    "api.mistral.ai" -> {
+                    host == "api.mistral.ai" -> {
                         // Mistral 不支持
                     }
 
-                    "chat.intern-ai.org.cn" -> {
+                    host == "chat.intern-ai.org.cn" -> {
                         // 书生
                         // https://internlm.intern-ai.org.cn/api/document?lang=zh
                         put("thinking_mode", level.isEnabled)
                     }
 
-                    "api.siliconflow.cn" -> {
+                    host == "api.siliconflow.cn" -> {
                         // https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning#3-1-api-%E5%8F%82%E6%95%B0
                         val modelId = params.model.modelId
                         val siliconflowThinkingModels = setOf(
@@ -344,17 +427,17 @@ class ChatCompletionsAPI(
                         }
                     }
 
-                    "aiping.cn" -> {
+                    host == "aiping.cn" -> {
                         put("enable_thinking", level.isEnabled)
                     }
 
-                    "open.bigmodel.cn" -> {
+                    host == "open.bigmodel.cn" -> {
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
                     }
 
-                    "api.moonshot.cn" -> {
+                    host == "api.moonshot.cn" -> {
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                             // K2.6 的 thinking.keep 默认为 null（忽略历史思考），思考开启时
@@ -365,22 +448,23 @@ class ChatCompletionsAPI(
                         })
                     }
 
-                    "api.deepseek.com" -> {
-                        put("thinking", buildJsonObject {
-                            put("type", if (!level.isEnabled) "disabled" else "enabled")
-                        })
-                        if (level.isEnabled && level != ReasoningLevel.AUTO) {
-                            val effort = when (level) {
-                                ReasoningLevel.MEDIUM -> "high"
-                                ReasoningLevel.XHIGH,
-                                ReasoningLevel.MAX -> "max"
-                                else -> level.effort
+                    host == "api.deepseek.com" -> {
+                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        if (!modelId.isDeepSeekThinkingOnlyModel()) {
+                            put("thinking", buildJsonObject {
+                                put("type", if (!level.isEnabled) "disabled" else "enabled")
+                            })
+                            if (
+                                modelId.isDeepSeekV4Model() &&
+                                level.isEnabled &&
+                                level != ReasoningLevel.AUTO
+                            ) {
+                                put("reasoning_effort", level.deepSeekReasoningEffort())
                             }
-                            put("reasoning_effort", effort)
                         }
                     }
 
-                    "integrate.api.nvidia.com" -> {
+                    host == "integrate.api.nvidia.com" -> {
                         if ("deepseek-v4" in params.model.modelId.lowercase()) {
                             if (level != ReasoningLevel.AUTO) {
                                 val effort = when (level) {
@@ -405,16 +489,22 @@ class ChatCompletionsAPI(
                         }
                     }
 
-                    "opencode.ai" -> {
+                    host == "opencode.ai" -> {
                         if (level != ReasoningLevel.AUTO) {
                             put("reasoning_effort", level.cappedEffort(ReasoningLevel.XHIGH)!!)
                         }
                     }
 
                     else -> {
-                        // OpenAI 官方
-                        // 文档中，completions API 只支持 "low", "medium", "high"
-                        if (level != ReasoningLevel.AUTO) {
+                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        // Unknown compatible hosts may reject provider-specific fields. Only use
+                        // OpenAI's reasoning_effort for model families that follow that contract.
+                        if (
+                            level != ReasoningLevel.AUTO &&
+                            !modelId.isQwenFamily() &&
+                            !modelId.isDeepSeekFamily() &&
+                            !modelId.isDoubaoFamily()
+                        ) {
                             put(
                                 "reasoning_effort",
                                 if (level == ReasoningLevel.OFF) {

@@ -99,6 +99,27 @@ class ModelContextWindowTest {
     }
 
     @Test
+    fun `recognizes Qwen DeepSeek and Doubao models behind compatible providers`() {
+        val expectedWindows = mapOf(
+            "Qwen/Qwen3.8-Max" to 1_000_000,
+            "Qwen/Qwen3-32B" to 256_000,
+            "qwen3-30b-a3b-thinking-2507" to 256_000,
+            "qwen-max-latest" to 128_000,
+            "qwen-long" to 10_000_000,
+            "deepseek-ai/DeepSeek-V4-Pro" to 1_000_000,
+            "deepseek-ai/DeepSeek-V3.2-Exp" to 128_000,
+            "deepseek-ai/DeepSeek-R1-0528" to 128_000,
+            "doubao-seed-1-6-251015" to 256_000,
+            "vendor/doubao-custom-128k" to 128_000,
+            "doubao-seed-evolving-250428" to 1_024_000,
+        )
+
+        expectedWindows.forEach { (modelId, expected) ->
+            assertEquals("model=$modelId", expected, inferContextWindowTokens(modelId))
+        }
+    }
+
+    @Test
     fun `merges discovered capacities without replacing manual settings`() {
         val configured = listOf(
             Model(modelId = "gpt-5"),
