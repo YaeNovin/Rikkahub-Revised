@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ProviderRequestException
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.stream.StreamChunkDecoder
@@ -25,6 +26,7 @@ import kotlin.time.Clock
 internal class GoogleStreamDecoder(
     private val responseId: String,
     private val model: String,
+    private val expectsImageOutput: Boolean = false,
 ) : StreamChunkDecoder {
     private val streamState = GoogleStreamState()
     private var finishReason: String? = null
@@ -56,6 +58,13 @@ internal class GoogleStreamDecoder(
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()
         finished = true
+        if (expectsImageOutput && !streamState.hasFinalOutput) {
+            throw ProviderRequestException(
+                statusCode = 503,
+                retryAfterMillis = null,
+                message = "Google image generation ended without a final image or text response",
+            )
+        }
         return streamState.finish(finishReason, responseId, model)
     }
 
@@ -133,6 +142,8 @@ internal class GoogleStreamDecoder(
         private var reasoningId: String? = null
         private var imageId: String? = null
         private val openToolIds = linkedSetOf<String>()
+        var hasFinalOutput: Boolean = false
+            private set
 
         fun append(message: UIMessage, responseId: String): List<StreamChunk> = buildList {
             val imageCount = message.parts.count { it is UIMessagePart.Image }
@@ -140,6 +151,7 @@ internal class GoogleStreamDecoder(
             message.parts.forEach { part ->
                 when (part) {
                     is UIMessagePart.Text -> if (part.text.isNotEmpty()) {
+                        hasFinalOutput = true
                         addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
                         val id = textId ?: nextId(responseId, "text").also {
                             textId = it; add(StreamChunk.TextStart(it))
@@ -162,6 +174,9 @@ internal class GoogleStreamDecoder(
                         }
                     }
                     is UIMessagePart.Image -> {
+                        if (part.url.substringAfter(";base64,", part.url).isNotBlank()) {
+                            hasFinalOutput = true
+                        }
                         addAll(closeText()); addAll(closeReasoning()); addAll(closeTools())
                         if (imageCount > 1 && emittedImages > 0) addAll(closeImage())
                         val id = imageId ?: nextId(responseId, "image").also {

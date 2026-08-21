@@ -53,6 +53,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderCapability
+import me.rerere.ai.provider.ProviderRequestException
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.inferModelTypeFromId
 import me.rerere.ai.provider.providerRequestFailure
@@ -493,10 +494,18 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val candidate = bodyJson["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
             ?: error("No candidates in response")
+        val message = parseMessage(candidate)
+        if (params.model.supportsGoogleNativeImageOutput() && !message.hasFinalGoogleOutput()) {
+            throw ProviderRequestException(
+                statusCode = 503,
+                retryAfterMillis = null,
+                message = "Google image generation ended without a final image or text response",
+            )
+        }
         TextGenerationResult(
             id = Uuid.random().toString(),
             model = params.model.modelId,
-            message = parseMessage(candidate),
+            message = message,
             finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull,
             usage = parseUsageMeta(bodyJson["usageMetadata"] as? JsonObject),
         )
@@ -534,7 +543,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         Log.i(TAG, "streamText: model=${params.model.modelId}, uploadedFiles=${uploadedFiles.size}")
 
         val responseId = Uuid.random().toString()
-        val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
+        val decoder = GoogleStreamDecoder(
+            responseId = responseId,
+            model = params.model.modelId,
+            expectsImageOutput = params.model.supportsGoogleNativeImageOutput(),
+        )
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -596,8 +609,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
             override fun onClosed(eventSource: EventSource) {
                 println("[onClosed] 连接已关闭")
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (error: Throwable) {
+                    close(error)
+                }
             }
         }
 
@@ -723,9 +740,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
         // Model BuiltIn Tools
         // 目前不能和工具调用兼容
-        if (params.model.tools.isNotEmpty()) {
+        val serverTools = params.model.tools - BuiltInTools.ImageGeneration
+        if (serverTools.isNotEmpty()) {
             put("tools", buildJsonArray {
-                params.model.tools.forEach { builtInTool ->
+                serverTools.forEach { builtInTool ->
                     when (builtInTool) {
                         BuiltInTools.Search -> {
                             add(buildJsonObject {
@@ -780,8 +798,19 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun Model.supportsGoogleNativeImageOutput(): Boolean =
-        Modality.IMAGE in outputModalities ||
+        BuiltInTools.ImageGeneration in tools ||
+            Modality.IMAGE in outputModalities ||
             Modality.IMAGE in ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(modelId)
+
+    private fun UIMessage.hasFinalGoogleOutput(): Boolean = parts.any { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text.isNotBlank()
+            is UIMessagePart.Image -> part.url.substringAfter(";base64,", part.url).isNotBlank()
+            is UIMessagePart.Tool,
+            is UIMessagePart.ServerTool -> true
+            else -> false
+        }
+    }
 
     private suspend fun uploadLargeMedia(
         providerSetting: ProviderSetting.Google,

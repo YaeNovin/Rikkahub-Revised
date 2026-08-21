@@ -5,15 +5,21 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderRequestException
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.isRetryableProviderFailure
+import me.rerere.ai.provider.stream.SseEvent
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -130,5 +136,68 @@ class GoogleImageProtocolTest {
         val responseModalities = body["generationConfig"]!!.jsonObject["responseModalities"]!!
             .jsonArray.map { it.jsonPrimitive.content }
         assertEquals(listOf("TEXT", "IMAGE"), responseModalities)
+    }
+
+    @Test
+    fun `chat image generation tool enables image responses without an empty tools array`() {
+        val provider = GoogleProvider(OkHttpClient())
+        val method = GoogleProvider::class.java.getDeclaredMethod(
+            "buildCompletionRequestBody",
+            List::class.java,
+            TextGenerationParams::class.java,
+        ).apply { isAccessible = true }
+        val body = method.invoke(
+            provider,
+            listOf(UIMessage.user("Draw a lighthouse")),
+            TextGenerationParams(
+                model = Model(
+                    modelId = "gemini-3.1-flash-image",
+                    outputModalities = listOf(Modality.TEXT),
+                    tools = setOf(BuiltInTools.ImageGeneration),
+                ),
+            ),
+        ) as kotlinx.serialization.json.JsonObject
+
+        val responseModalities = body["generationConfig"]!!.jsonObject["responseModalities"]!!
+            .jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("TEXT", "IMAGE"), responseModalities)
+        assertFalse(body.containsKey("tools"))
+    }
+
+    @Test
+    fun `chat image stream retries when it ends after reasoning only`() {
+        val decoder = GoogleStreamDecoder(
+            responseId = "response",
+            model = "gemini-3.1-flash-image",
+            expectsImageOutput = true,
+        )
+        val decoded = decoder.accept(
+            SseEvent(
+                data = """{"candidates":[{"content":{"parts":[{"text":"draft","thought":true}]},"finishReason":"STOP"}]}""",
+            )
+        )
+
+        assertTrue(decoded.chunks.any { it is StreamChunk.ReasoningDelta })
+        val error = assertThrows(ProviderRequestException::class.java) {
+            decoder.onClosed()
+        }
+        assertTrue(error.isRetryableProviderFailure())
+    }
+
+    @Test
+    fun `chat image stream emits final inline image`() {
+        val decoder = GoogleStreamDecoder(
+            responseId = "response",
+            model = "gemini-3.1-flash-image",
+            expectsImageOutput = true,
+        )
+        val decoded = decoder.accept(
+            SseEvent(
+                data = """{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]},"finishReason":"STOP"}]}""",
+            )
+        )
+
+        assertTrue(decoded.chunks.any { it is StreamChunk.ImageDelta })
+        assertTrue(decoder.onClosed().any { it is StreamChunk.ImageEnd })
     }
 }
