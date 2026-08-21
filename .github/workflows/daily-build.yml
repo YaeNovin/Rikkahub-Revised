@@ -6,7 +6,7 @@ on:
     - cron: '0 18 * * *'
   # 也支持手动触发
   workflow_dispatch:
-  # Workflow 或签名构建配置变更时立即自检一次
+  # Workflow、签名构建配置或文档解析模块变更时立即自检一次
   push:
     branches:
       - main
@@ -16,6 +16,7 @@ on:
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle/**'
+      - 'document/**'
 
 jobs:
   # 检查过去 24 小时内是否有新提交，没有则跳过构建，避免重复打包
