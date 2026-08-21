@@ -10,16 +10,19 @@ import kotlin.math.roundToLong
 
 /** Converts a bounded Standard MIDI File into compact, model-readable ABC notation. */
 internal object MidiToAbcConverter {
-    private const val MAX_FILE_BYTES = 32L * 1024L * 1024L
+    private const val MAX_FILE_BYTES = 128L * 1024L * 1024L
     private const val MAX_TRACKS = 128
-    private const val MAX_EVENTS = 250_000
-    private const val MAX_NOTES = 100_000
+    private const val MAX_EVENTS = 300_000
+    private const val MAX_NOTES = 50_000
+    private const val MAX_ACTIVE_NOTES = 8_192
     private const val MAX_VOICES = 32
-    private const val MAX_OUTPUT_CHARS = 200_000
+    private const val MAX_OUTPUT_CHARS = 120_000
+    private const val MAX_TITLE_BYTES = 4_096
+    private const val TRUNCATION_SUFFIX_RESERVE = 160
 
     fun convert(file: File): Result<String> = runCatching {
         require(file.isFile) { "MIDI file not found" }
-        require(file.length() <= MAX_FILE_BYTES) { "MIDI file is larger than 32 MB" }
+        require(file.length() <= MAX_FILE_BYTES) { "MIDI file is larger than 128 MB" }
         parse(file).toAbc(file.name)
     }
 
@@ -33,7 +36,7 @@ internal object MidiToAbcConverter {
             val trackCount = header.readUInt16(2)
             val division = header.readUInt16(4)
             require(format in 0..2) { "Unsupported MIDI format" }
-            require(trackCount in 1..MAX_TRACKS) { "Unsupported MIDI track count" }
+            require(trackCount > 0) { "MIDI contains no tracks" }
             require(division and 0x8000 == 0 && division > 0) { "SMPTE MIDI timing is not supported" }
 
             val notes = mutableListOf<Note>()
@@ -43,8 +46,10 @@ internal object MidiToAbcConverter {
             var title: String? = null
             var events = 0
             var parsedTracks = 0
+            var truncated = trackCount > MAX_TRACKS
+            val trackLimit = min(trackCount, MAX_TRACKS)
 
-            while (parsedTracks < trackCount) {
+            while (parsedTracks < trackLimit) {
                 val chunkId = readAscii(input, 4) ?: break
                 val chunkLength = input.readUInt32()
                 require(chunkLength <= Int.MAX_VALUE) { "MIDI chunk is too large" }
@@ -56,14 +61,14 @@ internal object MidiToAbcConverter {
                 val track = LimitedInputStream(input, chunkLength)
                 val result = parseTrack(track, parsedTracks, notes, events)
                 events += result.eventCount
+                truncated = truncated || result.truncated
                 tempoMicrosPerQuarter = result.tempoMicrosPerQuarter ?: tempoMicrosPerQuarter
                 meter = result.meter ?: meter
                 key = result.key ?: key
                 title = title ?: result.title
                 track.drain()
                 parsedTracks++
-                require(events <= MAX_EVENTS) { "MIDI contains too many events" }
-                require(notes.size <= MAX_NOTES) { "MIDI contains too many notes" }
+                if (result.stoppedEarly) break
             }
             require(parsedTracks > 0) { "MIDI contains no tracks" }
             require(notes.isNotEmpty()) { "MIDI contains no playable notes" }
@@ -74,6 +79,7 @@ internal object MidiToAbcConverter {
                 meter = meter,
                 key = key,
                 title = title,
+                truncated = truncated || parsedTracks < trackCount,
             )
         }
     }
@@ -91,9 +97,18 @@ internal object MidiToAbcConverter {
         var meter: Meter? = null
         var key: KeySignature? = null
         var title: String? = null
+        var truncated = false
+        var stoppedEarly = false
         val active = HashMap<Int, ArrayDeque<ActiveNote>>()
+        var activeNoteCount = 0
 
-        while (input.remaining > 0 && eventCount + eventOffset <= MAX_EVENTS) {
+        while (input.remaining > 0) {
+            if (eventCount + eventOffset >= MAX_EVENTS) {
+                truncated = true
+                stoppedEarly = true
+                input.drain()
+                break
+            }
             tick += input.readVlq()
             var statusOrData = input.readByteOrThrow()
             val status: Int
@@ -109,81 +124,117 @@ internal object MidiToAbcConverter {
 
             when {
                 status in 0x80..0x8F -> {
-                    val pitch = firstData ?: input.readByteOrThrow()
-                    val velocity = input.readByteOrThrow()
-                    finishNote(active, status and 0x0F, pitch, tick, trackIndex, notes)
-                    if (velocity < 0) error("Invalid MIDI velocity")
+                    val pitch = firstData ?: input.readMidiDataByte()
+                    input.readMidiDataByte()
+                    if (finishNote(active, status and 0x0F, pitch, tick, trackIndex, notes)) {
+                        activeNoteCount--
+                    }
                 }
 
                 status in 0x90..0x9F -> {
-                    val pitch = firstData ?: input.readByteOrThrow()
-                    val velocity = input.readByteOrThrow()
+                    val pitch = firstData ?: input.readMidiDataByte()
+                    val velocity = input.readMidiDataByte()
                     val channel = status and 0x0F
                     if (velocity == 0) {
-                        finishNote(active, channel, pitch, tick, trackIndex, notes)
-                    } else {
+                        if (finishNote(active, channel, pitch, tick, trackIndex, notes)) {
+                            activeNoteCount--
+                        }
+                    } else if (activeNoteCount < MAX_ACTIVE_NOTES && notes.size < MAX_NOTES) {
                         active.getOrPut(channel * 128 + pitch) { ArrayDeque() }
                             .addLast(ActiveNote(tick, channel, pitch, velocity))
+                        activeNoteCount++
+                    } else {
+                        truncated = true
                     }
                 }
 
                 status in 0xA0..0xBF || status in 0xE0..0xEF -> {
-                    if (firstData == null) input.readByteOrThrow()
-                    input.readByteOrThrow()
+                    if (firstData == null) input.readMidiDataByte()
+                    input.readMidiDataByte()
                 }
 
                 status in 0xC0..0xDF -> {
-                    if (firstData == null) input.readByteOrThrow()
+                    if (firstData == null) input.readMidiDataByte()
                 }
 
                 status == 0xFF -> {
                     val type = input.readByteOrThrow()
-                    val length = input.readVlq().toInt()
-                    require(length.toLong() <= input.remaining) { "MIDI meta event exceeds track" }
-                    val data = input.readExact(length)
+                    val length = input.readVlq()
+                    require(length <= input.remaining) { "MIDI meta event exceeds track" }
                     when (type) {
-                        0x2F -> input.drain()
-                        0x03 -> title = title ?: data.toString(Charsets.UTF_8).trim().takeIf { it.isNotEmpty() }
-                        0x51 -> if (data.size == 3) {
+                        0x2F -> {
+                            input.skipExact(length)
+                            input.drain()
+                        }
+                        0x03 -> {
+                            val titleLength = min(length, MAX_TITLE_BYTES.toLong()).toInt()
+                            val data = input.readExact(titleLength)
+                            input.skipExact(length - titleLength)
+                            if (length > MAX_TITLE_BYTES) truncated = true
+                            title = title ?: data.toString(Charsets.UTF_8).trim().takeIf { it.isNotEmpty() }
+                        }
+                        0x51 -> if (length == 3L) {
+                            val data = input.readExact(3)
                             tempo = ((data[0].toInt() and 0xFF) shl 16) or
                                 ((data[1].toInt() and 0xFF) shl 8) or
                                 (data[2].toInt() and 0xFF)
-                        }
-                        0x58 -> if (data.size >= 2) {
+                        } else input.skipExact(length)
+                        0x58 -> if (length >= 2L) {
+                            val data = input.readExact(2)
+                            input.skipExact(length - 2L)
                             val denominator = 1 shl (data[1].toInt() and 0xFF).coerceIn(0, 7)
                             meter = Meter((data[0].toInt() and 0xFF).coerceIn(1, 32), denominator)
-                        }
-                        0x59 -> if (data.size >= 2) {
+                        } else input.skipExact(length)
+                        0x59 -> if (length >= 2L) {
+                            val data = input.readExact(2)
+                            input.skipExact(length - 2L)
                             key = KeySignature(data[0].toInt(), data[1].toInt() != 0)
-                        }
+                        } else input.skipExact(length)
+                        else -> input.skipExact(length)
                     }
                 }
 
                 status == 0xF0 || status == 0xF7 -> {
-                    val length = input.readVlq().toInt()
-                    input.skipExact(length.toLong())
+                    val length = input.readVlq()
+                    require(length <= input.remaining) { "MIDI SysEx event exceeds track" }
+                    input.skipExact(length)
                     runningStatus = -1
                 }
 
-                status == 0xF1 || status == 0xF3 -> input.readByteOrThrow()
-                status == 0xF2 -> {
-                    input.readByteOrThrow()
-                    input.readByteOrThrow()
+                status == 0xF1 || status == 0xF3 -> {
+                    input.readMidiDataByte()
+                    runningStatus = -1
                 }
-                status == 0xF6 -> Unit
+                status == 0xF2 -> {
+                    input.readMidiDataByte()
+                    input.readMidiDataByte()
+                    runningStatus = -1
+                }
+                status == 0xF4 || status == 0xF5 || status == 0xF6 -> runningStatus = -1
+                status in 0xF8..0xFE -> Unit
                 else -> error("Unsupported MIDI status 0x${status.toString(16)}")
             }
             eventCount++
+            if (notes.size >= MAX_NOTES && input.remaining > 0L) {
+                truncated = true
+                stoppedEarly = true
+                input.drain()
+                break
+            }
             if (status == 0xFF && input.remaining == 0L) break
         }
 
         active.values.forEach { pending ->
             while (pending.isNotEmpty()) {
                 val note = pending.removeLast()
-                if (tick > note.startTick) notes += Note(trackIndex, note.channel, note.pitch, note.startTick, tick, note.velocity)
+                if (tick > note.startTick && notes.size < MAX_NOTES) {
+                    notes += Note(trackIndex, note.channel, note.pitch, note.startTick, tick, note.velocity)
+                } else if (tick > note.startTick) {
+                    truncated = true
+                }
             }
         }
-        return TrackResult(eventCount, tempo, meter, key, title)
+        return TrackResult(eventCount, tempo, meter, key, title, truncated, stoppedEarly)
     }
 
     private fun finishNote(
@@ -193,13 +244,14 @@ internal object MidiToAbcConverter {
         endTick: Long,
         track: Int,
         output: MutableList<Note>,
-    ) {
-        val pending = active[channel * 128 + pitch] ?: return
-        val note = pending.removeLastOrNull() ?: return
-        if (endTick > note.startTick) {
+    ): Boolean {
+        val pending = active[channel * 128 + pitch] ?: return false
+        val note = pending.removeLastOrNull() ?: return false
+        if (endTick > note.startTick && output.size < MAX_NOTES) {
             output += Note(track, channel, pitch, note.startTick, endTick, note.velocity)
         }
         if (pending.isEmpty()) active.remove(channel * 128 + pitch)
+        return true
     }
 
     private fun MidiSong.toAbc(fileName: String): String {
@@ -214,6 +266,7 @@ internal object MidiToAbcConverter {
             .sortedWith(compareBy<NoteEvent> { it.start }.thenBy { it.track }.thenBy { it.pitches.firstOrNull() ?: 0 })
 
         val voices = mutableListOf<MutableList<NoteEvent>>()
+        var truncated = this.truncated
         events.forEach { event ->
             val voice = voices.firstOrNull { voice ->
                 val last = voice.lastOrNull()
@@ -221,6 +274,7 @@ internal object MidiToAbcConverter {
             }
             if (voice != null) voice += event
             else if (voices.size < MAX_VOICES) voices += mutableListOf(event)
+            else truncated = true
         }
 
         val measureUnits = max(1, meter.numerator * 16 / meter.denominator)
@@ -232,33 +286,60 @@ internal object MidiToAbcConverter {
         builder.append("Q:1/4=").append((60_000_000 / tempoMicrosPerQuarter).coerceIn(1, 999)).append("\n")
         builder.append("K:").append(key.toAbc()).append("\n")
 
-        voices.forEachIndexed { index, voice ->
-            builder.append("V:").append(index + 1).append('\n')
+        voiceLoop@ for ((index, voice) in voices.withIndex()) {
+            if (!builder.appendBounded("V:${index + 1}\n")) {
+                truncated = true
+                break
+            }
             var cursor = 0L
-            voice.forEach { event ->
-                if (event.start > cursor) appendSpan(builder, "z", cursor, event.start, measureUnits)
-                appendSpan(builder, event.pitches.toAbc(), event.start, event.start + event.duration, measureUnits)
+            for (event in voice) {
+                if (event.start > cursor && !appendSpan(builder, "z", cursor, event.start, measureUnits)) {
+                    truncated = true
+                    break@voiceLoop
+                }
+                if (!appendSpan(builder, event.pitches.toAbc(), event.start, event.start + event.duration, measureUnits)) {
+                    truncated = true
+                    break@voiceLoop
+                }
                 cursor = event.start + event.duration
             }
-            if (cursor > 0 && cursor % measureUnits != 0L) builder.append("| ")
-            builder.append("\n")
-            require(builder.length <= MAX_OUTPUT_CHARS) { "Converted ABC output is too large" }
+            if (cursor > 0 && cursor % measureUnits != 0L && !builder.appendBounded("| ")) {
+                truncated = true
+                break
+            }
+            if (!builder.appendBounded("\n")) {
+                truncated = true
+                break
+            }
+        }
+        if (truncated) {
+            builder.append("\n% Conversion truncated to a bounded musical preview for reliable processing.\n")
         }
         return builder.toString().trim()
     }
 
-    private fun appendSpan(builder: StringBuilder, symbol: String, start: Long, end: Long, measureUnits: Int) {
+    private fun appendSpan(builder: StringBuilder, symbol: String, start: Long, end: Long, measureUnits: Int): Boolean {
         var cursor = start
         while (cursor < end) {
             val nextBar = ((cursor / measureUnits) + 1) * measureUnits
             val next = min(end, nextBar)
             val duration = (next - cursor).toInt().coerceAtLeast(1)
-            builder.append(symbol).append(duration)
-            if (next < end) builder.append('-')
-            builder.append(' ')
-            if (next % measureUnits == 0L) builder.append("| ")
+            val token = buildString {
+                append(symbol).append(duration)
+                if (next < end) append('-')
+                append(' ')
+                if (next % measureUnits == 0L) append("| ")
+            }
+            if (!builder.appendBounded(token)) return false
             cursor = next
         }
+        return true
+    }
+
+    private fun StringBuilder.appendBounded(value: String): Boolean {
+        if (length + value.length > MAX_OUTPUT_CHARS - TRUNCATION_SUFFIX_RESERVE) return false
+        append(value)
+        return true
     }
 
     private fun List<Int>.toAbc(): String {
@@ -290,6 +371,7 @@ internal object MidiToAbcConverter {
         val meter: Meter,
         val key: KeySignature,
         val title: String?,
+        val truncated: Boolean,
     )
 
     private data class Note(val track: Int, val channel: Int, val pitch: Int, val startTick: Long, val endTick: Long, val velocity: Int)
@@ -298,7 +380,15 @@ internal object MidiToAbcConverter {
     private data class NoteEvent(val track: Int, val start: Long, val duration: Long, val pitches: List<Int>)
     private data class Meter(val numerator: Int, val denominator: Int)
     private data class KeySignature(val sf: Int, val minorMode: Boolean)
-    private data class TrackResult(val eventCount: Int, val tempoMicrosPerQuarter: Int?, val meter: Meter?, val key: KeySignature?, val title: String?)
+    private data class TrackResult(
+        val eventCount: Int,
+        val tempoMicrosPerQuarter: Int?,
+        val meter: Meter?,
+        val key: KeySignature?,
+        val title: String?,
+        val truncated: Boolean,
+        val stoppedEarly: Boolean,
+    )
 
     private class LimitedInputStream(private val source: InputStream, var remaining: Long) : InputStream() {
         override fun read(): Int {
@@ -322,15 +412,24 @@ internal object MidiToAbcConverter {
         }
 
         fun drain() {
-            val buffer = ByteArray(16 * 1024)
             while (remaining > 0) {
-                val read = read(buffer)
-                if (read <= 0) error("Unexpected end of MIDI track")
+                if (skip(remaining) <= 0L && read() < 0) {
+                    error("Unexpected end of MIDI track")
+                }
             }
         }
     }
 
     private fun InputStream.readByteOrThrow(): Int = read().takeIf { it >= 0 } ?: error("Unexpected end of MIDI file")
+
+    private fun InputStream.readMidiDataByte(): Int {
+        while (true) {
+            val value = readByteOrThrow()
+            if (value in 0xF8..0xFE) continue
+            require(value and 0x80 == 0) { "Invalid MIDI data byte" }
+            return value
+        }
+    }
 
     private fun InputStream.readUInt32(): Long {
         return (readByteOrThrow().toLong() shl 24) or

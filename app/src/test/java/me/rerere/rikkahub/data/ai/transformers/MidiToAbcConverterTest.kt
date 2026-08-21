@@ -48,6 +48,61 @@ class MidiToAbcConverterTest {
         file.delete()
     }
 
+    @Test
+    fun `accepts realtime events in complex midi tracks`() {
+        val file = writeTempMidi(
+            header(format = 0, tracks = 1, division = 96) + track(
+                0, 0xF8,
+                0, 0x90, 60, 0xF8, 100,
+                96, 0x80, 60, 0xFA, 0,
+                0, 0xFF, 0x2F, 0x00,
+            )
+        )
+
+        val abc = MidiToAbcConverter.convert(file).getOrThrow()
+
+        assertTrue(abc.contains("C4"))
+        file.delete()
+    }
+
+    @Test
+    fun `returns a bounded preview instead of failing on extremely long notation`() {
+        val file = writeTempMidi(
+            header(format = 0, tracks = 1, division = 96) + track(
+                0, 0x90, 60, 100,
+                0xFF, 0xFF, 0xFF, 0x7F, 0x80, 60, 0,
+                0, 0xFF, 0x2F, 0x00,
+            )
+        )
+
+        val abc = MidiToAbcConverter.convert(file).getOrThrow()
+
+        assertTrue(abc.length <= 120_000)
+        assertTrue(abc.contains("Conversion truncated"))
+        file.delete()
+    }
+
+    @Test
+    fun `returns a bounded preview when the file declares many tracks`() {
+        val noteTrack = track(
+            0, 0x90, 60, 100,
+            96, 0x80, 60, 0,
+            0, 0xFF, 0x2F, 0x00,
+        )
+        val emptyTrack = track(0, 0xFF, 0x2F, 0x00)
+        val file = writeTempMidi(
+            (1 until 128).fold(
+                header(format = 1, tracks = 129, division = 96) + noteTrack
+            ) { bytes, _ -> bytes + emptyTrack }
+        )
+
+        val abc = MidiToAbcConverter.convert(file).getOrThrow()
+
+        assertTrue(abc.contains("C4"))
+        assertTrue(abc.contains("Conversion truncated"))
+        file.delete()
+    }
+
     private fun writeTempMidi(bytes: ByteArray): File {
         return File.createTempFile("midi", ".mid").also { it.writeBytes(bytes) }
     }
