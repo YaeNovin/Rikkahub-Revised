@@ -29,7 +29,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`v2.4.8-revised.3`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.3) |
+| Current release | [`v2.4.8-revised.4`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.4) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -64,6 +64,24 @@ repository.
 
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
+
+### Current Formal Release: v2.4.8-revised.4
+
+- Improved model capability, context-window, and reasoning-parameter detection
+  for Qwen, DeepSeek, Doubao, and compatible providers.
+- Standardized GPT Image 2 size, aspect-ratio, and quality parameters, with
+  improved Gemini, Grok, and Seedream image-generation compatibility.
+- Upgraded the image gallery with previews, details, folders, image import,
+  metadata backup, and batch add, move, and delete operations.
+- Improved automatic reconnection for network changes, rate limits, interrupted
+  connections, chat continuation, and image generation or editing.
+- Improved full-conversation and file token accounting, context-window
+  detection, and automatic context compression reliability.
+- Fixed DOC, DOCX, and XLSX parsing and improved large multimedia attachments
+  and complex MIDI processing.
+- Localized software error messages and added a seven-day, entry-based
+  diagnostic log viewer.
+- Improved MCP OAuth authorization, connection status, and reconnect feedback.
 
 - Token-aware rolling context summaries, automatic context-window discovery,
   animated compression feedback, and context usage display.

@@ -27,7 +27,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`v2.4.8-revised.3`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.3) |
+| 当前版本 | [`v2.4.8-revised.4`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.4) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -58,6 +58,18 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 ## Revised 的主要改动
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
+
+### 当前正式版：v2.4.8-revised.4
+
+- 优化千问、DeepSeek、豆包及兼容供应商的模型能力、上下文窗口与推理参数识别。
+- 规范 GPT Image 2 的图片尺寸、比例和质量参数，并完善 Gemini、Grok 与
+  Seedream 生图兼容性。
+- 升级图库预览、详情、文件夹、图片导入、元数据备份，以及批量添加、移动和删除。
+- 改进网络切换、限流、连接中断、聊天续答，以及生图和图片编辑过程中的自动重连。
+- 提升完整对话和文件的 Token 统计、上下文窗口识别与自动压缩可靠性。
+- 修复 DOC、DOCX、XLSX 解析，并优化大型多媒体附件和复杂 MIDI 文件处理。
+- 汉化软件错误提示，增加按条目保存七天的诊断日志及查看入口。
+- 完善 MCP OAuth 授权、连接状态和重连反馈。
 
 - 基于 Token 的滚动上下文摘要、上下文窗口自动识别、压缩动画提示和使用量展示。
 - 本地知识库、文档导入与分块、混合检索、助手绑定、RAG、来源引用和文件预览。
