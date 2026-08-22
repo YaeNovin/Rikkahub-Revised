@@ -68,7 +68,7 @@ Before publishing an APK or AAB:
 - Repository: `https://github.com/YaeNovin/Rikkahub-Revised`
 - API: `https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest`
 - First tag/version: `v2.4.8-revised.1` / `2.4.8-revised.1`
-- Current tag/version: `v2.4.8-revised.3` / `2.4.8-revised.3`
+- Current tag/version: `v2.4.8-revised.4` / `2.4.8-revised.4`
 - APK assets: `app-arm64-v8a-release.apk`, `app-x86_64-release.apk`, and
   `app-universal-release.apk`
 
