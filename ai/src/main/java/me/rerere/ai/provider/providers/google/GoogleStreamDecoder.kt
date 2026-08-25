@@ -13,6 +13,7 @@ import me.rerere.ai.provider.ProviderRequestException
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.stream.StreamChunkDecoder
+import me.rerere.ai.provider.stream.prematureStreamTermination
 import me.rerere.ai.ui.GoogleThoughtMetadata
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
@@ -53,7 +54,11 @@ internal class GoogleStreamDecoder(
         return DecodeResult(chunks)
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (finished) return emptyList()
+        if (finishReason == null) prematureStreamTermination("Google generateContent")
+        return finish()
+    }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()

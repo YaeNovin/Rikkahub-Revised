@@ -15,6 +15,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.stream.StreamChunkDecoder
+import me.rerere.ai.provider.stream.prematureStreamTermination
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.OpenRouterReasoningMetadata
 import me.rerere.ai.ui.UIMessage
@@ -84,7 +85,11 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         return DecodeResult(chunks)
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (finished) return emptyList()
+        if (finishReason == null) prematureStreamTermination("Chat Completions")
+        return finish()
+    }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()

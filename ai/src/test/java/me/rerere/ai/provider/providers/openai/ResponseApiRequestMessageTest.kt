@@ -394,6 +394,13 @@ class ResponseApiRequestMessageTest {
                 modelId = "gpt-5",
             ),
         )
+        val openAi56 = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1"),
+            params = createReasoningParams(
+                reasoningLevel = ReasoningLevel.MAX,
+                modelId = "gpt-5.6-sol",
+            ),
+        )
 
         assertEquals(
             "xhigh",
@@ -406,6 +413,10 @@ class ResponseApiRequestMessageTest {
         assertEquals(
             "high",
             olderOpenAi["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
+        )
+        assertEquals(
+            "max",
+            openAi56["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
         )
     }
 

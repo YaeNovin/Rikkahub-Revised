@@ -285,7 +285,7 @@ fun Throwable.providerRetryAfterMillis(): Long? =
         .mapNotNull(ProviderRequestException::retryAfterMillis)
         .firstOrNull()
 
-/** A shared retry budget for every reconnect phase of one provider request. */
+/** A shared retry-count and reconnect-wait budget for one provider request. */
 class ProviderRetryController(
     val maxRetries: Int = DEFAULT_MAX_RETRIES,
     val initialDelayMillis: Long = DEFAULT_INITIAL_RETRY_DELAY_MILLIS,
@@ -295,7 +295,7 @@ class ProviderRetryController(
     private val randomDouble: () -> Double = Random.Default::nextDouble,
     private val nanoTime: () -> Long = System::nanoTime,
 ) {
-    private var startedAtNanos: Long? = null
+    private var waitedDurationMillis: Long = 0L
 
     var retryCount: Int = 0
         private set
@@ -316,29 +316,37 @@ class ProviderRetryController(
         delayBeforeRetry: suspend (delayMillis: Long) -> Unit = { delay(it) },
     ): Boolean {
         if (retryCount >= maxRetries) return false
-        val retryStartedAtNanos = startedAtNanos ?: nanoTime().also { startedAtNanos = it }
 
         val retryDelay = error.providerRetryAfterMillis()
             ?.coerceAtLeast(0L)
             ?.let(::retryAfterDelayMillis)
             ?: jitteredExponentialDelayMillis(retryCount)
-        val elapsedMillis = ((nanoTime() - retryStartedAtNanos).coerceAtLeast(0L) /
-            NANOS_PER_MILLISECOND)
-        val remainingMillis = (maxDurationMillis - elapsedMillis).coerceAtLeast(0L)
+        val remainingMillis = remainingDurationMillis()
         if (retryDelay > remainingMillis) return false
 
         val retryNumber = retryCount + 1
         retryCount = retryNumber
         onRetry(retryNumber, retryDelay)
-        delayBeforeRetry(retryDelay)
+        val waitStartedAtNanos = nanoTime()
+        try {
+            delayBeforeRetry(retryDelay)
+        } finally {
+            recordWaitDuration(waitStartedAtNanos)
+        }
         return remainingDurationMillis() > 0L
     }
 
-    fun remainingDurationMillis(): Long {
-        val retryStartedAtNanos = startedAtNanos ?: return maxDurationMillis
-        val elapsedMillis = ((nanoTime() - retryStartedAtNanos).coerceAtLeast(0L) /
+    fun remainingDurationMillis(): Long =
+        (maxDurationMillis - waitedDurationMillis).coerceAtLeast(0L)
+
+    private fun recordWaitDuration(startedAtNanos: Long) {
+        val elapsedMillis = ((nanoTime() - startedAtNanos).coerceAtLeast(0L) /
             NANOS_PER_MILLISECOND)
-        return (maxDurationMillis - elapsedMillis).coerceAtLeast(0L)
+        waitedDurationMillis = if (elapsedMillis > Long.MAX_VALUE - waitedDurationMillis) {
+            Long.MAX_VALUE
+        } else {
+            waitedDurationMillis + elapsedMillis
+        }
     }
 
     private fun jitteredExponentialDelayMillis(retryIndex: Int): Long {

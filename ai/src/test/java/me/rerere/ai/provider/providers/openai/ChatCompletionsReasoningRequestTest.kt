@@ -34,6 +34,9 @@ class ChatCompletionsReasoningRequestTest {
         val openAi = buildRequest("https://api.openai.com/v1", "gpt-5")
         assertEquals("high", openAi["reasoning_effort"]?.jsonPrimitive?.content)
 
+        val openAi56 = buildRequest("https://api.openai.com/v1", "gpt-5.6-sol")
+        assertEquals("max", openAi56["reasoning_effort"]?.jsonPrimitive?.content)
+
         val deepSeek = buildRequest("https://api.deepseek.com/v1", "deepseek-v4")
         assertEquals("max", deepSeek["reasoning_effort"]?.jsonPrimitive?.content)
 

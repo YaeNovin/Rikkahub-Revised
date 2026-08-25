@@ -97,9 +97,38 @@ data class ImageGenerationConstraints(
     val supportedBackgroundValues: Set<String> = emptySet(),
     val supportsOutputCompression: Boolean = false,
     val supportedResolutionValues: Set<String> = emptySet(),
+    val supportedThinkingValues: Set<String> = emptySet(),
+    val supportsTextResponse: Boolean = false,
+    val supportsSafetySettings: Boolean = false,
+    val supportsWebSearchGrounding: Boolean = false,
+    val supportsImageSearchGrounding: Boolean = false,
     val blockedImageOptionKeys: Set<String> = emptySet(),
     val usesJsonImageEdit: Boolean = false,
     val usesGenerationEndpointForEdit: Boolean = false,
+)
+
+enum class ProviderRequestChannel {
+    OPENAI_API,
+    XAI_API,
+    ANTHROPIC_API,
+    GOOGLE_AI_STUDIO,
+    VERTEX_AI,
+    COMPATIBLE_ENDPOINT,
+}
+
+enum class ProviderRequestOperation {
+    TEXT_GENERATION,
+    STREAM_TEXT,
+    IMAGE_GENERATION,
+    IMAGE_EDIT,
+}
+
+data class ProviderRequestDiagnostics(
+    val provider: String,
+    val model: String,
+    val channel: ProviderRequestChannel,
+    val operation: ProviderRequestOperation,
+    val parameters: Map<String, String>,
 )
 
 @Serializable
@@ -119,8 +148,323 @@ data class TextGenerationParams(
     val maxTokens: Int? = null,
     val tools: List<Tool> = emptyList(),
     val reasoningLevel: ReasoningLevel = ReasoningLevel.OFF,
+    val openAIOptions: OpenAIGenerationOptions = OpenAIGenerationOptions(),
+    val grokOptions: GrokGenerationOptions = GrokGenerationOptions(),
+    val qwenOptions: QwenGenerationOptions = QwenGenerationOptions(),
+    val deepSeekOptions: DeepSeekGenerationOptions = DeepSeekGenerationOptions(),
+    val geminiOptions: GeminiGenerationOptions = GeminiGenerationOptions(),
+    val claudeOptions: ClaudeGenerationOptions = ClaudeGenerationOptions(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
+)
+
+@Serializable
+data class ClaudeGenerationOptions(
+    val serviceTier: ClaudeServiceTier = ClaudeServiceTier.DEFAULT,
+    val inferenceGeo: ClaudeInferenceGeo = ClaudeInferenceGeo.DEFAULT,
+    val parallelToolCalls: ClaudeParallelToolCalls = ClaudeParallelToolCalls.AUTO,
+    val toolChoice: ClaudeToolChoice = ClaudeToolChoice.DEFAULT,
+    val stopSequences: List<String> = emptyList(),
+    val topK: Int? = null,
+    val thinkingDisplay: ClaudeThinkingDisplay = ClaudeThinkingDisplay.SUMMARIZED,
+    val responseFormat: ClaudeResponseFormat = ClaudeResponseFormat.AUTO,
+    val responseJsonSchema: String = "",
+)
+
+@Serializable
+enum class ClaudeServiceTier(val apiValue: String?) {
+    DEFAULT(null),
+    AUTO("auto"),
+    STANDARD_ONLY("standard_only"),
+}
+
+@Serializable
+enum class ClaudeInferenceGeo(val apiValue: String?) {
+    DEFAULT(null),
+    GLOBAL("global"),
+    US("us"),
+}
+
+@Serializable
+enum class ClaudeParallelToolCalls(val disableParallelToolUse: Boolean?) {
+    AUTO(null),
+    ENABLED(false),
+    DISABLED(true),
+}
+
+@Serializable
+enum class ClaudeToolChoice(val apiValue: String?) {
+    DEFAULT(null),
+    AUTO("auto"),
+    ANY("any"),
+    NONE("none"),
+}
+
+@Serializable
+enum class ClaudeThinkingDisplay(val apiValue: String?) {
+    DEFAULT(null),
+    SUMMARIZED("summarized"),
+    OMITTED("omitted"),
+}
+
+@Serializable
+enum class ClaudeResponseFormat(val apiValue: String?) {
+    AUTO(null),
+    JSON_SCHEMA("json_schema"),
+}
+
+@Serializable
+data class GrokGenerationOptions(
+    val serviceTier: GrokServiceTier = GrokServiceTier.AUTO,
+    val parallelToolCalls: GrokParallelToolCalls = GrokParallelToolCalls.AUTO,
+    val toolChoice: GrokToolChoice = GrokToolChoice.DEFAULT,
+    val seed: Long? = null,
+    val stopSequences: List<String> = emptyList(),
+    val responseFormat: GrokResponseFormat = GrokResponseFormat.AUTO,
+    val responseJsonSchema: String = "",
+    val responseSchemaName: String = "response",
+    val presencePenalty: Float? = null,
+    val frequencyPenalty: Float? = null,
+    val minP: Float? = null,
+    val topK: Int? = null,
+    val maxTurns: Int? = null,
+)
+
+@Serializable
+enum class GrokServiceTier(val apiValue: String?) {
+    AUTO(null),
+    DEFAULT("default"),
+    PRIORITY("priority"),
+}
+
+@Serializable
+enum class GrokParallelToolCalls(val apiValue: Boolean?) {
+    AUTO(null),
+    ENABLED(true),
+    DISABLED(false),
+}
+
+@Serializable
+enum class GrokToolChoice(val apiValue: String?) {
+    DEFAULT(null),
+    AUTO("auto"),
+    NONE("none"),
+    REQUIRED("required"),
+}
+
+@Serializable
+enum class GrokResponseFormat(val apiValue: String?) {
+    AUTO(null),
+    TEXT("text"),
+    JSON_OBJECT("json_object"),
+    JSON_SCHEMA("json_schema"),
+}
+
+@Serializable
+data class QwenGenerationOptions(
+    val parallelToolCalls: QwenOptionalToggle = QwenOptionalToggle.DEFAULT,
+    val toolChoice: QwenToolChoice = QwenToolChoice.DEFAULT,
+    val topK: Int? = null,
+    val repetitionPenalty: Float? = null,
+    val presencePenalty: Float? = null,
+    val seed: Long? = null,
+    val stopSequences: List<String> = emptyList(),
+    val preserveThinking: QwenOptionalToggle = QwenOptionalToggle.DEFAULT,
+    val toolStream: QwenOptionalToggle = QwenOptionalToggle.DEFAULT,
+    val highResolutionVision: QwenOptionalToggle = QwenOptionalToggle.DEFAULT,
+    val responseFormat: QwenResponseFormat = QwenResponseFormat.AUTO,
+    val responseSchemaName: String = "response",
+    val responseJsonSchema: String = "",
+)
+
+@Serializable
+enum class QwenOptionalToggle(val apiValue: Boolean?) {
+    DEFAULT(null),
+    ENABLED(true),
+    DISABLED(false),
+}
+
+@Serializable
+enum class QwenToolChoice(val apiValue: String?) {
+    DEFAULT(null),
+    AUTO("auto"),
+    NONE("none"),
+    REQUIRED("required"),
+}
+
+@Serializable
+enum class QwenResponseFormat(val apiValue: String?) {
+    AUTO(null),
+    TEXT("text"),
+    JSON_OBJECT("json_object"),
+    JSON_SCHEMA("json_schema"),
+}
+
+@Serializable
+data class DeepSeekGenerationOptions(
+    val toolChoice: DeepSeekToolChoice = DeepSeekToolChoice.DEFAULT,
+    val responseFormat: DeepSeekResponseFormat = DeepSeekResponseFormat.AUTO,
+    val stopSequences: List<String> = emptyList(),
+    val logProbabilities: DeepSeekOptionalToggle = DeepSeekOptionalToggle.DEFAULT,
+    val topLogProbs: Int? = null,
+    val userId: String = "",
+    val imageDetail: DeepSeekImageDetail = DeepSeekImageDetail.AUTO,
+)
+
+@Serializable
+enum class DeepSeekOptionalToggle(val apiValue: Boolean?) {
+    DEFAULT(null),
+    ENABLED(true),
+    DISABLED(false),
+}
+
+@Serializable
+enum class DeepSeekToolChoice(val apiValue: String?) {
+    DEFAULT(null),
+    AUTO("auto"),
+    NONE("none"),
+    REQUIRED("required"),
+}
+
+@Serializable
+enum class DeepSeekResponseFormat(val apiValue: String?) {
+    AUTO(null),
+    TEXT("text"),
+    JSON_OBJECT("json_object"),
+}
+
+@Serializable
+enum class DeepSeekImageDetail(val apiValue: String?) {
+    AUTO(null),
+    LOW("low"),
+    HIGH("high"),
+    ORIGINAL("original"),
+}
+
+@Serializable
+data class OpenAIGenerationOptions(
+    val verbosity: OpenAITextVerbosity = OpenAITextVerbosity.AUTO,
+    val serviceTier: OpenAIServiceTier = OpenAIServiceTier.AUTO,
+    val parallelToolCalls: OpenAIParallelToolCalls = OpenAIParallelToolCalls.AUTO,
+    val toolChoice: OpenAIToolChoice = OpenAIToolChoice.DEFAULT,
+    val reasoningSummary: OpenAIReasoningSummary = OpenAIReasoningSummary.AUTO,
+    val reasoningContext: OpenAIReasoningContext = OpenAIReasoningContext.AUTO,
+    val reasoningMode: OpenAIReasoningMode = OpenAIReasoningMode.STANDARD,
+    val maxToolCalls: Int? = null,
+)
+
+@Serializable
+enum class OpenAITextVerbosity(val apiValue: String?) {
+    AUTO(null),
+    LOW("low"),
+    MEDIUM("medium"),
+    HIGH("high"),
+}
+
+@Serializable
+enum class OpenAIServiceTier(val apiValue: String?) {
+    AUTO(null),
+    DEFAULT("default"),
+    FLEX("flex"),
+    FAST("fast"),
+    ULTRAFAST("ultrafast"),
+}
+
+@Serializable
+enum class OpenAIParallelToolCalls(val apiValue: Boolean?) {
+    AUTO(null),
+    ENABLED(true),
+    DISABLED(false),
+}
+
+@Serializable
+enum class OpenAIToolChoice(val apiValue: String?) {
+    DEFAULT(null),
+    AUTO("auto"),
+    NONE("none"),
+    REQUIRED("required"),
+}
+
+@Serializable
+enum class OpenAIReasoningSummary(val apiValue: String?) {
+    DISABLED(null),
+    AUTO("auto"),
+    CONCISE("concise"),
+    DETAILED("detailed"),
+}
+
+@Serializable
+enum class OpenAIReasoningContext(val apiValue: String?) {
+    AUTO(null),
+    CURRENT_TURN("current_turn"),
+    ALL_TURNS("all_turns"),
+}
+
+@Serializable
+enum class OpenAIReasoningMode(val apiValue: String?) {
+    STANDARD(null),
+    PRO("pro"),
+}
+
+@Serializable
+data class GeminiGenerationOptions(
+    val includeThoughts: Boolean = true,
+    val mediaResolution: GeminiMediaResolution = GeminiMediaResolution.AUTO,
+    val seed: Int? = null,
+    val stopSequences: List<String> = emptyList(),
+    val responseMimeType: GeminiResponseMimeType = GeminiResponseMimeType.AUTO,
+    val responseJsonSchema: String = "",
+    val presencePenalty: Float? = null,
+    val frequencyPenalty: Float? = null,
+    val safetySettings: GeminiSafetySettings = GeminiSafetySettings(),
+)
+
+@Serializable
+enum class GeminiMediaResolution(val apiValue: String?) {
+    AUTO(null),
+    LOW("MEDIA_RESOLUTION_LOW"),
+    MEDIUM("MEDIA_RESOLUTION_MEDIUM"),
+    HIGH("MEDIA_RESOLUTION_HIGH"),
+    ULTRA_HIGH("MEDIA_RESOLUTION_ULTRA_HIGH"),
+}
+
+@Serializable
+enum class GeminiResponseMimeType(val apiValue: String?) {
+    AUTO(null),
+    TEXT("text/plain"),
+    JSON("application/json"),
+    ENUM("text/x.enum"),
+}
+
+@Serializable
+enum class GeminiSafetyThreshold(val apiValue: String?) {
+    DEFAULT(null),
+    OFF("OFF"),
+    BLOCK_NONE("BLOCK_NONE"),
+    BLOCK_ONLY_HIGH("BLOCK_ONLY_HIGH"),
+    BLOCK_MEDIUM_AND_ABOVE("BLOCK_MEDIUM_AND_ABOVE"),
+    BLOCK_LOW_AND_ABOVE("BLOCK_LOW_AND_ABOVE"),
+}
+
+@Serializable
+data class GeminiSafetySettings(
+    val harassment: GeminiSafetyThreshold = GeminiSafetyThreshold.OFF,
+    val hateSpeech: GeminiSafetyThreshold = GeminiSafetyThreshold.OFF,
+    val sexuallyExplicit: GeminiSafetyThreshold = GeminiSafetyThreshold.OFF,
+    val dangerousContent: GeminiSafetyThreshold = GeminiSafetyThreshold.OFF,
+)
+
+@Serializable
+data class GeminiImageGenerationOptions(
+    val includeTextResponse: Boolean = true,
+    val webSearchGrounding: Boolean = false,
+    val imageSearchGrounding: Boolean = false,
+    val safetySettings: GeminiSafetySettings = GeminiSafetySettings(
+        harassment = GeminiSafetyThreshold.DEFAULT,
+        hateSpeech = GeminiSafetyThreshold.DEFAULT,
+        sexuallyExplicit = GeminiSafetyThreshold.DEFAULT,
+        dangerousContent = GeminiSafetyThreshold.DEFAULT,
+    ),
 )
 
 @Serializable
@@ -135,6 +479,8 @@ data class ImageGenerationParams(
     val background: String? = null,
     val outputCompression: Int = 100,
     val resolution: String? = null,
+    val thinkingLevel: String? = null,
+    val geminiOptions: GeminiImageGenerationOptions = GeminiImageGenerationOptions(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )
@@ -152,6 +498,8 @@ data class ImageEditParams(
     val background: String? = null,
     val outputCompression: Int = 100,
     val resolution: String? = null,
+    val thinkingLevel: String? = null,
+    val geminiOptions: GeminiImageGenerationOptions = GeminiImageGenerationOptions(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )

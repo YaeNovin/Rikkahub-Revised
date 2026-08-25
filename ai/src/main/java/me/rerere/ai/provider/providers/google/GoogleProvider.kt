@@ -21,7 +21,9 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
@@ -43,6 +45,8 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
+import me.rerere.ai.provider.GeminiImageGenerationOptions
+import me.rerere.ai.provider.GeminiMediaResolution
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.ImageGenerationParams
@@ -53,7 +57,10 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderCapability
+import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.ai.provider.ProviderRequestException
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.inferModelTypeFromId
 import me.rerere.ai.provider.providerRequestFailure
@@ -119,6 +126,8 @@ internal val GOOGLE_EXTENDED_IMAGE_ASPECT_RATIOS = linkedSetOf(
 )
 internal val GOOGLE_3_IMAGE_RESOLUTIONS = linkedSetOf("1K", "2K", "4K")
 internal val GOOGLE_31_IMAGE_RESOLUTIONS = linkedSetOf("512", "1K", "2K", "4K")
+internal val GOOGLE_31_LITE_IMAGE_RESOLUTIONS = linkedSetOf("1K")
+internal val GOOGLE_31_IMAGE_THINKING_LEVELS = linkedSetOf("minimal", "high")
 
 private data class UploadedGoogleFile(
     val uri: String,
@@ -242,8 +251,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             )
         }
 
-        val isGemini31 = modelId.startsWith("gemini-3.1-")
-        val isGemini3 = modelId.startsWith("gemini-3-") || isGemini31
+        val isGemini31Flash = modelId.startsWith("gemini-3.1-flash-image")
+        val isGemini31FlashLite = modelId.startsWith("gemini-3.1-flash-lite-image")
+        val isGemini31Image = isGemini31Flash || isGemini31FlashLite
+        val isGemini3Pro = modelId.startsWith("gemini-3-pro-image")
+        val isGemini3 = modelId.startsWith("gemini-3-") || isGemini31Image
         return ImageGenerationConstraints(
             supportsGeneration = true,
             supportsEdit = true,
@@ -251,14 +263,28 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             maxOutputImages = 1,
             maxReferenceImages = if (isGemini3) 14 else 3,
             supportsSize = true,
-            supportedSizes = if (isGemini31) GOOGLE_EXTENDED_IMAGE_ASPECT_RATIOS else GOOGLE_IMAGE_ASPECT_RATIOS,
+            supportedSizes = if (isGemini31Image) {
+                GOOGLE_EXTENDED_IMAGE_ASPECT_RATIOS
+            } else {
+                GOOGLE_IMAGE_ASPECT_RATIOS
+            },
             supportsCustomSize = false,
             sizeRequestField = "aspect_ratio",
             supportedResolutionValues = when {
-                isGemini31 -> GOOGLE_31_IMAGE_RESOLUTIONS
+                isGemini31FlashLite -> GOOGLE_31_LITE_IMAGE_RESOLUTIONS
+                isGemini31Flash -> GOOGLE_31_IMAGE_RESOLUTIONS
                 isGemini3 -> GOOGLE_3_IMAGE_RESOLUTIONS
                 else -> emptySet()
             },
+            supportedThinkingValues = if (isGemini31Image) {
+                GOOGLE_31_IMAGE_THINKING_LEVELS
+            } else {
+                emptySet()
+            },
+            supportsTextResponse = true,
+            supportsSafetySettings = true,
+            supportsWebSearchGrounding = isGemini31Flash || isGemini3Pro,
+            supportsImageSearchGrounding = isGemini31Flash,
         )
     }
 
@@ -274,11 +300,21 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             prompt = params.prompt,
             size = params.size,
             resolution = params.resolution,
+            thinkingLevel = params.thinkingLevel,
+            geminiOptions = params.geminiOptions,
             customBody = params.customBody,
             constraints = constraints,
             imageParts = emptyList(),
         )
-        requestGoogleImages(providerSetting, params.model, params.customHeaders.toHeaders(), requestBody)
+        requestGoogleImages(
+            providerSetting = providerSetting,
+            model = params.model,
+            headers = params.customHeaders.toHeaders(),
+            requestBody = requestBody,
+            operation = ProviderRequestOperation.IMAGE_GENERATION,
+            referenceImageCount = 0,
+            hasCustomBody = params.customBody.isNotEmpty(),
+        )
             .forEach { emit(it) }
     }.flowOn(Dispatchers.IO)
 
@@ -301,11 +337,21 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             prompt = params.prompt,
             size = params.size,
             resolution = params.resolution,
+            thinkingLevel = params.thinkingLevel,
+            geminiOptions = params.geminiOptions,
             customBody = params.customBody,
             constraints = constraints,
             imageParts = imageParts,
         )
-        requestGoogleImages(providerSetting, params.model, params.customHeaders.toHeaders(), requestBody)
+        requestGoogleImages(
+            providerSetting = providerSetting,
+            model = params.model,
+            headers = params.customHeaders.toHeaders(),
+            requestBody = requestBody,
+            operation = ProviderRequestOperation.IMAGE_EDIT,
+            referenceImageCount = imageParts.size,
+            hasCustomBody = params.customBody.isNotEmpty(),
+        )
             .forEach { emit(it) }
     }.flowOn(Dispatchers.IO)
 
@@ -314,6 +360,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         model: Model,
         headers: okhttp3.Headers,
         requestBody: JsonObject,
+        operation: ProviderRequestOperation,
+        referenceImageCount: Int,
+        hasCustomBody: Boolean,
     ): List<ImageGenerationItem> {
         val path = if (providerSetting.vertexAI) {
             "publishers/google/models/${model.modelId}:generateContent"
@@ -327,6 +376,17 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .headers(headers)
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .configureReferHeaders(providerSetting.baseUrl)
+                .tag(
+                    ProviderRequestDiagnostics::class.java,
+                    buildGoogleRequestDiagnostics(
+                        providerSetting = providerSetting,
+                        model = model,
+                        operation = operation,
+                        requestBody = requestBody,
+                        referenceImageCount = referenceImageCount,
+                        hasCustomBody = hasCustomBody,
+                    ),
+                )
                 .build(),
         )
 
@@ -476,6 +536,16 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
                 )
                 .configureReferHeaders(providerSetting.baseUrl)
+                .tag(
+                    ProviderRequestDiagnostics::class.java,
+                    buildGoogleRequestDiagnostics(
+                        providerSetting = providerSetting,
+                        model = params.model,
+                        operation = ProviderRequestOperation.TEXT_GENERATION,
+                        requestBody = requestBody,
+                        hasCustomBody = params.customBody.isNotEmpty(),
+                    ),
+                )
                 .build()
         )
 
@@ -537,6 +607,16 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
                 )
                 .configureReferHeaders(providerSetting.baseUrl)
+                .tag(
+                    ProviderRequestDiagnostics::class.java,
+                    buildGoogleRequestDiagnostics(
+                        providerSetting = providerSetting,
+                        model = params.model,
+                        operation = ProviderRequestOperation.STREAM_TEXT,
+                        requestBody = requestBody,
+                        hasCustomBody = params.customBody.isNotEmpty(),
+                    ),
+                )
                 .build()
         )
 
@@ -639,6 +719,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         uploadedFiles: Map<String, UploadedGoogleFile>,
     ): JsonObject = buildJsonObject {
         val supportsImageOutput = params.model.supportsGoogleNativeImageOutput()
+        val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(params.model.modelId)
+        val isGemini37Flash = ModelRegistry.GEMINI_3_7_FLASH.match(params.model.modelId)
+        val perPartMediaResolution = params.geminiOptions.mediaResolution.apiValue
+            .takeIf { isGemini3 && params.geminiOptions.mediaResolution == GeminiMediaResolution.ULTRA_HIGH }
         // System message if available
         val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
         if (systemMessage != null && !supportsImageOutput) {
@@ -656,18 +740,54 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         // Generation config
         put("generationConfig", buildJsonObject {
-            if (params.temperature != null) put("temperature", params.temperature)
-            if (params.topP != null) put("topP", params.topP)
+            if (!isGemini3) {
+                if (params.temperature != null) put("temperature", params.temperature)
+                if (params.topP != null) put("topP", params.topP)
+            }
             if (params.maxTokens != null) put("maxOutputTokens", params.maxTokens)
+            if (isGemini3) {
+                val options = params.geminiOptions
+                if (options.mediaResolution != GeminiMediaResolution.ULTRA_HIGH) {
+                    options.mediaResolution.apiValue?.let { put("mediaResolution", it) }
+                }
+                options.seed?.let { put("seed", it) }
+                options.stopSequences
+                    .map(String::trim)
+                    .filter(String::isNotEmpty)
+                    .take(5)
+                    .takeIf(List<String>::isNotEmpty)
+                    ?.let { sequences ->
+                        putJsonArray("stopSequences") {
+                            sequences.forEach { add(JsonPrimitive(it)) }
+                        }
+                    }
+                options.presencePenalty
+                    ?.takeIf { it >= -2f && it < 2f }
+                    ?.let { put("presencePenalty", it) }
+                options.frequencyPenalty
+                    ?.takeIf { it >= -2f && it < 2f }
+                    ?.let { put("frequencyPenalty", it) }
+
+                val schema = options.responseJsonSchema
+                    .takeIf(String::isNotBlank)
+                    ?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() }
+                val responseMimeType = options.responseMimeType.apiValue
+                    ?: if (schema != null) "application/json" else null
+                responseMimeType?.let { put("responseMimeType", it) }
+                schema?.let { put("responseJsonSchema", it) }
+            }
             if (supportsImageOutput) {
                 put("responseModalities", buildJsonArray {
                     add(JsonPrimitive("TEXT"))
                     add(JsonPrimitive("IMAGE"))
                 })
             }
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (isGemini3 || params.model.abilities.contains(ModelAbility.REASONING)) {
                 put("thinkingConfig", buildJsonObject {
-                    put("includeThoughts", true)
+                    put(
+                        "includeThoughts",
+                        if (isGemini3) params.geminiOptions.includeThoughts else true,
+                    )
 
                     val isGeminiPro =
                         params.model.modelId.contains(Regex("2\\.5.*pro", RegexOption.IGNORE_CASE))
@@ -676,8 +796,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         ReasoningLevel.AUTO -> {} // 自动模式，不设置参数
 
                         ReasoningLevel.OFF -> {
-                            if (ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)) {
-                                put("thinkingLevel", "minimal")
+                            if (isGemini3) {
+                                // Gemini 3.7 Flash rejects "minimal"; its lowest supported level is "low".
+                                put("thinkingLevel", if (isGemini37Flash) "low" else "minimal")
                             } else if (!isGeminiPro) {
                                 put("thinkingBudget", 0)
                                 put("includeThoughts", false)
@@ -685,7 +806,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         }
 
                         else -> {
-                            if (ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)) {
+                            if (isGemini3) {
                                 when (params.reasoningLevel) {
                                     ReasoningLevel.LOW -> put("thinkingLevel", "low")
                                     ReasoningLevel.MEDIUM -> put("thinkingLevel", "medium")
@@ -706,7 +827,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         // Contents (user messages)
         put(
             "contents",
-            buildContents(messages, uploadedFiles)
+            buildContents(messages, uploadedFiles, perPartMediaResolution)
         )
 
         // Tools
@@ -765,26 +886,30 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         // Safety Settings
         putJsonArray("safetySettings") {
-            add(buildJsonObject {
-                put("category", "HARM_CATEGORY_HARASSMENT")
-                put("threshold", "OFF")
-            })
-            add(buildJsonObject {
-                put("category", "HARM_CATEGORY_HATE_SPEECH")
-                put("threshold", "OFF")
-            })
-            add(buildJsonObject {
-                put("category", "HARM_CATEGORY_SEXUALLY_EXPLICIT")
-                put("threshold", "OFF")
-            })
-            add(buildJsonObject {
-                put("category", "HARM_CATEGORY_DANGEROUS_CONTENT")
-                put("threshold", "OFF")
-            })
-            add(buildJsonObject {
-                put("category", "HARM_CATEGORY_CIVIC_INTEGRITY")
-                put("threshold", "OFF")
-            })
+            val safetySettings = params.geminiOptions.safetySettings
+            val categoryThresholds: List<Pair<String, String?>> = if (isGemini3) {
+                listOf(
+                    "HARM_CATEGORY_HARASSMENT" to safetySettings.harassment.apiValue,
+                    "HARM_CATEGORY_HATE_SPEECH" to safetySettings.hateSpeech.apiValue,
+                    "HARM_CATEGORY_SEXUALLY_EXPLICIT" to safetySettings.sexuallyExplicit.apiValue,
+                    "HARM_CATEGORY_DANGEROUS_CONTENT" to safetySettings.dangerousContent.apiValue,
+                )
+            } else {
+                listOf(
+                    "HARM_CATEGORY_HARASSMENT" to "OFF",
+                    "HARM_CATEGORY_HATE_SPEECH" to "OFF",
+                    "HARM_CATEGORY_SEXUALLY_EXPLICIT" to "OFF",
+                    "HARM_CATEGORY_DANGEROUS_CONTENT" to "OFF",
+                    "HARM_CATEGORY_CIVIC_INTEGRITY" to "OFF",
+                )
+            }
+            categoryThresholds.forEach { (category, threshold) ->
+                if (threshold == null) return@forEach
+                add(buildJsonObject {
+                    put("category", category)
+                    put("threshold", threshold)
+                })
+            }
         }
     }.mergeCustomBody(params.customBody)
 
@@ -795,6 +920,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             MessageRole.ASSISTANT -> "model"
             MessageRole.TOOL -> "user" // google api中, tool结果是用户role发送的
         }
+    }
+
+    private fun JsonObjectBuilder.putPartMediaResolution(level: String) {
+        put("mediaResolution", buildJsonObject {
+            put("level", level)
+        })
     }
 
     private fun Model.supportsGoogleNativeImageOutput(): Boolean =
@@ -1110,20 +1241,22 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun buildContents(messages: List<UIMessage>): JsonArray = buildContents(messages, emptyMap())
+    private fun buildContents(messages: List<UIMessage>): JsonArray =
+        buildContents(messages, emptyMap(), null)
 
     private fun buildContents(
         messages: List<UIMessage>,
         uploadedFiles: Map<String, UploadedGoogleFile>,
+        mediaResolution: String?,
     ): JsonArray {
         return buildJsonArray {
             messages
                 .filter { it.role != MessageRole.SYSTEM && it.isValidToUpload() }
                 .forEach { message ->
                     if (message.role == MessageRole.ASSISTANT) {
-                        addModelMessage(message, uploadedFiles)
+                        addModelMessage(message, uploadedFiles, mediaResolution)
                     } else {
-                        addUserMessage(message, uploadedFiles)
+                        addUserMessage(message, uploadedFiles, mediaResolution)
                     }
                 }
         }
@@ -1132,6 +1265,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private fun JsonArrayBuilder.addModelMessage(
         message: UIMessage,
         uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
+        mediaResolution: String? = null,
     ) {
         val groups = groupPartsByToolBoundary(message.parts)
         val partsBuffer = mutableListOf<JsonObject>()
@@ -1139,7 +1273,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         for (group in groups) {
             when (group) {
                 is PartGroup.Content -> {
-                    group.parts.mapNotNull { it.toGooglePart(uploadedFiles) }.forEach { partsBuffer.add(it) }
+                    group.parts.mapNotNull { it.toGooglePart(uploadedFiles, mediaResolution) }
+                        .forEach { partsBuffer.add(it) }
                 }
 
                 is PartGroup.Tools -> {
@@ -1157,7 +1292,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     add(buildJsonObject {
                         put("role", "user")
                         putJsonArray("parts") {
-                            group.tools.forEach { add(it.toFunctionResponsePart()) }
+                            group.tools.forEach { add(it.toFunctionResponsePart(mediaResolution)) }
                         }
                     })
                 }
@@ -1176,17 +1311,19 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private fun JsonArrayBuilder.addUserMessage(
         message: UIMessage,
         uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
+        mediaResolution: String? = null,
     ) {
         add(buildJsonObject {
             put("role", commonRoleToGoogleRole(message.role))
             putJsonArray("parts") {
-                message.parts.mapNotNull { it.toGooglePart(uploadedFiles) }.forEach { add(it) }
+                message.parts.mapNotNull { it.toGooglePart(uploadedFiles, mediaResolution) }.forEach { add(it) }
             }
         })
     }
 
     private fun UIMessagePart.toGooglePart(
         uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
+        mediaResolution: String? = null,
     ): JsonObject? = when (this) {
         is UIMessagePart.Text -> buildJsonObject {
             put("text", text)
@@ -1199,6 +1336,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put("mimeType", uploaded.mimeType)
                         put("fileUri", uploaded.uri)
                     })
+                    mediaResolution?.let { putPartMediaResolution(it) }
                 }
             } ?: encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
@@ -1206,6 +1344,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put("mimeType", encoded.mimeType)
                         put("data", encoded.base64)
                     })
+                    mediaResolution?.let { putPartMediaResolution(it) }
                     metadataAs<GoogleThoughtMetadata>()?.thoughtSignature?.let {
                         put("thoughtSignature", it)
                     }
@@ -1220,6 +1359,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put("mimeType", uploaded.mimeType)
                         put("fileUri", uploaded.uri)
                     })
+                    mediaResolution?.let { putPartMediaResolution(it) }
                 }
             } ?: encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
@@ -1227,6 +1367,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put("mimeType", encoded.mimeType)
                         put("data", encoded.base64)
                     })
+                    mediaResolution?.let { putPartMediaResolution(it) }
                 }
             }
         }
@@ -1238,6 +1379,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put("mimeType", uploaded.mimeType)
                         put("fileUri", uploaded.uri)
                     })
+                    mediaResolution?.let { putPartMediaResolution(it) }
                 }
             } ?: encodeBase64(false).getOrNull()?.let { encoded ->
                 buildJsonObject {
@@ -1245,6 +1387,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         put("mimeType", encoded.mimeType)
                         put("data", encoded.base64)
                     })
+                    mediaResolution?.let { putPartMediaResolution(it) }
                 }
             }
         }
@@ -1262,7 +1405,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun UIMessagePart.Tool.toFunctionResponsePart() = buildJsonObject {
+    private fun UIMessagePart.Tool.toFunctionResponsePart(mediaResolution: String? = null) = buildJsonObject {
             put("functionResponse", buildJsonObject {
                 put("name", toolName)
 
@@ -1273,7 +1416,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 // 过滤出最终包含 inlineData 的数据块
                 val mediaGoogleParts = output
                     .filter { it !is UIMessagePart.Text }
-                    .mapNotNull { it.toGooglePart() }
+                    .mapNotNull { it.toGooglePart(mediaResolution = mediaResolution) }
                     .filter { it.containsKey("inlineData") } 
 
                 // 3. 构建给模型看的结构化 response 节点
@@ -1343,10 +1486,141 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     }
 }
 
+fun ProviderSetting.Google.requestChannel(): ProviderRequestChannel {
+    if (vertexAI) return ProviderRequestChannel.VERTEX_AI
+    val host = runCatching { baseUrl.trim().trimEnd('/').toHttpUrl().host }.getOrNull()
+    return if (host.equals("generativelanguage.googleapis.com", ignoreCase = true)) {
+        ProviderRequestChannel.GOOGLE_AI_STUDIO
+    } else {
+        ProviderRequestChannel.COMPATIBLE_ENDPOINT
+    }
+}
+
+internal fun buildGoogleRequestDiagnostics(
+    providerSetting: ProviderSetting.Google,
+    model: Model,
+    operation: ProviderRequestOperation,
+    requestBody: JsonObject,
+    referenceImageCount: Int = 0,
+    hasCustomBody: Boolean = false,
+): ProviderRequestDiagnostics {
+    val generationConfig = requestBody["generationConfig"] as? JsonObject
+    val parameters = linkedMapOf<String, String>()
+    val apiDefault = "omitted (API default)"
+
+    fun JsonElement?.primitiveValue(): String? =
+        (this as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+
+    fun JsonObject?.value(key: String): String? = this?.get(key).primitiveValue()
+
+    fun JsonObject?.arraySize(key: String): Int = (this?.get(key) as? JsonArray)?.size ?: 0
+
+    val responseModalities = (generationConfig?.get("responseModalities") as? JsonArray)
+        .orEmpty()
+        .mapNotNull { it.primitiveValue() }
+        .joinToString(", ")
+        .ifBlank { apiDefault }
+    parameters["responseModalities"] = responseModalities
+
+    when (operation) {
+        ProviderRequestOperation.IMAGE_GENERATION,
+        ProviderRequestOperation.IMAGE_EDIT -> {
+            val imageConfig = generationConfig?.get("imageConfig") as? JsonObject
+            val googleSearch = (requestBody["tools"] as? JsonArray)
+                .orEmpty()
+                .asSequence()
+                .mapNotNull { it as? JsonObject }
+                .mapNotNull { it["googleSearch"] as? JsonObject }
+                .firstOrNull()
+            val searchTypes = googleSearch?.get("searchTypes") as? JsonObject
+            parameters["imageConfig.aspectRatio"] = imageConfig.value("aspectRatio") ?: apiDefault
+            parameters["imageConfig.imageSize"] = imageConfig.value("imageSize") ?: apiDefault
+            parameters["thinkingConfig.thinkingLevel"] =
+                (generationConfig?.get("thinkingConfig") as? JsonObject)
+                    .value("thinkingLevel") ?: apiDefault
+            parameters["tools.googleSearch.webSearch"] =
+                (googleSearch != null && (searchTypes == null || searchTypes.containsKey("webSearch"))).toString()
+            parameters["tools.googleSearch.imageSearch"] =
+                (searchTypes?.containsKey("imageSearch") == true).toString()
+            (requestBody["safetySettings"] as? JsonArray).orEmpty().forEach { settingElement ->
+                val setting = settingElement as? JsonObject ?: return@forEach
+                val category = setting.value("category") ?: return@forEach
+                val threshold = setting.value("threshold") ?: return@forEach
+                parameters["safety.${category.removePrefix("HARM_CATEGORY_").lowercase()}"] = threshold
+            }
+            parameters["referenceImages"] = referenceImageCount.toString()
+        }
+
+        ProviderRequestOperation.TEXT_GENERATION,
+        ProviderRequestOperation.STREAM_TEXT -> {
+            val thinkingConfig = generationConfig?.get("thinkingConfig") as? JsonObject
+            val perPartMediaResolution = requestBody["contents"].findMediaResolutionLevel()
+            parameters["temperature"] = generationConfig.value("temperature") ?: apiDefault
+            parameters["topP"] = generationConfig.value("topP") ?: apiDefault
+            parameters["maxOutputTokens"] = generationConfig.value("maxOutputTokens") ?: apiDefault
+            parameters["thinkingConfig.thinkingLevel"] =
+                thinkingConfig.value("thinkingLevel") ?: apiDefault
+            parameters["thinkingConfig.thinkingBudget"] =
+                thinkingConfig.value("thinkingBudget") ?: apiDefault
+            parameters["thinkingConfig.includeThoughts"] =
+                thinkingConfig.value("includeThoughts") ?: apiDefault
+            parameters["mediaResolution"] = generationConfig.value("mediaResolution")
+                ?: perPartMediaResolution?.let { "$it (per media part)" }
+                ?: apiDefault
+            parameters["seed"] = generationConfig.value("seed") ?: apiDefault
+            parameters["stopSequences"] = generationConfig
+                .arraySize("stopSequences")
+                .takeIf { it > 0 }
+                ?.let { "$it configured" }
+                ?: apiDefault
+            parameters["responseMimeType"] =
+                generationConfig.value("responseMimeType") ?: apiDefault
+            parameters["responseJsonSchema"] = if (generationConfig?.containsKey("responseJsonSchema") == true) {
+                "configured"
+            } else {
+                apiDefault
+            }
+            parameters["presencePenalty"] = generationConfig.value("presencePenalty") ?: apiDefault
+            parameters["frequencyPenalty"] = generationConfig.value("frequencyPenalty") ?: apiDefault
+
+            (requestBody["safetySettings"] as? JsonArray).orEmpty().forEach { settingElement ->
+                val setting = settingElement as? JsonObject ?: return@forEach
+                val category = setting.value("category") ?: return@forEach
+                val threshold = setting.value("threshold") ?: return@forEach
+                parameters["safety.${category.removePrefix("HARM_CATEGORY_").lowercase()}"] = threshold
+            }
+        }
+    }
+
+    parameters["customBody"] = if (hasCustomBody) "configured" else "none"
+    return ProviderRequestDiagnostics(
+        provider = providerSetting.name,
+        model = model.modelId,
+        channel = providerSetting.requestChannel(),
+        operation = operation,
+        parameters = parameters,
+    )
+}
+
+private fun JsonElement?.findMediaResolutionLevel(): String? = when (this) {
+    is JsonObject -> {
+        val direct = (this["mediaResolution"] as? JsonObject)
+            ?.get("level")
+            ?.jsonPrimitive
+            ?.contentOrNull
+        direct ?: values.firstNotNullOfOrNull { it.findMediaResolutionLevel() }
+    }
+
+    is JsonArray -> firstNotNullOfOrNull { it.findMediaResolutionLevel() }
+    else -> null
+}
+
 internal fun buildGoogleImageRequestBody(
     prompt: String,
     size: String,
     resolution: String?,
+    thinkingLevel: String? = null,
+    geminiOptions: GeminiImageGenerationOptions = GeminiImageGenerationOptions(),
     customBody: List<CustomBody>,
     constraints: ImageGenerationConstraints,
     imageParts: List<JsonObject>,
@@ -1355,6 +1629,16 @@ internal fun buildGoogleImageRequestBody(
         it.isNotBlank() && it != "auto" && constraints.supportedSizes?.contains(it) == true
     }
     val imageSize = resolution?.takeIf(constraints.supportedResolutionValues::contains)
+    val supportedThinkingLevel = thinkingLevel?.takeIf(constraints.supportedThinkingValues::contains)
+    val includeTextResponse = geminiOptions.includeTextResponse && constraints.supportsTextResponse
+    val useWebSearch = geminiOptions.webSearchGrounding && constraints.supportsWebSearchGrounding
+    val useImageSearch = geminiOptions.imageSearchGrounding && constraints.supportsImageSearchGrounding
+    val safetySettings = listOf(
+        "HARM_CATEGORY_HARASSMENT" to geminiOptions.safetySettings.harassment.apiValue,
+        "HARM_CATEGORY_HATE_SPEECH" to geminiOptions.safetySettings.hateSpeech.apiValue,
+        "HARM_CATEGORY_SEXUALLY_EXPLICIT" to geminiOptions.safetySettings.sexuallyExplicit.apiValue,
+        "HARM_CATEGORY_DANGEROUS_CONTENT" to geminiOptions.safetySettings.dangerousContent.apiValue,
+    ).filter { (_, threshold) -> threshold != null }
 
     return buildJsonObject {
         putJsonArray("contents") {
@@ -1368,7 +1652,7 @@ internal fun buildGoogleImageRequestBody(
         }
         put("generationConfig", buildJsonObject {
             putJsonArray("responseModalities") {
-                add(JsonPrimitive("TEXT"))
+                if (includeTextResponse) add(JsonPrimitive("TEXT"))
                 add(JsonPrimitive("IMAGE"))
             }
             if (aspectRatio != null || imageSize != null) {
@@ -1377,7 +1661,34 @@ internal fun buildGoogleImageRequestBody(
                     imageSize?.let { put("imageSize", it) }
                 })
             }
+            supportedThinkingLevel?.let { level ->
+                put("thinkingConfig", buildJsonObject {
+                    put("thinkingLevel", level)
+                })
+            }
         })
+        if (constraints.supportsSafetySettings && safetySettings.isNotEmpty()) {
+            putJsonArray("safetySettings") {
+                safetySettings.forEach { (category, threshold) ->
+                    add(buildJsonObject {
+                        put("category", category)
+                        put("threshold", requireNotNull(threshold))
+                    })
+                }
+            }
+        }
+        if (useWebSearch || useImageSearch) {
+            putJsonArray("tools") {
+                add(buildJsonObject {
+                    put("googleSearch", buildJsonObject {
+                        put("searchTypes", buildJsonObject {
+                            if (useWebSearch) put("webSearch", buildJsonObject {})
+                            if (useImageSearch) put("imageSearch", buildJsonObject {})
+                        })
+                    })
+                })
+            }
+        }
     }.mergeCustomBody(customBody)
 }
 
