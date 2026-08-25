@@ -77,7 +77,13 @@ import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantClaudePage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDeepSeekPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGeminiPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGrokPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantOpenAIPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantQwenPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantExtensionsPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantLocalToolPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
@@ -268,13 +274,14 @@ class RouteActivity : ComponentActivity() {
         }
 
         val backStack = rememberNavBackStack(startScreen)
+        val navigator = remember(backStack) { Navigator(backStack) }
         SideEffect { this@RouteActivity.navStack = backStack }
 
         ShareHandler(backStack)
 
         SharedTransitionLayout {
             CompositionLocalProvider(
-                LocalNavController provides Navigator(backStack),
+                LocalNavController provides navigator,
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
                 LocalToaster provides toastState,
@@ -361,6 +368,30 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.AssistantBasic> { key ->
                                 AssistantBasicPage(key.id)
+                            }
+
+                            entry<Screen.AssistantClaude> { key ->
+                                AssistantClaudePage(key.id)
+                            }
+
+                            entry<Screen.AssistantDeepSeek> { key ->
+                                AssistantDeepSeekPage(key.id)
+                            }
+
+                            entry<Screen.AssistantGemini> { key ->
+                                AssistantGeminiPage(key.id)
+                            }
+
+                            entry<Screen.AssistantGrok> { key ->
+                                AssistantGrokPage(key.id)
+                            }
+
+                            entry<Screen.AssistantOpenAI> { key ->
+                                AssistantOpenAIPage(key.id)
+                            }
+
+                            entry<Screen.AssistantQwen> { key ->
+                                AssistantQwenPage(key.id)
                             }
 
                             entry<Screen.AssistantPrompt> { key ->
@@ -612,6 +643,24 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class AssistantBasic(val id: String) : Screen
+
+    @Serializable
+    data class AssistantClaude(val id: String) : Screen
+
+    @Serializable
+    data class AssistantDeepSeek(val id: String) : Screen
+
+    @Serializable
+    data class AssistantGemini(val id: String) : Screen
+
+    @Serializable
+    data class AssistantGrok(val id: String) : Screen
+
+    @Serializable
+    data class AssistantOpenAI(val id: String) : Screen
+
+    @Serializable
+    data class AssistantQwen(val id: String) : Screen
 
     @Serializable
     data class AssistantPrompt(val id: String) : Screen

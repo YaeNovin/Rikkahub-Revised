@@ -553,6 +553,12 @@ class GenerationHandler(
             maxTokens = assistant.maxTokens,
             tools = tools,
             reasoningLevel = assistant.reasoningLevel,
+            openAIOptions = assistant.openAIOptions,
+            grokOptions = assistant.grokOptions,
+            qwenOptions = assistant.qwenOptions,
+            deepSeekOptions = assistant.deepSeekOptions,
+            geminiOptions = assistant.geminiOptions,
+            claudeOptions = assistant.claudeOptions,
             customHeaders = buildList {
                 addAll(assistant.customHeaders)
                 addAll(model.customHeaders)

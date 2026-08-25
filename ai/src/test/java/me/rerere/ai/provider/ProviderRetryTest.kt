@@ -11,6 +11,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.io.EOFException
 import java.io.IOException
 import java.net.SocketException
 import java.net.SocketTimeoutException
@@ -147,6 +148,43 @@ class ProviderRetryTest {
 
         assertEquals(2, attempts)
         assertEquals(1, controller.retryCount)
+    }
+
+    @Test
+    fun `long provider attempts do not consume reconnect wait duration`() = runBlocking {
+        var nowMillis = 0L
+        var attempts = 0
+        val delays = mutableListOf<Long>()
+        val controller = ProviderRetryController(
+            maxRetries = 2,
+            initialDelayMillis = 1_000L,
+            maxDurationMillis = 4_000L,
+            jitterRatio = 0.0,
+            nanoTime = { nowMillis * 1_000_000L },
+        )
+
+        retryProviderRequest(
+            enabled = true,
+            retryController = controller,
+            delayBeforeRetry = { delayMillis ->
+                delays += delayMillis
+                nowMillis += delayMillis
+            },
+        ) {
+            attempts++
+            when (attempts) {
+                1 -> throw IOException("connection reset")
+                2 -> {
+                    nowMillis += 200_000L
+                    throw EOFException("stream ended during long reasoning")
+                }
+            }
+        }
+
+        assertEquals(3, attempts)
+        assertEquals(listOf(1_000L, 2_000L), delays)
+        assertEquals(2, controller.retryCount)
+        assertEquals(1_000L, controller.remainingDurationMillis())
     }
 
     @Test

@@ -9,6 +9,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.stream.StreamChunkDecoder
+import me.rerere.ai.provider.stream.prematureStreamTermination
 import me.rerere.ai.ui.ClaudeReasoningMetadata
 import me.rerere.ai.ui.ServerToolMetadata
 import me.rerere.ai.ui.ServerToolProtocol
@@ -150,7 +151,10 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
         }
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (finished) return emptyList()
+        prematureStreamTermination("Anthropic Messages")
+    }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()

@@ -7,6 +7,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Message02
 import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Wrench01
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,6 +36,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.claude.resolveClaudeModelParameterSupport
+import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
+import me.rerere.ai.provider.providers.openai.resolveGrokModelParameterSupport
+import me.rerere.ai.provider.providers.openai.resolveOpenAIModelParameterSupport
+import me.rerere.ai.provider.providers.openai.resolveQwenModelParameterSupport
+import me.rerere.ai.registry.ModelRegistry
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -53,6 +64,60 @@ fun AssistantDetailPage(id: String) {
         }
     )
     val assistant by vm.assistant.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val providers by vm.providers.collectAsStateWithLifecycle()
+    val selectedModel = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
+    val selectedProvider = selectedModel?.findProvider(providers)
+    val modelParameterEntry = when {
+        selectedModel != null &&
+            selectedProvider is ProviderSetting.Claude &&
+            resolveClaudeModelParameterSupport(selectedModel.modelId).available -> Triple(
+                Screen.AssistantClaude(id),
+                R.string.assistant_page_tab_claude,
+                R.string.assistant_detail_claude_desc,
+            )
+        selectedModel != null &&
+            (selectedProvider is ProviderSetting.OpenAI ||
+                selectedProvider is ProviderSetting.Claude) &&
+            resolveDeepSeekModelParameterSupport(selectedModel.modelId).available -> Triple(
+                Screen.AssistantDeepSeek(id),
+                R.string.assistant_page_tab_deepseek,
+                R.string.assistant_detail_deepseek_desc,
+            )
+        selectedModel != null &&
+            selectedProvider is ProviderSetting.OpenAI &&
+            resolveQwenModelParameterSupport(selectedModel.modelId).available -> Triple(
+                Screen.AssistantQwen(id),
+                R.string.assistant_page_tab_qwen,
+                R.string.assistant_detail_qwen_desc,
+            )
+        selectedModel != null &&
+            selectedProvider is ProviderSetting.OpenAI &&
+            resolveGrokModelParameterSupport(selectedModel.modelId).available -> Triple(
+                Screen.AssistantGrok(id),
+                R.string.assistant_page_tab_grok,
+                R.string.assistant_detail_grok_desc,
+            )
+        selectedModel != null &&
+            selectedProvider is ProviderSetting.OpenAI &&
+            resolveOpenAIModelParameterSupport(selectedModel.modelId).available -> Triple(
+                Screen.AssistantOpenAI(id),
+                R.string.assistant_page_tab_openai,
+                R.string.assistant_detail_openai_desc,
+            )
+        selectedModel != null &&
+            selectedProvider is ProviderSetting.Google &&
+            ModelRegistry.GEMINI_3_SERIES.match(selectedModel.modelId) -> Triple(
+                Screen.AssistantGemini(id),
+                R.string.assistant_page_tab_gemini,
+                R.string.assistant_detail_gemini_desc,
+            )
+        else -> Triple<Screen?, Int, Int>(
+            null,
+            R.string.assistant_page_tab_model_parameters,
+            R.string.assistant_detail_model_parameters_unavailable,
+        )
+    }
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -105,6 +170,16 @@ fun AssistantDetailPage(id: String) {
                         leadingContent = { Icon(HugeIcons.Message02, null) },
                         supportingContent = { Text(stringResource(R.string.assistant_detail_prompt_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_prompt)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                    )
+                    item(
+                        onClick = modelParameterEntry.first?.let { destination ->
+                            { navController.navigate(destination) }
+                        },
+                        modifier = Modifier.alpha(if (modelParameterEntry.first != null) 1f else 0.38f),
+                        leadingContent = { Icon(HugeIcons.Sparkles, null) },
+                        supportingContent = { Text(stringResource(modelParameterEntry.third)) },
+                        headlineContent = { Text(stringResource(modelParameterEntry.second)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(

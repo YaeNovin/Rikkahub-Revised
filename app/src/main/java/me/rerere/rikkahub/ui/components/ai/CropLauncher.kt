@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toFile
@@ -21,25 +22,42 @@ import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.context.LocalToaster
 import java.io.File
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun useCropLauncher(
-    onCroppedImageReady: (Uri) -> Unit,
+    onCroppedImageReady: suspend (Uri) -> Unit,
     onCleanup: (() -> Unit)? = null,
     aspectRatio: Pair<Float, Float>? = null,
     freeStyleCropEnabled: Boolean = true
 ): Pair<ActivityResultLauncher<Intent>, (Uri) -> Unit> {
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
     var cropOutputUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun cleanupCropOutput() {
+        cropOutputUri?.toFile()?.delete()
+        cropOutputUri = null
+        onCleanup?.invoke()
+    }
 
     val cropActivityLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         when (result.resultCode) {
             android.app.Activity.RESULT_OK -> {
-                cropOutputUri?.let { croppedUri ->
-                    onCroppedImageReady(croppedUri)
+                val croppedUri = cropOutputUri
+                if (croppedUri == null) {
+                    cleanupCropOutput()
+                } else {
+                    scope.launch {
+                        try {
+                            onCroppedImageReady(croppedUri)
+                        } finally {
+                            cleanupCropOutput()
+                        }
+                    }
                 }
             }
 
@@ -53,15 +71,15 @@ internal fun useCropLauncher(
                     context.formatUserFacingError(error ?: IllegalStateException("Image crop failed")),
                     type = ToastType.Error
                 )
+                cleanupCropOutput()
             }
+
+            else -> cleanupCropOutput()
         }
-        cropOutputUri?.toFile()?.delete()
-        cropOutputUri = null
-        onCleanup?.invoke()
     }
 
     val launchCrop: (Uri) -> Unit = { sourceUri ->
-        val outputFile = File(context.appTempFolder, "crop_output_${System.currentTimeMillis()}.jpg")
+        val outputFile = File(context.appTempFolder, "crop_output_${System.currentTimeMillis()}.png")
         cropOutputUri = Uri.fromFile(outputFile)
 
         var crop = UCrop.of(sourceUri, cropOutputUri!!).withOptions(UCrop.Options().apply {

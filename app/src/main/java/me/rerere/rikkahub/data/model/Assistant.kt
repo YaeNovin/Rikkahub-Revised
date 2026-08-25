@@ -5,6 +5,12 @@ import kotlinx.serialization.Serializable
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
+import me.rerere.ai.provider.ClaudeGenerationOptions
+import me.rerere.ai.provider.DeepSeekGenerationOptions
+import me.rerere.ai.provider.GeminiGenerationOptions
+import me.rerere.ai.provider.GrokGenerationOptions
+import me.rerere.ai.provider.OpenAIGenerationOptions
+import me.rerere.ai.provider.QwenGenerationOptions
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.ai.context.DEFAULT_ROLLING_CONTEXT_THRESHOLD_TOKENS
@@ -39,6 +45,12 @@ data class Assistant(
     val regexes: List<AssistantRegex> = emptyList(),
     val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
     val maxTokens: Int? = null,
+    val openAIOptions: OpenAIGenerationOptions = OpenAIGenerationOptions(),
+    val grokOptions: GrokGenerationOptions = GrokGenerationOptions(),
+    val qwenOptions: QwenGenerationOptions = QwenGenerationOptions(),
+    val deepSeekOptions: DeepSeekGenerationOptions = DeepSeekGenerationOptions(),
+    val geminiOptions: GeminiGenerationOptions = GeminiGenerationOptions(),
+    val claudeOptions: ClaudeGenerationOptions = ClaudeGenerationOptions(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),
     val mcpServers: Set<Uuid> = emptySet(),

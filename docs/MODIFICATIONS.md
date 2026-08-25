@@ -6,11 +6,33 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.4`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.5`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2.4.8-revised.5 Maintenance Changes / 维护变更
+
+- English: Added model-aware request parameters for OpenAI, Claude, Gemini,
+  Grok, Qwen, and DeepSeek, with sanitized request diagnostics that omit
+  credentials, prompts, schemas, and binary content.
+  中文：为 OpenAI、Claude、Gemini、Grok、Qwen 和 DeepSeek 增加按模型能力适配的
+  请求参数，并提供不记录凭据、提示词、Schema 与二进制内容的脱敏请求诊断。
+- English: Improved stream reliability with premature-termination detection,
+  corrected retry time budgets, and event-stream connection keepalive settings.
+  中文：通过流提前终止检测、正确的重试时间预算及事件流连接保活设置，提高流式
+  生成可靠性。
+- English: Added Gemini image-generation controls and unified source, inline,
+  and full-screen previews for supported rich code blocks; crop output now
+  remains available until persistence completes.
+  中文：增加 Gemini 生图参数，并统一受支持富代码块的源码、内嵌与全屏预览；裁剪
+  输出会在持久化完成后再清理。
+- English: Fixed stale settings writes that could block conversation switching,
+  made navigation replacement atomic, and restored the provider model action bar
+  to the bottom of the model list.
+  中文：修复可能导致无法切换对话的旧设置快照写入，使导航替换成为原子操作，并将
+  供应商模型操作栏恢复到模型列表底部。
 
 ## 2.4.8-revised.4 Maintenance Changes / 维护变更
 
@@ -136,7 +158,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.4` and signing values
+- `release` uses `2.4.8-revised.5` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.

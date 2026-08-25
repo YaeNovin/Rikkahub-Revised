@@ -53,6 +53,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -91,7 +92,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.ai.provider.GeminiImageGenerationOptions
+import me.rerere.ai.provider.GeminiSafetySettings
+import me.rerere.ai.provider.GeminiSafetyThreshold
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.google.requestChannel
 import me.rerere.ai.ui.ImageGenSize
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
@@ -123,6 +130,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
+import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.utils.ImageUtils
@@ -273,6 +281,8 @@ private fun ImageGenScreen(
     val background by vm.background.collectAsStateWithLifecycle()
     val outputCompression by vm.outputCompression.collectAsStateWithLifecycle()
     val resolution by vm.resolution.collectAsStateWithLifecycle()
+    val thinkingLevel by vm.thinkingLevel.collectAsStateWithLifecycle()
+    val geminiImageOptions by vm.geminiImageOptions.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val currentGeneratedImages by vm.currentGeneratedImages.collectAsStateWithLifecycle()
     val referenceImages by vm.referenceImages.collectAsStateWithLifecycle()
@@ -284,6 +294,12 @@ private fun ImageGenScreen(
     } else {
         null
     }
+    val geminiProvider = selectedProvider as? ProviderSetting.Google
+    val isGeminiImageModel = geminiProvider != null &&
+        selectedConstraints?.sizeRequestField == "aspect_ratio" &&
+        selectedModel?.modelId?.substringAfterLast('/')?.startsWith("gemini-", ignoreCase = true) == true
+    val geminiModelId = selectedModel?.modelId?.takeIf { isGeminiImageModel }
+    val geminiRequestChannel = geminiProvider?.requestChannel()?.takeIf { isGeminiImageModel }
     val maxOutputImages = selectedConstraints?.maxOutputImages ?: 1
     val maxReferenceImages = selectedConstraints?.takeIf { it.supportsEdit }?.maxReferenceImages ?: 0
     val supportedSizes = selectedConstraints?.supportedSizes
@@ -312,6 +328,9 @@ private fun ImageGenScreen(
         if (background !in selectedConstraints?.supportedBackgroundValues.orEmpty()) vm.updateBackground(null)
         if (background == "transparent" && outputFormat !in setOf(null, "png", "webp")) vm.updateBackground(null)
         if (resolution !in selectedConstraints?.supportedResolutionValues.orEmpty()) vm.updateResolution(null)
+        if (thinkingLevel !in selectedConstraints?.supportedThinkingValues.orEmpty()) {
+            vm.updateThinkingLevel(null)
+        }
     }
 
     Column(
@@ -410,11 +429,21 @@ private fun ImageGenScreen(
                 background = background,
                 outputCompression = outputCompression,
                 resolution = resolution,
+                thinkingLevel = thinkingLevel,
+                geminiImageOptions = geminiImageOptions,
                 supportedQualityValues = selectedConstraints?.supportedQualityValues.orEmpty(),
                 supportedOutputFormats = selectedConstraints?.supportedOutputFormats.orEmpty(),
                 supportedBackgroundValues = selectedConstraints?.supportedBackgroundValues.orEmpty(),
                 supportsOutputCompression = selectedConstraints?.supportsOutputCompression == true,
                 supportedResolutionValues = selectedConstraints?.supportedResolutionValues.orEmpty(),
+                supportedThinkingValues = selectedConstraints?.supportedThinkingValues.orEmpty(),
+                supportsGeminiTextResponse = selectedConstraints?.supportsTextResponse == true,
+                supportsGeminiSafetySettings = selectedConstraints?.supportsSafetySettings == true,
+                supportsGeminiWebSearch = selectedConstraints?.supportsWebSearchGrounding == true,
+                supportsGeminiImageSearch = selectedConstraints?.supportsImageSearchGrounding == true,
+                geminiModelId = geminiModelId,
+                geminiRequestChannel = geminiRequestChannel,
+                referenceImageCount = referenceImages.size,
                 sheetState = settingsSheetState,
                 onDismiss = { showSettingsSheet = false }
             )
@@ -1426,14 +1455,50 @@ private fun SettingsBottomSheet(
     background: String?,
     outputCompression: Int,
     resolution: String?,
+    thinkingLevel: String?,
+    geminiImageOptions: GeminiImageGenerationOptions,
     supportedQualityValues: Set<String>,
     supportedOutputFormats: Set<String>,
     supportedBackgroundValues: Set<String>,
     supportsOutputCompression: Boolean,
     supportedResolutionValues: Set<String>,
+    supportedThinkingValues: Set<String>,
+    supportsGeminiTextResponse: Boolean,
+    supportsGeminiSafetySettings: Boolean,
+    supportsGeminiWebSearch: Boolean,
+    supportsGeminiImageSearch: Boolean,
+    geminiModelId: String?,
+    geminiRequestChannel: ProviderRequestChannel?,
+    referenceImageCount: Int,
     sheetState: SheetState,
     onDismiss: () -> Unit
 ) {
+    var showGeminiParameterSummary by remember { mutableStateOf(false) }
+    var showGeminiSafetySettings by remember { mutableStateOf(false) }
+    if (showGeminiParameterSummary && geminiModelId != null && geminiRequestChannel != null) {
+        GeminiImageParameterDialog(
+            modelId = geminiModelId,
+            channel = geminiRequestChannel,
+            aspectRatio = size.takeUnless { it == ImageGenSize.AUTO.value },
+            resolution = resolution,
+            thinkingLevel = thinkingLevel,
+            geminiImageOptions = geminiImageOptions.copy(
+                includeTextResponse = geminiImageOptions.includeTextResponse && supportsGeminiTextResponse,
+                webSearchGrounding = geminiImageOptions.webSearchGrounding && supportsGeminiWebSearch,
+                imageSearchGrounding = geminiImageOptions.imageSearchGrounding && supportsGeminiImageSearch,
+            ),
+            referenceImageCount = referenceImageCount,
+            onDismiss = { showGeminiParameterSummary = false },
+        )
+    }
+    if (showGeminiSafetySettings) {
+        GeminiImageSafetyDialog(
+            settings = geminiImageOptions.safetySettings,
+            onSettingsChange = vm::updateGeminiSafetySettings,
+            onDismiss = { showGeminiSafetySettings = false },
+        )
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -1454,6 +1519,37 @@ private fun SettingsBottomSheet(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
+
+            if (geminiModelId != null && geminiRequestChannel != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showGeminiParameterSummary = true },
+                ) {
+                    FormItem(
+                        modifier = Modifier.padding(12.dp),
+                        label = { Text(stringResource(R.string.imggen_page_gemini_parameters_title)) },
+                        description = {
+                            Text(stringResource(R.string.imggen_page_gemini_parameters_desc))
+                            Text(stringResource(R.string.imggen_page_gemini_parameters_experimental))
+                        },
+                        tail = {
+                            Icon(
+                                imageVector = HugeIcons.InformationCircle,
+                                contentDescription = stringResource(
+                                    R.string.imggen_page_gemini_parameters_details,
+                                ),
+                            )
+                        },
+                    ) {
+                        Text(
+                            text = geminiRequestChannel.displayName(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
 
             FormItem(
                 label = { Text(stringResource(R.string.imggen_page_generation_count)) },
@@ -1478,7 +1574,14 @@ private fun SettingsBottomSheet(
                                 }
                             )
                         )
-                    }
+                    },
+                    description = if (geminiModelId != null) {
+                        {
+                            Text(stringResource(R.string.imggen_page_gemini_aspect_ratio_desc))
+                        }
+                    } else {
+                        null
+                    },
                 ) {
                     val sizeOptions = supportedSizes ?: ImageGenSize.entries
                         .mapTo(linkedSetOf()) { it.value }
@@ -1662,9 +1765,95 @@ private fun SettingsBottomSheet(
             if (supportedResolutionValues.isNotEmpty()) {
                 ImageOptionChips(
                     title = stringResource(R.string.imggen_page_resolution),
+                    description = if (geminiModelId != null) {
+                        stringResource(R.string.imggen_page_gemini_resolution_desc)
+                    } else {
+                        null
+                    },
                     value = resolution,
                     options = supportedResolutionValues,
                     onValueChange = vm::updateResolution,
+                )
+            }
+
+            if (supportedThinkingValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_thinking),
+                    description = stringResource(R.string.imggen_page_gemini_thinking_desc),
+                    value = thinkingLevel,
+                    options = supportedThinkingValues,
+                    onValueChange = vm::updateThinkingLevel,
+                )
+            }
+
+            if (geminiModelId != null && supportsGeminiTextResponse) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_gemini_text_response)) },
+                    description = {
+                        Text(stringResource(R.string.imggen_page_gemini_text_response_desc))
+                    },
+                    tail = {
+                        Switch(
+                            checked = geminiImageOptions.includeTextResponse,
+                            onCheckedChange = vm::updateGeminiTextResponse,
+                        )
+                    },
+                )
+            }
+
+            if (geminiModelId != null && supportsGeminiWebSearch) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_gemini_web_search)) },
+                    description = {
+                        Text(stringResource(R.string.imggen_page_gemini_web_search_desc))
+                        Text(stringResource(R.string.imggen_page_gemini_search_warning))
+                    },
+                    tail = {
+                        Switch(
+                            checked = geminiImageOptions.webSearchGrounding,
+                            onCheckedChange = vm::updateGeminiWebSearch,
+                        )
+                    },
+                )
+            }
+
+            if (geminiModelId != null && supportsGeminiImageSearch) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_gemini_image_search)) },
+                    description = {
+                        Text(stringResource(R.string.imggen_page_gemini_image_search_desc))
+                        Text(stringResource(R.string.imggen_page_gemini_search_warning))
+                    },
+                    tail = {
+                        Switch(
+                            checked = geminiImageOptions.imageSearchGrounding,
+                            onCheckedChange = vm::updateGeminiImageSearch,
+                        )
+                    },
+                )
+            }
+
+            if (geminiModelId != null && supportsGeminiSafetySettings) {
+                val configuredSafetyCategories = geminiImageOptions.safetySettings.configuredCount()
+                FormItem(
+                    label = { Text(stringResource(R.string.assistant_gemini_safety_title)) },
+                    description = {
+                        Text(stringResource(R.string.imggen_page_gemini_safety_desc))
+                    },
+                    tail = {
+                        TextButton(onClick = { showGeminiSafetySettings = true }) {
+                            Text(
+                                if (configuredSafetyCategories == 0) {
+                                    stringResource(R.string.assistant_gemini_safety_default)
+                                } else {
+                                    stringResource(
+                                        R.string.assistant_gemini_safety_summary,
+                                        configuredSafetyCategories,
+                                    )
+                                }
+                            )
+                        }
+                    },
                 )
             }
 
@@ -1677,11 +1866,15 @@ private fun SettingsBottomSheet(
 @Composable
 private fun ImageOptionChips(
     title: String,
+    description: String? = null,
     value: String?,
     options: Set<String>,
     onValueChange: (String?) -> Unit,
 ) {
-    FormItem(label = { Text(title) }) {
+    FormItem(
+        label = { Text(title) },
+        description = description?.let { text -> { Text(text) } },
+    ) {
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1708,3 +1901,215 @@ private fun ImageOptionChips(
         }
     }
 }
+
+private fun GeminiSafetySettings.configuredCount(): Int = listOf(
+    harassment,
+    hateSpeech,
+    sexuallyExplicit,
+    dangerousContent,
+).count { it != GeminiSafetyThreshold.DEFAULT }
+
+@Composable
+private fun GeminiImageSafetyDialog(
+    settings: GeminiSafetySettings,
+    onSettingsChange: (GeminiSafetySettings) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.assistant_gemini_safety_title)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(stringResource(R.string.assistant_gemini_safety_detail))
+                Text(
+                    text = stringResource(R.string.assistant_gemini_safety_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                GeminiImageSafetyItem(
+                    title = stringResource(R.string.assistant_gemini_safety_harassment),
+                    description = stringResource(R.string.assistant_gemini_safety_harassment_desc),
+                    selected = draft.harassment,
+                    onSelected = { draft = draft.copy(harassment = it) },
+                )
+                GeminiImageSafetyItem(
+                    title = stringResource(R.string.assistant_gemini_safety_hate),
+                    description = stringResource(R.string.assistant_gemini_safety_hate_desc),
+                    selected = draft.hateSpeech,
+                    onSelected = { draft = draft.copy(hateSpeech = it) },
+                )
+                GeminiImageSafetyItem(
+                    title = stringResource(R.string.assistant_gemini_safety_sexual),
+                    description = stringResource(R.string.assistant_gemini_safety_sexual_desc),
+                    selected = draft.sexuallyExplicit,
+                    onSelected = { draft = draft.copy(sexuallyExplicit = it) },
+                )
+                GeminiImageSafetyItem(
+                    title = stringResource(R.string.assistant_gemini_safety_dangerous),
+                    description = stringResource(R.string.assistant_gemini_safety_dangerous_desc),
+                    selected = draft.dangerousContent,
+                    onSelected = { draft = draft.copy(dangerousContent = it) },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onSettingsChange(draft)
+                onDismiss()
+            }) {
+                Text(stringResource(R.string.confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun GeminiImageSafetyItem(
+    title: String,
+    description: String,
+    selected: GeminiSafetyThreshold,
+    onSelected: (GeminiSafetyThreshold) -> Unit,
+) {
+    FormItem(
+        label = { Text(title) },
+        description = { Text(description) },
+    ) {
+        Select(
+            options = GeminiSafetyThreshold.entries,
+            selectedOption = selected,
+            onOptionSelected = onSelected,
+            optionToString = { it.displayName() },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun GeminiImageParameterDialog(
+    modelId: String,
+    channel: ProviderRequestChannel,
+    aspectRatio: String?,
+    resolution: String?,
+    thinkingLevel: String?,
+    geminiImageOptions: GeminiImageGenerationOptions,
+    referenceImageCount: Int,
+    onDismiss: () -> Unit,
+) {
+    val apiDefault = stringResource(R.string.imggen_page_gemini_parameter_omitted)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.imggen_page_gemini_parameters_details)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(stringResource(R.string.imggen_page_gemini_parameters_actual_desc))
+                GeminiImageParameterItem(stringResource(R.string.log_page_model), modelId)
+                GeminiImageParameterItem(
+                    stringResource(R.string.log_page_channel),
+                    channel.displayName(),
+                )
+                GeminiImageParameterItem("imageConfig.aspectRatio", aspectRatio ?: apiDefault)
+                GeminiImageParameterItem("imageConfig.imageSize", resolution ?: apiDefault)
+                GeminiImageParameterItem("thinkingConfig.thinkingLevel", thinkingLevel ?: apiDefault)
+                GeminiImageParameterItem(
+                    "responseModalities",
+                    if (geminiImageOptions.includeTextResponse) "TEXT, IMAGE" else "IMAGE",
+                )
+                GeminiImageParameterItem(
+                    "tools.googleSearch.webSearch",
+                    geminiImageOptions.webSearchGrounding.localizedEnabledState(),
+                )
+                GeminiImageParameterItem(
+                    "tools.googleSearch.imageSearch",
+                    geminiImageOptions.imageSearchGrounding.localizedEnabledState(),
+                )
+                GeminiImageParameterItem(
+                    stringResource(R.string.assistant_gemini_safety_title),
+                    if (geminiImageOptions.safetySettings.configuredCount() == 0) {
+                        stringResource(R.string.assistant_gemini_safety_default)
+                    } else {
+                        stringResource(
+                            R.string.assistant_gemini_safety_summary,
+                            geminiImageOptions.safetySettings.configuredCount(),
+                        )
+                    },
+                )
+                GeminiImageParameterItem(
+                    stringResource(R.string.imggen_page_gemini_reference_images),
+                    referenceImageCount.toString(),
+                )
+                Text(
+                    text = stringResource(R.string.imggen_page_gemini_parameters_log_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.imggen_page_close))
+            }
+        },
+    )
+}
+
+@Composable
+private fun GeminiImageParameterItem(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun ProviderRequestChannel.displayName(): String = stringResource(
+    when (this) {
+        ProviderRequestChannel.ANTHROPIC_API -> R.string.log_page_channel_anthropic_api
+        ProviderRequestChannel.OPENAI_API -> R.string.log_page_channel_openai_api
+        ProviderRequestChannel.XAI_API -> R.string.log_page_channel_xai_api
+        ProviderRequestChannel.GOOGLE_AI_STUDIO -> R.string.log_page_channel_google_ai_studio
+        ProviderRequestChannel.VERTEX_AI -> R.string.log_page_channel_vertex_ai
+        ProviderRequestChannel.COMPATIBLE_ENDPOINT -> R.string.log_page_channel_compatible
+    }
+)
+
+@Composable
+private fun GeminiSafetyThreshold.displayName(): String = stringResource(
+    when (this) {
+        GeminiSafetyThreshold.DEFAULT -> R.string.assistant_gemini_safety_default
+        GeminiSafetyThreshold.OFF -> R.string.assistant_gemini_safety_off
+        GeminiSafetyThreshold.BLOCK_NONE -> R.string.assistant_gemini_safety_block_none
+        GeminiSafetyThreshold.BLOCK_ONLY_HIGH -> R.string.assistant_gemini_safety_block_high
+        GeminiSafetyThreshold.BLOCK_MEDIUM_AND_ABOVE -> R.string.assistant_gemini_safety_block_medium
+        GeminiSafetyThreshold.BLOCK_LOW_AND_ABOVE -> R.string.assistant_gemini_safety_block_low
+    }
+)
+
+@Composable
+private fun Boolean.localizedEnabledState(): String = stringResource(
+    if (this) R.string.imggen_page_gemini_enabled else R.string.imggen_page_gemini_disabled
+)

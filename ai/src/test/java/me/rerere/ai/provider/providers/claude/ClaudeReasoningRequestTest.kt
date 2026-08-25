@@ -25,12 +25,12 @@ class ClaudeReasoningRequestTest {
     }
 
     @Test
-    fun `max effort is sent only to supported Anthropic models`() {
+    fun `max effort follows supported Anthropic models`() {
         val opus = buildRequest("https://api.anthropic.com/v1", "claude-opus-4-6")
         val sonnet = buildRequest("https://api.anthropic.com/v1", "claude-sonnet-4-6")
 
         assertEquals("max", opus["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
-        assertEquals("high", sonnet["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
+        assertEquals("max", sonnet["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
     }
 
     @Test

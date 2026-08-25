@@ -37,6 +37,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import me.rerere.ai.provider.GeminiImageGenerationOptions
+import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.CustomBody
@@ -138,6 +140,12 @@ class ImgGenVM(
 
     private val _resolution = MutableStateFlow<String?>(null)
     val resolution: StateFlow<String?> = _resolution
+
+    private val _thinkingLevel = MutableStateFlow<String?>(null)
+    val thinkingLevel: StateFlow<String?> = _thinkingLevel
+
+    private val _geminiImageOptions = MutableStateFlow(GeminiImageGenerationOptions())
+    val geminiImageOptions: StateFlow<GeminiImageGenerationOptions> = _geminiImageOptions
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
@@ -384,6 +392,26 @@ class ImgGenVM(
         _resolution.value = value
     }
 
+    fun updateThinkingLevel(value: String?) {
+        _thinkingLevel.value = value
+    }
+
+    fun updateGeminiTextResponse(enabled: Boolean) {
+        _geminiImageOptions.value = _geminiImageOptions.value.copy(includeTextResponse = enabled)
+    }
+
+    fun updateGeminiWebSearch(enabled: Boolean) {
+        _geminiImageOptions.value = _geminiImageOptions.value.copy(webSearchGrounding = enabled)
+    }
+
+    fun updateGeminiImageSearch(enabled: Boolean) {
+        _geminiImageOptions.value = _geminiImageOptions.value.copy(imageSearchGrounding = enabled)
+    }
+
+    fun updateGeminiSafetySettings(settings: GeminiSafetySettings) {
+        _geminiImageOptions.value = _geminiImageOptions.value.copy(safetySettings = settings)
+    }
+
     fun addReferenceImages(paths: List<String>) {
         if (_isGenerating.value) {
             deleteReferenceFiles(paths)
@@ -462,6 +490,8 @@ class ImgGenVM(
                     background = _background.value,
                     outputCompression = _outputCompression.value,
                     resolution = _resolution.value,
+                    thinkingLevel = _thinkingLevel.value,
+                    geminiOptions = _geminiImageOptions.value,
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies
                 )
@@ -522,6 +552,8 @@ class ImgGenVM(
                     background = _background.value,
                     outputCompression = _outputCompression.value,
                     resolution = _resolution.value,
+                    thinkingLevel = _thinkingLevel.value,
+                    geminiOptions = _geminiImageOptions.value,
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies
                 )

@@ -45,4 +45,17 @@ class InteractiveCodeBlockTest {
         assertTrue(html.contains("const geoJson = config.geoJson"))
         assertTrue(html.contains("setTimeout(refreshMapViewport, 120)"))
     }
+
+    @Test
+    fun `score preview keeps a solid canvas and supports scrolling`() {
+        val html = buildInteractiveRendererHtml(
+            renderer = InteractiveCodeRenderer.ABC,
+            code = "X:1\nK:C\nC D E F|",
+            colorScheme = androidx.compose.material3.lightColorScheme(),
+        )
+
+        assertTrue(html.contains("overflow: auto"))
+        assertTrue(html.contains("body { background: #"))
+        assertTrue(html.contains("ABCJS.renderAbc"))
+    }
 }

@@ -103,16 +103,48 @@ fun HighlightCodeBlock(
     val navController = LocalNavController.current
     val context = LocalContext.current
     val settings = LocalSettings.current
+    val colorScheme = MaterialTheme.colorScheme
     val normalizedLanguage = remember(language) { language.lowercase() }
     val canInlinePreview = completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES
+    val canRenderMermaid = completeCodeBlock && normalizedLanguage == "mermaid"
     val interactiveRenderer = remember(normalizedLanguage) {
         InteractiveCodeRenderer.fromLanguage(normalizedLanguage)
     }
     val canRenderInteractive = completeCodeBlock &&
         interactiveRenderer != null &&
         canRenderInteractiveCodeBlock(normalizedLanguage, code)
-    var previewMode by remember(canInlinePreview, code, normalizedLanguage) {
-        mutableStateOf(canInlinePreview)
+    val canShowVisualPreview = canInlinePreview || canRenderMermaid || canRenderInteractive
+    val renderErrorMessage = stringResource(R.string.error_message_rich_content_render)
+    val fullScreenPreviewHtml = remember(
+        code,
+        normalizedLanguage,
+        interactiveRenderer,
+        canShowVisualPreview,
+        colorScheme,
+        renderErrorMessage,
+    ) {
+        when {
+            !canShowVisualPreview -> null
+            normalizedLanguage in PREVIEWABLE_LANGUAGES -> buildCodePreviewHtml(
+                code = code,
+                language = normalizedLanguage,
+            )
+            canRenderMermaid -> buildMermaidHtml(
+                code = normalizeMermaidCode(code),
+                colorScheme = colorScheme,
+                renderErrorMessage = renderErrorMessage,
+            )
+            canRenderInteractive -> buildInteractiveRendererHtml(
+                renderer = requireNotNull(interactiveRenderer),
+                code = code,
+                colorScheme = colorScheme,
+                renderErrorMessage = renderErrorMessage,
+            )
+            else -> null
+        }
+    }
+    var previewMode by remember(canShowVisualPreview, code, normalizedLanguage) {
+        mutableStateOf(canShowVisualPreview)
     }
 
     var isExpanded by remember(settings.displaySetting.codeBlockAutoCollapse) {
@@ -158,7 +190,8 @@ fun HighlightCodeBlock(
                 navController = navController,
                 completeCodeBlock = completeCodeBlock,
                 previewMode = previewMode,
-                canInlinePreview = canInlinePreview,
+                canTogglePreview = canShowVisualPreview,
+                fullScreenPreviewHtml = fullScreenPreviewHtml,
                 onTogglePreviewMode = {
                     previewMode = !previewMode
                 },
@@ -168,7 +201,7 @@ fun HighlightCodeBlock(
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {
             when {
-                canInlinePreview && previewMode -> {
+                previewMode && canInlinePreview -> {
                     CodeBlockPreview(
                         code = code,
                         language = normalizedLanguage,
@@ -177,13 +210,14 @@ fun HighlightCodeBlock(
                             .height(200.dp),
                     )
                 }
-                completeCodeBlock && normalizedLanguage == "mermaid" -> {
+                previewMode && canRenderMermaid -> {
                     Mermaid(
                         code = code,
                         modifier = Modifier.fillMaxWidth(),
+                        showFullScreenAction = false,
                     )
                 }
-                canRenderInteractive -> {
+                previewMode && canRenderInteractive -> {
                     InteractiveCodeBlock(
                         renderer = requireNotNull(interactiveRenderer),
                         code = code,
@@ -371,7 +405,8 @@ private fun HighlightCodeActions(
     navController: Navigator,
     completeCodeBlock: Boolean = true,
     previewMode: Boolean = false,
-    canInlinePreview: Boolean = false,
+    canTogglePreview: Boolean = false,
+    fullScreenPreviewHtml: String? = null,
     onTogglePreviewMode: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -446,11 +481,14 @@ private fun HighlightCodeActions(
                     .size(iconSize)
             )
 
-            val normalizedLanguage = language.lowercase()
-            if (canInlinePreview) {
+            if (canTogglePreview) {
                 Icon(
                     imageVector = if (previewMode) HugeIcons.Code else HugeIcons.View,
-                    contentDescription = if (previewMode) "Code" else stringResource(id = R.string.code_block_preview),
+                    contentDescription = if (previewMode) {
+                        stringResource(id = R.string.code_block_source)
+                    } else {
+                        stringResource(id = R.string.code_block_preview)
+                    },
                     tint = iconTint,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
@@ -462,7 +500,7 @@ private fun HighlightCodeActions(
                 )
             }
 
-            if (completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES) {
+            if (completeCodeBlock && fullScreenPreviewHtml != null) {
                 Icon(
                     imageVector = HugeIcons.Eye,
                     contentDescription = stringResource(id = R.string.code_block_preview),
@@ -470,8 +508,10 @@ private fun HighlightCodeActions(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .onClick {
-                            val content = buildCodePreviewHtml(code = code, language = normalizedLanguage)
-                            val contentId = WebViewContentCache.store(context.cacheDir, content)
+                            val contentId = WebViewContentCache.store(
+                                context.cacheDir,
+                                fullScreenPreviewHtml,
+                            )
                             navController.navigate(Screen.WebView(contentId = contentId))
                         }
                         .padding(4.dp)

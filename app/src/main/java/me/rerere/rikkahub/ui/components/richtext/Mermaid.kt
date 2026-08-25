@@ -44,6 +44,7 @@ import me.rerere.rikkahub.utils.toCssHex
 fun Mermaid(
     code: String,
     modifier: Modifier = Modifier,
+    showFullScreenAction: Boolean = true,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val darkMode = LocalDarkMode.current
@@ -128,16 +129,18 @@ fun Mermaid(
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                IconButton(
-                    onClick = {
-                        val contentId = WebViewContentCache.store(context.cacheDir, html)
-                        navController.navigate(Screen.WebView(contentId = contentId))
-                    },
-                ) {
-                    Icon(
-                        HugeIcons.View,
-                        contentDescription = "Preview"
-                    )
+                if (showFullScreenAction) {
+                    IconButton(
+                        onClick = {
+                            val contentId = WebViewContentCache.store(context.cacheDir, html)
+                            navController.navigate(Screen.WebView(contentId = contentId))
+                        },
+                    ) {
+                        Icon(
+                            HugeIcons.View,
+                            contentDescription = stringResource(R.string.code_block_preview),
+                        )
+                    }
                 }
                 IconButton(
                     onClick = {

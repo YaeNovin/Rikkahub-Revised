@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.stream
 
+import java.io.EOFException
 import me.rerere.ai.ui.StreamChunk
 
 /**
@@ -10,8 +11,12 @@ interface StreamChunkDecoder {
     /** 将单个原始 SSE 事件转换为通用流事件。解析失败时直接抛出异常。 */
     fun accept(event: SseEvent): DecodeResult
 
-    /** SSE 正常关闭时收尾。实现必须保证该方法及显式终止事件产生的 Finish 幂等。 */
+    /** SSE 关闭时收尾；缺少协议终止事件时应抛出可重试的提前结束异常。 */
     fun onClosed(): List<StreamChunk>
+}
+
+internal fun prematureStreamTermination(protocol: String): Nothing {
+    throw EOFException("$protocol stream ended before a terminal event")
 }
 
 data class DecodeResult(
