@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -80,6 +82,8 @@ class SettingsStore(
     context: Context,
     scope: AppScope,
 ) : KoinComponent {
+    private val scopedSettingsUpdateMutex = Mutex()
+
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
@@ -227,7 +231,7 @@ class SettingsStore(
                         MIN_GENERATION_RETRY_DURATION_SECONDS,
                         MAX_GENERATION_RETRY_DURATION_SECONDS,
                     ) ?: DEFAULT_GENERATION_RETRY_DURATION_SECONDS,
-                displaySetting = JsonInstant.decodeFromString(preferences[DISPLAY_SETTING] ?: "{}"),
+                displaySetting = decodeDisplaySetting(preferences[DISPLAY_SETTING]),
                 searchServices = preferences[SEARCH_SERVICES]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: listOf(SearchServiceOptions.DEFAULT),
@@ -464,6 +468,29 @@ class SettingsStore(
         update(fn(settingsFlow.value))
     }
 
+    suspend fun updateDisplaySetting(
+        fn: (DisplaySetting) -> DisplaySetting,
+    ) = scopedSettingsUpdateMutex.withLock {
+        val currentSettings = settingsFlow.value
+        if (currentSettings.init) {
+            dataStore.edit { preferences ->
+                val current = decodeDisplaySetting(preferences[DISPLAY_SETTING])
+                val updated = fn(current)
+                if (updated != current) {
+                    preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(updated)
+                }
+            }
+            return@withLock
+        }
+        val updated = fn(currentSettings.displaySetting)
+        if (updated == currentSettings.displaySetting) return@withLock
+
+        settingsFlow.value = currentSettings.copy(displaySetting = updated)
+        dataStore.edit { preferences ->
+            preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(updated)
+        }
+    }
+
     suspend fun updateAssistant(assistantId: Uuid) {
         dataStore.edit { preferences ->
             preferences[SELECT_ASSISTANT] = assistantId.toString()
@@ -612,6 +639,11 @@ data class Settings(
         fun dummy() = Settings(init = true)
     }
 }
+
+internal fun decodeDisplaySetting(raw: String?): DisplaySetting =
+    runCatching {
+        JsonInstant.decodeFromString<DisplaySetting>(raw ?: "{}")
+    }.getOrDefault(DisplaySetting())
 
 @Serializable
 enum class ChatFontFamily {

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,7 +44,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -492,25 +492,28 @@ private fun ModelList(
                 }
             }
         }
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
+                .offset(y = -ScreenOffset)
+                .wrapContentWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
         ) {
-            AddModelButton(
-                models = modelList,
-                selectedModels = providerSetting.models,
-                onAddModel = {
-                    onUpdateProvider(providerSetting.addModel(it))
-                },
-                onRemoveModel = {
-                    onUpdateProvider(providerSetting.delModel(it))
-                },
-                expanded = expanded,
-                parentProvider = providerSetting,
-                onUpdateProvider = onUpdateProvider
-            )
+            Row(modifier = Modifier.padding(8.dp)) {
+                AddModelButton(
+                    models = modelList,
+                    selectedModels = providerSetting.models,
+                    onAddModel = {
+                        onUpdateProvider(providerSetting.addModel(it))
+                    },
+                    onRemoveModel = {
+                        onUpdateProvider(providerSetting.delModel(it))
+                    },
+                    expanded = expanded,
+                    parentProvider = providerSetting,
+                    onUpdateProvider = onUpdateProvider
+                )
+            }
         }
     }
 }
