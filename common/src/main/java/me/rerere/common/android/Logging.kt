@@ -47,6 +47,21 @@ sealed class LogEntry {
     ) : LogEntry()
 
     @Serializable
+    data class ProviderRequestLog(
+        override val id: Uuid = Uuid.random(),
+        override val timestamp: Long = System.currentTimeMillis(),
+        override val tag: String = "PROVIDER_REQUEST",
+        val provider: String,
+        val model: String,
+        val channel: String,
+        val operation: String,
+        val parameters: Map<String, String> = emptyMap(),
+        val responseCode: Int? = null,
+        val durationMs: Long? = null,
+        val error: String? = null,
+    ) : LogEntry()
+
+    @Serializable
     data class ErrorLog(
         override val id: Uuid = Uuid.random(),
         override val timestamp: Long = System.currentTimeMillis(),
@@ -112,6 +127,10 @@ object Logging {
         addLog(entry)
     }
 
+    fun logProviderRequest(entry: LogEntry.ProviderRequestLog) {
+        addLog(entry)
+    }
+
     fun logError(
         name: String,
         summary: String,
@@ -170,6 +189,12 @@ object Logging {
     fun getRequestLogs(): List<LogEntry.RequestLog> {
         synchronized(lock) {
             return recentLogs.filterIsInstance<LogEntry.RequestLog>()
+        }
+    }
+
+    fun getProviderRequestLogs(): List<LogEntry.ProviderRequestLog> {
+        synchronized(lock) {
+            return recentLogs.filterIsInstance<LogEntry.ProviderRequestLog>()
         }
     }
 

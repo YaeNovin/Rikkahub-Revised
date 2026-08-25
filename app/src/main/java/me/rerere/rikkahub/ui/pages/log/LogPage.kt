@@ -42,6 +42,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.common.android.LogEntry
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.R
@@ -133,6 +135,14 @@ private fun UnifiedLogList(
                     }
                 )
 
+                is LogEntry.ProviderRequestLog -> ProviderRequestLogCard(
+                    log = log,
+                    onClick = {
+                        selectedLog = log
+                        scope.launch { sheetState.show() }
+                    },
+                )
+
                 is LogEntry.ErrorLog -> ErrorLogCard(
                     log = log,
                     onClick = {
@@ -153,11 +163,186 @@ private fun UnifiedLogList(
         ) {
             when (log) {
                 is LogEntry.RequestLog -> RequestLogDetail(log)
+                is LogEntry.ProviderRequestLog -> ProviderRequestLogDetail(log)
                 is LogEntry.ErrorLog -> ErrorLogDetail(log)
                 is LogEntry.TextLog -> Unit
             }
         }
     }
+}
+
+@Composable
+private fun ProviderRequestLogCard(log: LogEntry.ProviderRequestLog, onClick: () -> Unit) {
+    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = localizedProviderOperation(log.operation),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = dateFormat.format(Date(log.timestamp)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = log.model,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = JetbrainsMono,
+                maxLines = 2,
+            )
+            Text(
+                text = localizedProviderChannel(log.channel),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                log.responseCode?.let { code ->
+                    Text(
+                        text = stringResource(R.string.log_page_status_value, code),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (code in 200..299) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
+                log.durationMs?.let { duration ->
+                    Text(
+                        text = stringResource(R.string.log_page_duration_millis, duration),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            log.error?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 2,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderRequestLogDetail(log: LogEntry.ProviderRequestLog) {
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+    SelectionContainer {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Text(
+                    text = stringResource(R.string.log_page_provider_request_details),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            item { DetailSection(stringResource(R.string.log_page_time), dateFormat.format(Date(log.timestamp))) }
+            item { DetailSection(stringResource(R.string.log_page_provider), log.provider) }
+            item { DetailSection(stringResource(R.string.log_page_model), log.model) }
+            item {
+                DetailSection(
+                    stringResource(R.string.log_page_channel),
+                    localizedProviderChannel(log.channel),
+                )
+            }
+            item {
+                DetailSection(
+                    stringResource(R.string.log_page_operation),
+                    localizedProviderOperation(log.operation),
+                )
+            }
+            log.responseCode?.let { code ->
+                item { DetailSection(stringResource(R.string.log_page_status_code), code.toString()) }
+            }
+            log.durationMs?.let { duration ->
+                item {
+                    DetailSection(
+                        stringResource(R.string.log_page_duration),
+                        stringResource(R.string.log_page_duration_millis, duration),
+                    )
+                }
+            }
+            log.error?.let { error ->
+                item {
+                    DetailSection(stringResource(R.string.log_page_diagnostic_error_label), error)
+                }
+            }
+            if (log.parameters.isNotEmpty()) {
+                item {
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.log_page_parameters_sent),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.log_page_parameters_sent_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                log.parameters.forEach { (key, value) ->
+                    item { HeaderItem(key, value) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun localizedProviderChannel(value: String): String = when (value) {
+    ProviderRequestChannel.ANTHROPIC_API.name ->
+        stringResource(R.string.log_page_channel_anthropic_api)
+    ProviderRequestChannel.OPENAI_API.name ->
+        stringResource(R.string.log_page_channel_openai_api)
+    ProviderRequestChannel.XAI_API.name ->
+        stringResource(R.string.log_page_channel_xai_api)
+    ProviderRequestChannel.GOOGLE_AI_STUDIO.name ->
+        stringResource(R.string.log_page_channel_google_ai_studio)
+    ProviderRequestChannel.VERTEX_AI.name ->
+        stringResource(R.string.log_page_channel_vertex_ai)
+    ProviderRequestChannel.COMPATIBLE_ENDPOINT.name ->
+        stringResource(R.string.log_page_channel_compatible)
+    else -> value
+}
+
+@Composable
+private fun localizedProviderOperation(value: String): String = when (value) {
+    ProviderRequestOperation.TEXT_GENERATION.name ->
+        stringResource(R.string.log_page_operation_text)
+    ProviderRequestOperation.STREAM_TEXT.name ->
+        stringResource(R.string.log_page_operation_stream_text)
+    ProviderRequestOperation.IMAGE_GENERATION.name ->
+        stringResource(R.string.log_page_operation_image)
+    ProviderRequestOperation.IMAGE_EDIT.name ->
+        stringResource(R.string.log_page_operation_image_edit)
+    else -> value
 }
 
 @Composable

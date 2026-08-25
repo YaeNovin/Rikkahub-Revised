@@ -193,6 +193,7 @@ val dataSourceModule = module {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.MINUTES)
             .writeTimeout(120, TimeUnit.SECONDS)
+            .pingInterval(30, TimeUnit.SECONDS)
             .followSslRedirects(true)
             .followRedirects(true)
             .retryOnConnectionFailure(true)
@@ -203,6 +204,13 @@ val dataSourceModule = module {
 
                 if (originalRequest.header(HttpHeaders.UserAgent) == null) {
                     requestBuilder.addHeader(HttpHeaders.UserAgent, "RikkaHub-Android/${BuildConfig.VERSION_NAME}")
+                }
+                if (originalRequest.header(HttpHeaders.Accept)
+                        ?.contains("text/event-stream", ignoreCase = true) == true
+                ) {
+                    requestBuilder
+                        .header(HttpHeaders.CacheControl, "no-cache")
+                        .header(HttpHeaders.AcceptEncoding, "identity")
                 }
 
                 chain.proceed(requestBuilder.build())

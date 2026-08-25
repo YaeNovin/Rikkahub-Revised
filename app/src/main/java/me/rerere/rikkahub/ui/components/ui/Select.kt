@@ -44,6 +44,7 @@ fun <T> Select(
     selectedOption: T,
     onOptionSelected: (T) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     optionToString: @Composable (T) -> String = { it.toString() },
     optionLeading: @Composable ((T) -> Unit)? = null,
     leading: @Composable () -> Unit = {},
@@ -54,7 +55,7 @@ fun <T> Select(
     ExposedDropdownMenuBox(
         modifier = modifier,
         expanded = expanded,
-        onExpandedChange = { expanded = it }
+        onExpandedChange = { if (enabled) expanded = it }
     ) {
         Surface(
             tonalElevation = 4.dp,
@@ -65,7 +66,7 @@ fun <T> Select(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable { expanded = true }
+                    .clickable(enabled = enabled) { expanded = true }
                     .padding(vertical = 8.dp, horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
