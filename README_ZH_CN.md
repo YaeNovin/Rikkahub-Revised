@@ -27,7 +27,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`v2.4.8-revised.4`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.4) |
+| 当前版本 | [`v2.4.8-revised.5`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.5) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -59,17 +59,14 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-### 当前正式版：v2.4.8-revised.4
+### 当前正式版：v2.4.8-revised.5
 
-- 优化千问、DeepSeek、豆包及兼容供应商的模型能力、上下文窗口与推理参数识别。
-- 规范 GPT Image 2 的图片尺寸、比例和质量参数，并完善 Gemini、Grok 与
-  Seedream 生图兼容性。
-- 升级图库预览、详情、文件夹、图片导入、元数据备份，以及批量添加、移动和删除。
-- 改进网络切换、限流、连接中断、聊天续答，以及生图和图片编辑过程中的自动重连。
-- 提升完整对话和文件的 Token 统计、上下文窗口识别与自动压缩可靠性。
-- 修复 DOC、DOCX、XLSX 解析，并优化大型多媒体附件和复杂 MIDI 文件处理。
-- 汉化软件错误提示，增加按条目保存七天的诊断日志及查看入口。
-- 完善 MCP OAuth 授权、连接状态和重连反馈。
+- 为 OpenAI、Claude、Gemini、Grok、Qwen 和 DeepSeek 增加按模型能力适配的请求
+  参数，并新增不记录凭据、提示词、Schema 与二进制内容的脱敏诊断。
+- 增加流提前终止检测，修正重试时间预算，并完善事件流连接保活。
+- 增加 Gemini 生图参数，统一受支持富代码块的源码、内嵌与全屏预览。
+- 修复裁剪结果在保存完成前被清理、频繁调整设置后可能无法切换对话、导航替换
+  非原子化，以及供应商模型操作栏位置错误的问题。
 
 - 基于 Token 的滚动上下文摘要、上下文窗口自动识别、压缩动画提示和使用量展示。
 - 本地知识库、文档导入与分块、混合检索、助手绑定、RAG、来源引用和文件预览。
