@@ -13,6 +13,10 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +30,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,20 +40,18 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
@@ -200,16 +201,17 @@ private fun ModeInjectionTab(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .floatingToolbarVerticalNestedScroll(
                     expanded = expanded,
                     onExpand = { expanded = true },
                     onCollapse = { expanded = false }
                 ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
@@ -258,24 +260,27 @@ private fun ModeInjectionTab(
             }
         }
 
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
-            leadingContent = {
-                IconButton(onClick = { importer.importFromFile() }) {
-                    Icon(HugeIcons.FileImport, null)
-                }
-            },
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconButton(onClick = { importer.importFromFile() }) {
+                Icon(HugeIcons.FileImport, null)
+            }
             Button(onClick = { editState.open(PromptInjection.ModeInjection()) }) {
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(HugeIcons.Add01, null)
-                    AnimatedVisibility(expanded) {
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                        exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
+                    ) {
                         Row {
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(stringResource(R.string.prompt_page_add_mode_injection))
@@ -612,16 +617,17 @@ private fun LorebookTab(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .floatingToolbarVerticalNestedScroll(
                     expanded = expanded,
                     onExpand = { expanded = true },
                     onCollapse = { expanded = false }
                 ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
@@ -670,24 +676,27 @@ private fun LorebookTab(
             }
         }
 
-        HorizontalFloatingToolbar(
-            expanded = expanded,
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
-            leadingContent = {
-                IconButton(onClick = { importer.importFromFile() }) {
-                    Icon(HugeIcons.FileImport, null)
-                }
-            },
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconButton(onClick = { importer.importFromFile() }) {
+                Icon(HugeIcons.FileImport, null)
+            }
             Button(onClick = { editState.open(Lorebook()) }) {
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(HugeIcons.Add01, null)
-                    AnimatedVisibility(expanded) {
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                        exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
+                    ) {
                         Row {
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(stringResource(R.string.prompt_page_add_lorebook))

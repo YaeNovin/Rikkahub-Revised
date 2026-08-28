@@ -206,7 +206,7 @@ private fun FullScreenTextEditor(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Bottom
         ) {
-            Surface(
+            IsolatedOverlaySurface(
                 modifier = Modifier
                     .widthIn(max = 800.dp)
                     .fillMaxHeight(0.9f),

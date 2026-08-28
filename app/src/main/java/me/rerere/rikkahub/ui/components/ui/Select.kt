@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -37,6 +38,9 @@ import androidx.compose.ui.util.fastForEach
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
+import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
+import me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle
+import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
 
 @Composable
 fun <T> Select(
@@ -51,6 +55,11 @@ fun <T> Select(
     trailing: @Composable () -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val globalGlassActive = LocalGlobalBackgroundActive.current
+    val liquidGlassActive = globalGlassActive &&
+        LocalPageSurfaceStyle.current == BackgroundSurfaceStyle.LIQUID_GLASS
+    val anchorShape = RoundedCornerShape(50)
+    val menuShape = RoundedCornerShape(12.dp)
 
     ExposedDropdownMenuBox(
         modifier = modifier,
@@ -58,51 +67,72 @@ fun <T> Select(
         onExpandedChange = { if (enabled) expanded = it }
     ) {
         Surface(
-            tonalElevation = 4.dp,
-            shape = RoundedCornerShape(50),
+            tonalElevation = if (globalGlassActive) 0.dp else 4.dp,
+            shape = anchorShape,
+            border = if (liquidGlassActive) liquidGlassBorder(strength = 0.38f) else null,
+            color = if (globalGlassActive) {
+                liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, 0.82f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
-                    .clickable(enabled = enabled) { expanded = true }
-                    .padding(vertical = 8.dp, horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                leading()
-                Text(
-                    text = optionToString(selectedOption),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f)
-                )
-                trailing()
-                Icon(
-                    imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                    contentDescription = "expand"
-                )
+            Box {
+                if (liquidGlassActive) {
+                    LiquidGlassSurfaceLayers(
+                        modifier = Modifier.matchParentSize(),
+                        strength = 0.52f,
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(enabled = enabled) { expanded = true }
+                        .padding(vertical = 8.dp, horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    leading()
+                    Text(
+                        text = optionToString(selectedOption),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    trailing()
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = "expand"
+                    )
+                }
             }
         }
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = {
                 expanded = false
-            }
+            },
+            containerColor = Color.Transparent,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
-            options.fastForEach { option ->
-                DropdownMenuItem(
-                    onClick = {
-                        onOptionSelected(option)
-                        expanded = false
-                    },
-                    text = {
-                        Text(text = optionToString(option), maxLines = 1)
-                    },
-                    leadingIcon = optionLeading?.let {
-                        { it(option) }
-                    }
-                )
+            AppearanceMenuSurface(
+                shape = menuShape,
+            ) {
+                options.fastForEach { option ->
+                    DropdownMenuItem(
+                        onClick = {
+                            onOptionSelected(option)
+                            expanded = false
+                        },
+                        text = {
+                            Text(text = optionToString(option), maxLines = 1)
+                        },
+                        leadingIcon = optionLeading?.let {
+                            { it(option) }
+                        }
+                    )
+                }
             }
         }
     }
@@ -130,6 +160,7 @@ fun <T> SelectTextField(
     var expanded by remember { mutableStateOf(false) }
     var anchorWidth by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
+    val menuShape = RoundedCornerShape(12.dp)
 
     Box(modifier = modifier) {
         OutlinedTextField(
@@ -162,12 +193,13 @@ fun <T> SelectTextField(
             )
         }
 
-        DropdownMenu(
+        AppearanceDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             modifier = Modifier
                 .width(with(density) { anchorWidth.toDp() })
-                .heightIn(max = 240.dp)
+                .heightIn(max = 240.dp),
+            shape = menuShape,
         ) {
             options.fastForEach { option ->
                 DropdownMenuItem(

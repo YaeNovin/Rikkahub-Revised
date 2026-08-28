@@ -25,7 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
@@ -199,9 +199,7 @@ internal fun FilesPicker(
                     )
                 }
             },
-            colors = ListItemDefaults.colors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer
-            ),
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
@@ -234,9 +232,7 @@ internal fun FilesPicker(
                     )
                 }
             },
-            colors = ListItemDefaults.colors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer
-            ),
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
@@ -362,9 +358,7 @@ private fun WorkspacePickerListItem(
                 }
             }
         },
-        colors = ListItemDefaults.colors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier
             .clip(MaterialTheme.shapes.large)
             .clickable { showSheet = true },
@@ -517,7 +511,8 @@ private fun BigIconTextButton(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(8.dp)
+            color = Color.Transparent,
+            shape = RoundedCornerShape(8.dp),
         ) {
             Box(
                 modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)

@@ -103,6 +103,7 @@ fun HighlightCodeBlock(
     val navController = LocalNavController.current
     val context = LocalContext.current
     val settings = LocalSettings.current
+    val richContent = richContentColors()
     val colorScheme = MaterialTheme.colorScheme
     val normalizedLanguage = remember(language) { language.lowercase() }
     val canInlinePreview = completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES
@@ -171,14 +172,14 @@ fun HighlightCodeBlock(
 
     Column(
         modifier = modifier
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
+            .border(1.dp, richContent.border, MaterialTheme.shapes.large)
             .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer),
+            .background(richContent.container),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .background(richContent.toolbar)
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             HighlightCodeActions(

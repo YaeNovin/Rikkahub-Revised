@@ -8,23 +8,27 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu as DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -42,15 +46,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import kotlinx.coroutines.delay
@@ -75,6 +78,8 @@ import me.rerere.hugeicons.stroke.TransactionHistory
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
+import me.rerere.rikkahub.data.datastore.isNavigationGlassActive
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
@@ -82,11 +87,14 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
 import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
 import me.rerere.rikkahub.ui.components.ui.Greeting
+import me.rerere.rikkahub.ui.components.ui.IsolatedAppearanceSurface
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.ui.UpdateCard
 import androidx.compose.ui.draw.clip
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.Navigator
 import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.ui.hooks.EditStateContent
@@ -106,11 +114,17 @@ fun ChatDrawerContent(
     vm: ChatVM,
     settings: Settings,
     current: Conversation,
+    onSelectConversation: (Conversation) -> Unit = {
+        navigateToChatPage(navController, it.id)
+    },
     onNavigate: (Screen) -> Unit = { destination -> navController.navigate(destination) },
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val deleteFolderGeneratingMessage = stringResource(
+        R.string.chat_page_delete_folder_generating
+    )
     val isPlayStore = rememberIsPlayStoreVersion()
     val repo = koinInject<ConversationRepository>()
 
@@ -163,8 +177,16 @@ fun ChatDrawerContent(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var folderToRename by remember { mutableStateOf<Folder?>(null) }
     var folderToDelete by remember { mutableStateOf<Folder?>(null) }
+    var showUtilityActions by remember { mutableStateOf(false) }
 
     val updateCheckDisabledUntil = settings.displaySetting.updateCheckDisabledUntilEpochMillis
+    val appearance = settings.advancedAppearanceSetting
+    val navigationGlassActive = settings.isNavigationGlassActive()
+    val navigationSurfaceStyle = if (navigationGlassActive) {
+        appearance.navigationSurfaceStyle
+    } else {
+        BackgroundSurfaceStyle.OPAQUE
+    }
     var updateChecksEnabled by remember(updateCheckDisabledUntil) {
         mutableStateOf(updateCheckDisabledUntil <= System.currentTimeMillis())
     }
@@ -181,12 +203,29 @@ fun ChatDrawerContent(
     }
 
     ModalDrawerSheet(
-        modifier = Modifier.width(300.dp)
+        modifier = Modifier.width(300.dp),
+        drawerShape = RectangleShape,
+        drawerContainerColor = Color.Transparent,
+        windowInsets = WindowInsets(0, 0, 0, 0),
     ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        IsolatedAppearanceSurface(
+            style = navigationSurfaceStyle,
+            surfaceOpacity = appearance.navigationGlassOpacity,
+            blurRadius = when (navigationSurfaceStyle) {
+                BackgroundSurfaceStyle.LIQUID_GLASS -> appearance.navigationLiquidGlassBlurRadius
+                else -> appearance.navigationGlassBlurRadius
+            },
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             if (updateChecksEnabled && !isPlayStore) {
                 UpdateCard(vm)
             }
@@ -253,7 +292,9 @@ fun ChatDrawerContent(
                 }
             }
 
-            DrawerActions(onNavigate = onNavigate)
+            DrawerActions(
+                onNavigate = onNavigate,
+            )
 
             FolderBar(
                 folders = folders,
@@ -273,7 +314,7 @@ fun ChatDrawerContent(
                     .fillMaxWidth()
                     .weight(1f),
                 onClick = {
-                    navigateToChatPage(navController, it.id)
+                    onSelectConversation(it)
                 },
                 onRegenerateTitle = {
                     vm.generateTitle(it, true)
@@ -297,8 +338,12 @@ fun ChatDrawerContent(
                 onMoveToFolder = {
                     conversationToMoveFolder = it
                     showMoveToFolderSheet = true
-                }
+                },
             )
+
+            if (showUtilityActions) {
+                DrawerUtilityActions(onNavigate = onNavigate)
+            }
 
             // 助手选择器
             AssistantPicker(
@@ -347,7 +392,10 @@ fun ChatDrawerContent(
                     },
                 )
 
-                DrawerUtilityMenu(onNavigate = onNavigate)
+                DrawerUtilityMenu(
+                    expanded = showUtilityActions,
+                    onExpandedChange = { showUtilityActions = it },
+                )
 
                 DrawerAction(
                     icon = {
@@ -363,10 +411,13 @@ fun ChatDrawerContent(
 
                 DrawerAction(
                     icon = {
-                        Icon(HugeIcons.ChartColumn, "统计数据")
+                        Icon(
+                            HugeIcons.ChartColumn,
+                            stringResource(R.string.chat_drawer_statistics),
+                        )
                     },
                     label = {
-                        Text("统计数据")
+                        Text(stringResource(R.string.chat_drawer_statistics))
                     },
                     onClick = {
                         onNavigate(Screen.Stats)
@@ -384,6 +435,7 @@ fun ChatDrawerContent(
                         onNavigate(Screen.Setting)
                     },
                 )
+            }
             }
         }
     }
@@ -440,18 +492,18 @@ fun ChatDrawerContent(
                 }
             }
         }
-        ModalBottomSheet(
+        AppearanceModalBottomSheet(
             onDismissRequest = {
                 showMoveToFolderSheet = false
                 conversationToMoveFolder = null
             },
-            sheetState = folderSheetState
+            sheetState = folderSheetState,
+            modifier = Modifier.heightIn(max = 400.dp),
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 400.dp)
-                    .padding(16.dp),
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -466,9 +518,9 @@ fun ChatDrawerContent(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium,
                     color = if (conversationToMoveFolder?.folderId == null) {
-                        MaterialTheme.colorScheme.surfaceVariant
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
                     } else {
-                        MaterialTheme.colorScheme.surface
+                        Color.Transparent
                     },
                 ) {
                     Row(
@@ -496,9 +548,9 @@ fun ChatDrawerContent(
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.medium,
                             color = if (isCurrent) {
-                                MaterialTheme.colorScheme.surfaceVariant
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
                             } else {
-                                MaterialTheme.colorScheme.surface
+                                Color.Transparent
                             },
                             tonalElevation = if (isCurrent) 2.dp else 0.dp
                         ) {
@@ -600,7 +652,7 @@ fun ChatDrawerContent(
                             folderToDelete = null
                             conversations.refresh()
                         } else {
-                            toaster.show(context.getString(R.string.chat_page_delete_folder_generating), type = ToastType.Warning)
+                            toaster.show(deleteFolderGeneratingMessage, type = ToastType.Warning)
                         }
                     }
                 ) { Text(stringResource(R.string.chat_page_delete)) }
@@ -615,18 +667,18 @@ fun ChatDrawerContent(
 
     // 移动到助手 Bottom Sheet
     if (showMoveToAssistantSheet) {
-        ModalBottomSheet(
+        AppearanceModalBottomSheet(
             onDismissRequest = {
                 showMoveToAssistantSheet = false
                 conversationToMove = null
             },
-            sheetState = bottomSheetState
+            sheetState = bottomSheetState,
+            modifier = Modifier.heightIn(max = 400.dp),
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 400.dp)
-                    .padding(16.dp),
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -661,64 +713,80 @@ fun ChatDrawerContent(
 }
 
 @Composable
-private fun DrawerUtilityMenu(onNavigate: (Screen) -> Unit) {
-    var showMenuPopup by remember { mutableStateOf(false) }
+private fun DrawerUtilityMenu(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+) {
+    DrawerAction(
+        icon = {
+            Icon(HugeIcons.Sparkles, "Menu")
+        },
+        label = {
+            Text(stringResource(R.string.menu))
+        },
+        onClick = { onExpandedChange(!expanded) },
+    )
+}
 
-    Box {
-        DrawerAction(
-            icon = {
-                Icon(HugeIcons.Sparkles, "Menu")
-            },
-            label = {
-                Text(stringResource(R.string.menu))
-            },
-            onClick = {
-                showMenuPopup = true
-            },
+@Composable
+private fun DrawerUtilityActions(
+    onNavigate: (Screen) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        DrawerUtilityAction(
+            icon = HugeIcons.LanguageCircle,
+            label = stringResource(R.string.chat_page_menu_ai_translator),
+            onClick = { onNavigate(Screen.Translator) },
         )
-        if (showMenuPopup) {
-            val popupOffset = with(LocalDensity.current) {
-                IntOffset(0, (-120).dp.roundToPx())
-            }
-            Popup(
-                alignment = Alignment.TopStart,
-                offset = popupOffset,
-                onDismissRequest = { showMenuPopup = false },
-                properties = PopupProperties(focusable = true),
-            ) {
-                Surface(
-                    modifier = Modifier.width(160.dp),
-                    shape = MaterialTheme.shapes.extraSmall,
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    shadowElevation = 3.dp,
-                ) {
-                    Column {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_ai_translator)) },
-                            leadingIcon = { Icon(HugeIcons.LanguageCircle, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                onNavigate(Screen.Translator)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
-                            leadingIcon = { Icon(HugeIcons.Image02, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                onNavigate(Screen.ImageGen)
-                            }
-                        )
-                    }
-                }
-            }
+        DrawerUtilityAction(
+            icon = HugeIcons.Image02,
+            label = stringResource(R.string.chat_page_menu_image_generation),
+            onClick = { onNavigate(Screen.ImageGen) },
+        )
+    }
+}
+
+@Composable
+private fun DrawerUtilityAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
 
 @Composable
-private fun DrawerActions(onNavigate: (Screen) -> Unit) {
-    Column {
+private fun DrawerActions(
+    onNavigate: (Screen) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // 搜索入口
         Surface(
             onClick = { onNavigate(Screen.MessageSearch) },
@@ -726,7 +794,7 @@ private fun DrawerActions(onNavigate: (Screen) -> Unit) {
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp),
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = Color.Transparent,
         ) {
             Row(
                 modifier = Modifier
@@ -756,7 +824,7 @@ private fun DrawerActions(onNavigate: (Screen) -> Unit) {
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp),
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = Color.Transparent,
         ) {
             Row(
                 modifier = Modifier
@@ -791,7 +859,7 @@ private fun DrawerAction(
     Surface(
         onClick = onClick,
         modifier = modifier,
-        color = MaterialTheme.colorScheme.primaryContainer,
+        color = Color.Transparent,
         shape = CircleShape,
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
@@ -890,11 +958,8 @@ private fun FolderChip(
 ) {
     Surface(
         shape = CircleShape,
-        color = if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
+        color = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier
             .clip(CircleShape)
             .combinedClickable(
@@ -913,6 +978,7 @@ private fun FolderChip(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -931,9 +997,9 @@ private fun AssistantItem(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = if (isCurrentAssistant) {
-            MaterialTheme.colorScheme.surfaceVariant
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
         } else {
-            MaterialTheme.colorScheme.surface
+            Color.Transparent
         },
         tonalElevation = if (isCurrentAssistant) 2.dp else 0.dp
     ) {

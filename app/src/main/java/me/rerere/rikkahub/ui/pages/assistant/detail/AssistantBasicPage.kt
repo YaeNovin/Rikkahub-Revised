@@ -21,12 +21,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -47,6 +49,7 @@ import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.ai.context.MIN_ROLLING_CONTEXT_THRESHOLD_TOKENS
 import me.rerere.rikkahub.data.ai.context.effectiveRollingContextThreshold
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.datastore.isGlobalBackgroundAppliedToChat
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -55,6 +58,7 @@ import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.TagsInput
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.hooks.heroAnimation
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.toFixed
 import org.koin.androidx.compose.koinViewModel
@@ -117,6 +121,7 @@ internal fun AssistantBasicContent(
     onUpdate: (Assistant) -> Unit,
     vm: AssistantDetailVM
 ) {
+    val globalBackgroundOverridesChat = LocalSettings.current.isGlobalBackgroundAppliedToChat()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -508,6 +513,18 @@ internal fun AssistantBasicContent(
         Card(
             colors = CustomColors.cardColorsOnSurfaceContainer
         ) {
+            if (globalBackgroundOverridesChat) {
+                FormItem(
+                    modifier = Modifier.padding(8.dp),
+                    label = {
+                        Text(stringResource(R.string.assistant_page_background_global_override_title))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_background_global_override_desc))
+                    },
+                )
+                HorizontalDivider()
+            }
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
@@ -519,6 +536,7 @@ internal fun AssistantBasicContent(
                 tail = {
                     Switch(
                         checked = assistant.useGradientBackground,
+                        enabled = !globalBackgroundOverridesChat,
                         onCheckedChange = {
                             onUpdate(
                                 assistant.copy(
@@ -537,6 +555,7 @@ internal fun AssistantBasicContent(
                     modifier = Modifier.padding(8.dp),
                     background = assistant.background,
                     backgroundOpacity = assistant.backgroundOpacity,
+                    enabled = !globalBackgroundOverridesChat,
                     onUpdate = { background ->
                         onUpdate(
                             assistant.copy(
@@ -547,8 +566,15 @@ internal fun AssistantBasicContent(
                 )
             }
 
-            if (!assistant.useGradientBackground && assistant.background != null) {
+            if (!assistant.useGradientBackground && !assistant.background.isNullOrBlank()) {
                 val backgroundOpacity = assistant.backgroundOpacity.coerceIn(0f, 1f)
+                var opacitySlider by remember(assistant.id, assistant.background) {
+                    mutableFloatStateOf(backgroundOpacity)
+                }
+                var opacityDragging by remember { mutableStateOf(false) }
+                LaunchedEffect(backgroundOpacity) {
+                    if (!opacityDragging) opacitySlider = backgroundOpacity
+                }
                 HorizontalDivider()
                 FormItem(
                     modifier = Modifier.padding(8.dp),
@@ -560,11 +586,18 @@ internal fun AssistantBasicContent(
                     }
                 ) {
                     Slider(
-                        value = backgroundOpacity,
+                        value = opacitySlider,
+                        enabled = !globalBackgroundOverridesChat,
                         onValueChange = {
+                            opacityDragging = true
+                            opacitySlider = it
+                        },
+                        onValueChangeFinished = {
+                            opacityDragging = false
                             onUpdate(
                                 assistant.copy(
-                                    backgroundOpacity = it.toFixed(2).toFloatOrNull()?.coerceIn(0f, 1f) ?: 1.0f
+                                    backgroundOpacity = opacitySlider.toFixed(2)
+                                        .toFloatOrNull()?.coerceIn(0f, 1f) ?: 1.0f
                                 )
                             )
                         },
@@ -575,8 +608,60 @@ internal fun AssistantBasicContent(
                     Text(
                         text = stringResource(
                             R.string.assistant_page_background_opacity_value,
-                            (backgroundOpacity * 100).roundToInt()
+                            (opacitySlider * 100).roundToInt()
                         ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                    )
+                }
+
+                val backgroundBlurRadius = assistant.backgroundBlurRadius.coerceIn(0f, 40f)
+                var blurSlider by remember(assistant.id, assistant.background) {
+                    mutableFloatStateOf(backgroundBlurRadius)
+                }
+                var blurDragging by remember { mutableStateOf(false) }
+                LaunchedEffect(backgroundBlurRadius) {
+                    if (!blurDragging) blurSlider = backgroundBlurRadius
+                }
+                HorizontalDivider()
+                FormItem(
+                    modifier = Modifier.padding(8.dp),
+                    label = {
+                        Text(stringResource(R.string.assistant_page_background_blur))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_background_blur_desc))
+                    }
+                ) {
+                    Slider(
+                        value = blurSlider,
+                        enabled = !globalBackgroundOverridesChat,
+                        onValueChange = {
+                            blurDragging = true
+                            blurSlider = it
+                        },
+                        onValueChangeFinished = {
+                            blurDragging = false
+                            onUpdate(
+                                assistant.copy(
+                                    backgroundBlurRadius = blurSlider.toFixed(1)
+                                        .toFloatOrNull()?.coerceIn(0f, 40f) ?: 0f
+                                )
+                            )
+                        },
+                        valueRange = 0f..40f,
+                        steps = 19,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = if (blurSlider == 0f) {
+                            stringResource(R.string.assistant_page_background_blur_off)
+                        } else {
+                            stringResource(
+                                R.string.assistant_page_background_blur_value,
+                                blurSlider.roundToInt()
+                            )
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
                     )

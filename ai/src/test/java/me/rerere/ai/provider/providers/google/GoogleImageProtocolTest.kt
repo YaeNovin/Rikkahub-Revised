@@ -223,7 +223,27 @@ class GoogleImageProtocolTest {
         assertEquals("minimal", diagnostics.parameters["thinkingConfig.thinkingLevel"])
         assertEquals("false", diagnostics.parameters["tools.googleSearch.webSearch"])
         assertEquals("false", diagnostics.parameters["tools.googleSearch.imageSearch"])
+        assertEquals("14", diagnostics.parameters["prompt.characters"])
+        assertEquals("0", diagnostics.parameters["referenceImages.encodedBytes"])
+        assertEquals("0", diagnostics.parameters["referenceImages"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.harassment"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.hate_speech"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.sexually_explicit"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.dangerous_content"])
+        assertEquals("none", diagnostics.parameters["customBody"])
         assertFalse(diagnostics.parameters.values.any { "private prompt" in it })
+
+        val editDiagnostics = buildGoogleRequestDiagnostics(
+            providerSetting = setting,
+            model = Model(modelId = "gemini-3.1-flash-image"),
+            operation = ProviderRequestOperation.IMAGE_EDIT,
+            requestBody = body,
+            referenceImageCount = 1,
+            hasCustomBody = true,
+        )
+        assertEquals(ProviderRequestOperation.IMAGE_EDIT, editDiagnostics.operation)
+        assertEquals("1", editDiagnostics.parameters["referenceImages"])
+        assertEquals("configured", editDiagnostics.parameters["customBody"])
     }
 
     @Test

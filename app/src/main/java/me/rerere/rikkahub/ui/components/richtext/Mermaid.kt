@@ -16,6 +16,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.View
@@ -52,35 +54,43 @@ fun Mermaid(
     val activity = LocalActivity.current
     val toaster = LocalToaster.current
     val navController = LocalNavController.current
+    val scope = rememberCoroutineScope()
+    val exportSuccessMessage = stringResource(R.string.mermaid_export_success)
+    val exportFailedMessage = stringResource(R.string.mermaid_export_failed)
 
-    val jsInterface = remember {
+    val jsInterface = remember(
+        activity,
+        context,
+        exportFailedMessage,
+        exportSuccessMessage,
+        scope,
+        toaster,
+    ) {
         MermaidInterface(
             onExportImage = { base64Image ->
-                runCatching {
-                    activity?.let {
+                scope.launch {
+                    runCatching {
+                        val currentActivity = requireNotNull(activity)
+                        require(base64Image.isNotBlank())
+                        val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
+                        val bitmap = requireNotNull(
+                            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                        )
                         try {
-                            val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
-                            val bitmap =
-                                BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
                             context.exportImage(
-                                it,
+                                currentActivity,
                                 bitmap,
                                 "mermaid_${System.currentTimeMillis()}.png"
                             )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
+                        } finally {
+                            bitmap.recycle()
                         }
+                    }.onSuccess {
+                        toaster.show(exportSuccessMessage, type = ToastType.Success)
+                    }.onFailure { error ->
+                        error.printStackTrace()
+                        toaster.show(exportFailedMessage, type = ToastType.Error)
                     }
-                    toaster.show(
-                        context.getString(R.string.mermaid_export_success),
-                        type = ToastType.Success
-                    )
-                }.onFailure {
-                    it.printStackTrace()
-                    toaster.show(
-                        context.getString(R.string.mermaid_export_failed),
-                        type = ToastType.Error
-                    )
                 }
             }
         )

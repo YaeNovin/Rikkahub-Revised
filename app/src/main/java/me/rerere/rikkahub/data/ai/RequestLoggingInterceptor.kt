@@ -12,6 +12,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.common.android.LogEntry
 import me.rerere.common.android.Logging
+import me.rerere.common.android.extractErrorReason
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import okhttp3.Headers
 import okhttp3.HttpUrl
@@ -21,6 +22,8 @@ import okhttp3.Response
 import okio.Buffer
 
 private const val MAX_LOGGED_REQUEST_BODY_BYTES = 64L * 1024L
+private const val MAX_LOGGED_ERROR_BODY_BYTES = 16L * 1024L
+private const val MAX_LOGGED_ERROR_REASON_CHARS = 2_048
 private const val REDACTED = "[REDACTED]"
 
 class RequestLoggingInterceptor : Interceptor {
@@ -44,51 +47,75 @@ class RequestLoggingInterceptor : Interceptor {
         } catch (e: Exception) {
             error = sanitizeErrorMessage(e.message)
             val durationMs = System.currentTimeMillis() - startTime
-            diagnostics?.let { logProviderRequest(it, null, durationMs, error) }
-            if (recordHttpRequest) {
-                Logging.logRequest(
-                    LogEntry.RequestLog(
-                        tag = "HTTP",
-                        url = request.url.toSafeLogUrl(),
-                        method = request.method,
-                        requestHeaders = requestHeaders,
-                        requestBody = requestBody,
-                        durationMs = durationMs,
-                        error = error,
-                    )
-                )
-            }
+            buildUnifiedRequestLog(
+                diagnostics = diagnostics,
+                recordHttpRequest = recordHttpRequest,
+                url = request.url.toSafeLogUrl().takeIf { recordHttpRequest },
+                method = request.method.takeIf { recordHttpRequest },
+                requestHeaders = requestHeaders,
+                requestBody = requestBody,
+                durationMs = durationMs,
+                error = error,
+            )?.record()
             throw e
         }
 
         val durationMs = System.currentTimeMillis() - startTime
-        diagnostics?.let { logProviderRequest(it, response.code, durationMs, error) }
-        if (recordHttpRequest) {
-            Logging.logRequest(
-                LogEntry.RequestLog(
-                    tag = "HTTP",
-                    url = request.url.toSafeLogUrl(),
-                    method = request.method,
-                    requestHeaders = requestHeaders,
-                    requestBody = requestBody,
-                    responseCode = response.code,
-                    responseHeaders = response.headers.toSafeMap(),
-                    durationMs = durationMs,
-                    error = error,
-                )
-            )
+        if (!response.isSuccessful) {
+            error = response.readSafeErrorReason()
         }
+        buildUnifiedRequestLog(
+            diagnostics = diagnostics,
+            recordHttpRequest = recordHttpRequest,
+            url = request.url.toSafeLogUrl().takeIf { recordHttpRequest },
+            method = request.method.takeIf { recordHttpRequest },
+            requestHeaders = requestHeaders,
+            requestBody = requestBody,
+            responseCode = response.code,
+            responseHeaders = if (recordHttpRequest) response.headers.toSafeMap() else emptyMap(),
+            durationMs = durationMs,
+            error = error,
+        )?.record()
 
         return response
     }
+}
 
-    private fun logProviderRequest(
-        diagnostics: ProviderRequestDiagnostics,
-        responseCode: Int?,
-        durationMs: Long,
-        error: String?,
-    ) {
-        Logging.logProviderRequest(
+private fun Response.readSafeErrorReason(): String {
+    val responseBody = runCatching {
+        peekBody(MAX_LOGGED_ERROR_BODY_BYTES).string()
+    }.getOrNull()
+    return extractLoggedResponseError(responseBody)
+        ?: "HTTP $code ${message.takeIf(String::isNotBlank).orEmpty()}".trim()
+}
+
+internal fun extractLoggedResponseError(body: String?): String? {
+    val normalized = body?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val reason = extractErrorReason(normalized) ?: normalized.lineSequence()
+        .map(String::trim)
+        .firstOrNull(String::isNotEmpty)
+        ?: return null
+    return sanitizeErrorMessage(reason)
+        ?.replace(Regex("[\\r\\n\\t]+"), " ")
+        ?.replace(Regex(" {2,}"), " ")
+        ?.take(MAX_LOGGED_ERROR_REASON_CHARS)
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+}
+
+internal fun buildUnifiedRequestLog(
+    diagnostics: ProviderRequestDiagnostics?,
+    recordHttpRequest: Boolean,
+    url: String? = null,
+    method: String? = null,
+    requestHeaders: Map<String, String> = emptyMap(),
+    requestBody: String? = null,
+    responseCode: Int? = null,
+    responseHeaders: Map<String, String> = emptyMap(),
+    durationMs: Long? = null,
+    error: String? = null,
+): LogEntry? = when {
+    diagnostics != null ->
             LogEntry.ProviderRequestLog(
                 provider = diagnostics.provider,
                 model = diagnostics.model,
@@ -98,8 +125,34 @@ class RequestLoggingInterceptor : Interceptor {
                 responseCode = responseCode,
                 durationMs = durationMs,
                 error = error,
+                url = url.takeIf { recordHttpRequest },
+                method = method.takeIf { recordHttpRequest },
+                requestHeaders = requestHeaders.takeIf { recordHttpRequest }.orEmpty(),
+                requestBody = requestBody.takeIf { recordHttpRequest },
+                responseHeaders = responseHeaders.takeIf { recordHttpRequest }.orEmpty(),
             )
-        )
+
+    recordHttpRequest -> LogEntry.RequestLog(
+        tag = "HTTP",
+        url = requireNotNull(url),
+        method = requireNotNull(method),
+        requestHeaders = requestHeaders,
+        requestBody = requestBody,
+        responseCode = responseCode,
+        responseHeaders = responseHeaders,
+        durationMs = durationMs,
+        error = error,
+    )
+
+    else -> null
+}
+
+private fun LogEntry.record() {
+    when (this) {
+        is LogEntry.ProviderRequestLog -> Logging.logProviderRequest(this)
+        is LogEntry.RequestLog -> Logging.logRequest(this)
+        is LogEntry.ErrorLog,
+        is LogEntry.TextLog -> Unit
     }
 }
 
@@ -181,7 +234,15 @@ private fun String.isSensitiveLogField(): Boolean = lowercase()
     .replace("_", "") in SENSITIVE_FIELDS
 
 private fun sanitizeErrorMessage(message: String?): String? = message
-    ?.replace(Regex("(?i)([?&](?:key|api[_-]?key|access[_-]?token|token)=)[^&\\s]+"), "$1$REDACTED")
+    ?.replace(
+        Regex("(?i)((?:[?&]|\\b)(?:key|api[_-]?key|access[_-]?token|token)=)[^&\\s]+"),
+        "$1$REDACTED",
+    )
+    ?.replace(Regex("(?i)(bearer\\s+)[a-z0-9._~+/-]+"), "$1$REDACTED")
+    ?.replace(
+        Regex("(?i)([\\\"']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token)[\\\"']?\\s*[:=]\\s*[\\\"'])[^\\\"']+"),
+        "$1$REDACTED",
+    )
 
 private val SENSITIVE_FIELDS = setOf(
     "authorization",

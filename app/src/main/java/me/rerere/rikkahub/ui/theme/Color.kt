@@ -9,6 +9,8 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
+import me.rerere.rikkahub.ui.context.LocalGlobalGlassSurfaceOpacity
 
 data class ExtendColors(
     val red1: Color,
@@ -174,6 +176,15 @@ object CustomColors {
 
     val topBarColors: TopAppBarColors
         @Composable get() {
+            if (LocalGlobalBackgroundActive.current) {
+                val translucentContainer = colorScheme.surfaceContainer.copy(
+                    alpha = (LocalGlobalGlassSurfaceOpacity.current - 0.08f).coerceIn(0.35f, 1f)
+                )
+                return TopAppBarDefaults.topAppBarColors(
+                    containerColor = translucentContainer,
+                    scrolledContainerColor = translucentContainer,
+                )
+            }
             return if (!LocalDarkMode.current) TopAppBarDefaults.topAppBarColors(
                 containerColor = colorScheme.surfaceContainer,
                 scrolledContainerColor = colorScheme.surfaceContainer
@@ -181,11 +192,35 @@ object CustomColors {
         }
 
     val cardColors: CardColors
-        @Composable get() = CardDefaults.cardColors(containerColor = colorScheme.surfaceContainer)
+        @Composable get() = CardDefaults.cardColors(
+            containerColor = colorScheme.surfaceContainer.copy(
+                alpha = if (LocalGlobalBackgroundActive.current) {
+                    LocalGlobalGlassSurfaceOpacity.current.coerceIn(0.35f, 1f)
+                } else {
+                    1f
+                }
+            )
+        )
 
     val cardColorsOnSurfaceContainer: CardColors
-        @Composable get() = CardDefaults.cardColors(containerColor = colorScheme.surfaceBright)
+        @Composable get() = CardDefaults.cardColors(
+            containerColor = colorScheme.surfaceBright.copy(
+                alpha = if (LocalGlobalBackgroundActive.current) {
+                    LocalGlobalGlassSurfaceOpacity.current.coerceIn(0.35f, 1f)
+                } else {
+                    1f
+                }
+            )
+        )
 
     val listItemColors: ListItemColors
-        @Composable get() = ListItemDefaults.colors(containerColor = colorScheme.surfaceBright)
+        @Composable get() = ListItemDefaults.colors(
+            containerColor = colorScheme.surfaceBright.copy(
+                alpha = if (LocalGlobalBackgroundActive.current) {
+                    LocalGlobalGlassSurfaceOpacity.current.coerceIn(0.35f, 1f)
+                } else {
+                    1f
+                }
+            )
+        )
 }

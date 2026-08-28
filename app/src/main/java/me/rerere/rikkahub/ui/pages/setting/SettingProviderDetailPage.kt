@@ -11,6 +11,10 @@ import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +28,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -36,19 +39,19 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -61,6 +64,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -201,7 +205,8 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
         },
         bottomBar = {
             NavigationBar(
-                containerColor = CustomColors.cardColorsOnSurfaceContainer.containerColor
+                containerColor = Color.Transparent,
+                tonalElevation = 0.dp,
             ) {
                 NavigationBarItem(
                     selected = pager.currentPage == 0,
@@ -425,16 +430,17 @@ private fun ModelList(
         onUpdateProvider(providerSetting.moveMove(from.index, to.index))
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .floatingToolbarVerticalNestedScroll(
                     expanded = expanded,
                     onExpand = { expanded = true },
                     onCollapse = { expanded = false },
                 ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
+            contentPadding = PaddingValues(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
@@ -492,12 +498,11 @@ private fun ModelList(
                 }
             }
         }
-        Surface(
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset)
-                .wrapContentWidth(),
-            shape = MaterialTheme.shapes.extraLarge,
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.Center,
         ) {
             Row(modifier = Modifier.padding(8.dp)) {
                 AddModelButton(
@@ -797,12 +802,18 @@ private fun AddModelButton(
                     HugeIcons.Add01,
                     contentDescription = stringResource(R.string.setting_provider_page_add_model)
                 )
-                AnimatedVisibility(expanded) {
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text(
-                        stringResource(R.string.setting_provider_page_add_new_model),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                AnimatedVisibility(
+                    visible = expanded,
+                    enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                    exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(
+                            stringResource(R.string.setting_provider_page_add_new_model),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                 }
             }
         }
@@ -1300,34 +1311,38 @@ private fun ModelCard(
     SwipeToDismissBox(
         state = swipeToDismissBoxState,
         backgroundContent = {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
+            AnimatedVisibility(
+                visible = swipeToDismissBoxState.dismissDirection == SwipeToDismissBoxValue.EndToStart,
             ) {
-                IconButton(
-                    onClick = {
-                        scope.launch {
-                            swipeToDismissBoxState.reset()
-                        }
-                    }
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(HugeIcons.Cancel01, null)
-                }
-                FilledIconButton(
-                    onClick = {
-                        scope.launch {
-                            onDelete()
-                            swipeToDismissBoxState.reset()
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                swipeToDismissBoxState.reset()
+                            }
                         }
+                    ) {
+                        Icon(HugeIcons.Cancel01, null)
                     }
-                ) {
-                    Icon(
-                        HugeIcons.Delete01,
-                        contentDescription = stringResource(R.string.chat_page_delete)
-                    )
+                    FilledIconButton(
+                        onClick = {
+                            scope.launch {
+                                onDelete()
+                                swipeToDismissBoxState.reset()
+                            }
+                        }
+                    ) {
+                        Icon(
+                            HugeIcons.Delete01,
+                            contentDescription = stringResource(R.string.chat_page_delete)
+                        )
+                    }
                 }
             }
         },
@@ -1335,7 +1350,13 @@ private fun ModelCard(
         gesturesEnabled = true,
         modifier = modifier
     ) {
-        OutlinedCard {
+        OutlinedCard(
+            colors = CardDefaults.outlinedCardColors(
+                // The swipe actions live behind this card. Keep the foreground opaque so
+                // they are revealed only by moving the card, never through its background.
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

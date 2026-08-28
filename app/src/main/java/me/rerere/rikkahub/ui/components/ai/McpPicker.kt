@@ -25,7 +25,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
@@ -353,7 +353,13 @@ fun McpPicker(
                             Tag(
                                 type = TagType.INFO
                             ) {
-                                Text("${enabledTools.size}/${tools.size} tools")
+                                Text(
+                                    stringResource(
+                                        R.string.mcp_picker_tools_count,
+                                        enabledTools.size,
+                                        tools.size,
+                                    )
+                                )
                             }
                         }
                     }

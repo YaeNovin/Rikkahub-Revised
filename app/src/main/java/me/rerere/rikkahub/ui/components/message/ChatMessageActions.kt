@@ -16,7 +16,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
@@ -56,6 +56,7 @@ import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.WebDesign01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.datastore.hasActiveChatBackground
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
@@ -93,7 +94,9 @@ fun ColumnScope.ChatMessageActionButtons(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        val actionIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+        val actionIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = if (settings.hasActiveChatBackground()) 0.92f else 1f
+        )
 
         Icon(
             imageVector = HugeIcons.Copy01,
@@ -204,7 +207,9 @@ fun ColumnScope.ChatMessageActionButtons(
             Text(
                 text = message.createdAt.toJavaLocalDateTime().toMessageTimeString(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (settings.hasActiveChatBackground()) 0.90f else 0.6f
+                ),
                 maxLines = 1,
             )
         }

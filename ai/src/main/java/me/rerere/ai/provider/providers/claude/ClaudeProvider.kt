@@ -69,7 +69,6 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
-import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -84,6 +83,7 @@ import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ClaudeProvider"
+private const val MAX_PROVIDER_ERROR_BODY_BYTES = 64L * 1024L
 private const val ANTHROPIC_VERSION = "2023-06-01"
 private const val CLAUDE_PAUSE_TURN = "pause_turn"
 private const val MAX_PAUSE_TURN_CONTINUATIONS = 5
@@ -317,6 +317,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 requestBody.claudeRequestDiagnostics(
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.TEXT_GENERATION,
+                    hasCustomBody = params.customBody.isNotEmpty(),
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -326,11 +327,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "generateText: model=${params.model.modelId}, messages=${messages.size}")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            val body = response.body?.string()
+            val body = runCatching {
+                response.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES).string()
+            }.getOrNull()
             throw providerRequestFailure(
                 response = response,
                 cause = null,
@@ -378,6 +381,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 requestBody.claudeRequestDiagnostics(
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.STREAM_TEXT,
+                    hasCustomBody = params.customBody.isNotEmpty(),
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -388,18 +392,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
-
-        requestBody["messages"]!!.jsonArray.forEach {
-            Log.i(TAG, "streamText: $it")
-        }
+        Log.d(TAG, "streamText: model=${params.model.modelId}, messages=${messages.size}")
 
         val decoder = ClaudeStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                    Log.w(TAG, "onEvent: chunk dropped (${e?.javaClass?.simpleName ?: "unknown"})")
                 }
             }
         }
@@ -411,7 +411,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, data=$data")
+                Log.d(TAG, "onEvent: type=$type, dataLength=${data.length}")
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -424,19 +424,21 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var detail = t?.message
 
-                t?.printStackTrace()
-                Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
+                Log.e(
+                    TAG,
+                    "Stream failed: status=${response?.code}, type=${t?.javaClass?.simpleName}",
+                )
 
-                val bodyRaw = response?.body?.stringSafe()
+                val bodyRaw = runCatching {
+                    response?.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES)?.string()
+                }.getOrNull()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
                         detail = bodyElement.parseErrorDetail().message ?: bodyRaw
                     }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                } catch (_: Throwable) {
+                    Log.w(TAG, "onFailure: failed to parse error response (${bodyRaw?.length ?: 0} chars)")
                 } finally {
                     close(providerRequestFailure(response, t, detail ?: bodyRaw))
                 }
@@ -841,7 +843,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     put("data", encoded.base64)
                 })
             }.onFailure {
-                Log.w(TAG, "encode image failed: $url", it)
+                Log.w(TAG, "encode image failed: ${it.javaClass.simpleName}")
                 put("type", "text")
                 put("text", "")
             }
@@ -904,8 +906,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 "redacted_thinking" -> {
-                    val data = block["data"]?.jsonPrimitiveOrNull?.contentOrNull
-                    println(data)
+                    Log.d(TAG, "Received redacted thinking block")
                 }
 
                 "tool_use" -> {

@@ -30,9 +30,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedCard
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -91,6 +91,7 @@ import me.rerere.rikkahub.ui.components.message.ChatMessageServerToolStep
 import me.rerere.rikkahub.ui.components.message.groupMessageParts
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.AppearanceOptionSurface
 import me.rerere.rikkahub.ui.components.ui.BitmapComposer
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
@@ -139,7 +140,7 @@ fun ChatExportSheet(
 
                 val markdownSuccessMessage =
                     stringResource(id = R.string.chat_page_export_success, "Markdown")
-                OutlinedCard(
+                AppearanceOptionSurface(
                     onClick = {
                         exportToMarkdown(context, conversation, selectedMessages)
                         toaster.show(
@@ -148,7 +149,7 @@ fun ChatExportSheet(
                         )
                         onDismissRequest()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     ListItem(
                         headlineContent = {
@@ -159,14 +160,15 @@ fun ChatExportSheet(
                         },
                         leadingContent = {
                             Icon(HugeIcons.File02, contentDescription = null)
-                        }
+                        },
+                        colors = chatExportListItemColors(),
                     )
                 }
 
                 val imageSuccessMessage =
                     stringResource(id = R.string.chat_page_export_success, "Image")
-                OutlinedCard(
-                    modifier = Modifier.fillMaxWidth()
+                AppearanceOptionSurface(
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column {
                         ListItem(
@@ -178,7 +180,8 @@ fun ChatExportSheet(
                             },
                             leadingContent = {
                                 Icon(HugeIcons.Image02, contentDescription = null)
-                            }
+                            },
+                            colors = chatExportListItemColors(),
                         )
 
                         HorizontalDivider()
@@ -192,7 +195,8 @@ fun ChatExportSheet(
                                         imageExportOptions = imageExportOptions.copy(expandReasoning = it)
                                     }
                                 )
-                            }
+                            },
+                            colors = chatExportListItemColors(),
                         )
 
                         Row(
@@ -238,6 +242,15 @@ fun ChatExportSheet(
         }
     }
 }
+
+@Composable
+private fun chatExportListItemColors() = ListItemDefaults.colors(
+    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+    headlineColor = MaterialTheme.colorScheme.onSurface,
+    supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    leadingIconColor = MaterialTheme.colorScheme.onSurface,
+    trailingIconColor = MaterialTheme.colorScheme.onSurface,
+)
 
 private fun exportToMarkdown(
     context: Context,

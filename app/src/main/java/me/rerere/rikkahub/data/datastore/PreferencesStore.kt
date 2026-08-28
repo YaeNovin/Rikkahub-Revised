@@ -93,6 +93,7 @@ class SettingsStore(
         val THEME_ID = stringPreferencesKey("theme_id")
         val CUSTOM_THEMES = stringPreferencesKey("custom_themes")
         val DISPLAY_SETTING = stringPreferencesKey("display_setting")
+        val ADVANCED_APPEARANCE_SETTING = stringPreferencesKey("advanced_appearance_setting")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
         val ENABLE_GENERATION_RETRY = booleanPreferencesKey("enable_generation_retry")
         val GENERATION_RETRY_MAX_RETRIES = intPreferencesKey("generation_retry_max_retries")
@@ -232,6 +233,9 @@ class SettingsStore(
                         MAX_GENERATION_RETRY_DURATION_SECONDS,
                     ) ?: DEFAULT_GENERATION_RETRY_DURATION_SECONDS,
                 displaySetting = decodeDisplaySetting(preferences[DISPLAY_SETTING]),
+                advancedAppearanceSetting = decodeAdvancedAppearanceSetting(
+                    preferences[ADVANCED_APPEARANCE_SETTING]
+                ),
                 searchServices = preferences[SEARCH_SERVICES]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: listOf(SearchServiceOptions.DEFAULT),
@@ -403,6 +407,8 @@ class SettingsStore(
                     MAX_GENERATION_RETRY_DURATION_SECONDS,
                 )
             preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
+            preferences[ADVANCED_APPEARANCE_SETTING] =
+                JsonInstant.encodeToString(settings.advancedAppearanceSetting)
 
             preferences[FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
             preferences[SELECT_MODEL] = settings.chatModelId.toString()
@@ -488,6 +494,35 @@ class SettingsStore(
         settingsFlow.value = currentSettings.copy(displaySetting = updated)
         dataStore.edit { preferences ->
             preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(updated)
+        }
+    }
+
+    /**
+     * Updates only appearance preferences so rapid UI adjustments cannot overwrite
+     * assistant, provider, model, or other unrelated settings with an older snapshot.
+     */
+    suspend fun updateAdvancedAppearance(
+        fn: (AdvancedAppearanceSetting) -> AdvancedAppearanceSetting,
+    ) = scopedSettingsUpdateMutex.withLock {
+        val currentSettings = settingsFlow.value
+        if (currentSettings.init) {
+            dataStore.edit { preferences ->
+                val current = decodeAdvancedAppearanceSetting(
+                    preferences[ADVANCED_APPEARANCE_SETTING]
+                )
+                val updated = fn(current)
+                if (updated != current) {
+                    preferences[ADVANCED_APPEARANCE_SETTING] = JsonInstant.encodeToString(updated)
+                }
+            }
+            return@withLock
+        }
+        val updated = fn(currentSettings.advancedAppearanceSetting)
+        if (updated == currentSettings.advancedAppearanceSetting) return@withLock
+
+        settingsFlow.value = currentSettings.copy(advancedAppearanceSetting = updated)
+        dataStore.edit { preferences ->
+            preferences[ADVANCED_APPEARANCE_SETTING] = JsonInstant.encodeToString(updated)
         }
     }
 
@@ -590,6 +625,7 @@ data class Settings(
     val generationRetryInitialIntervalSeconds: Int = DEFAULT_GENERATION_RETRY_INTERVAL_SECONDS,
     val generationRetryMaxDurationSeconds: Int = DEFAULT_GENERATION_RETRY_DURATION_SECONDS,
     val displaySetting: DisplaySetting = DisplaySetting(),
+    val advancedAppearanceSetting: AdvancedAppearanceSetting = AdvancedAppearanceSetting(),
     val favoriteModels: List<Uuid> = emptyList(),
     val chatModelId: Uuid = Uuid.random(),
     val fastModelId: Uuid = Uuid.random(),
@@ -640,10 +676,186 @@ data class Settings(
     }
 }
 
+const val MIN_GLOBAL_BACKGROUND_BLUR_RADIUS = 4f
+const val MAX_GLOBAL_BACKGROUND_BLUR_RADIUS = 40f
+const val MIN_NAVIGATION_GLASS_BLUR_RADIUS = 4f
+const val MAX_NAVIGATION_GLASS_BLUR_RADIUS = 32f
+const val MIN_LIQUID_GLASS_BLUR_RADIUS = 0f
+const val MAX_LIQUID_GLASS_BLUR_RADIUS = 24f
+const val MIN_CHAT_TEXT_LINE_HEIGHT_RATIO = 1.25f
+const val MAX_CHAT_TEXT_LINE_HEIGHT_RATIO = 1.8f
+const val MIN_CHAT_PARAGRAPH_SPACING_RATIO = 0.35f
+const val MAX_CHAT_PARAGRAPH_SPACING_RATIO = 1f
+
 internal fun decodeDisplaySetting(raw: String?): DisplaySetting =
     runCatching {
         JsonInstant.decodeFromString<DisplaySetting>(raw ?: "{}")
     }.getOrDefault(DisplaySetting())
+
+internal fun decodeAdvancedAppearanceSetting(raw: String?): AdvancedAppearanceSetting =
+    runCatching {
+        JsonInstant.decodeFromString<AdvancedAppearanceSetting>(raw ?: "{}")
+    }.getOrDefault(AdvancedAppearanceSetting())
+
+@Serializable
+data class AdvancedAppearanceSetting(
+    val enableGlobalBackground: Boolean = false,
+    val globalBackground: String? = null,
+    val globalBackgroundOpacity: Float = 1f,
+    val applyGlobalBackgroundToChat: Boolean = false,
+    val globalBackgroundBlurRadius: Float = 20f,
+    val pageLiquidGlassBlurRadius: Float = 0f,
+    val pageSurfaceOpacity: Float = 0.68f,
+    val pageSurfaceStyle: BackgroundSurfaceStyle = BackgroundSurfaceStyle.TRANSLUCENT,
+    val overlaySurfaceStyle: BackgroundSurfaceStyle = BackgroundSurfaceStyle.OPAQUE,
+    val overlaySurfaceOpacity: Float = 0.82f,
+    val overlaySurfaceBlurRadius: Float = 20f,
+    val overlayLiquidGlassBlurRadius: Float = 0f,
+    val enableNavigationGlass: Boolean = true,
+    val navigationSurfaceStyle: BackgroundSurfaceStyle = BackgroundSurfaceStyle.LIQUID_GLASS,
+    val navigationGlassOpacity: Float = 0.72f,
+    val navigationGlassBlurRadius: Float = 24f,
+    val navigationLiquidGlassBlurRadius: Float = 0f,
+    val enableChatDockGlass: Boolean = false,
+    val chatDockGlassOpacity: Float = 0.58f,
+    val chatDockGlassBlurRadius: Float = 0f,
+    val chatBubbleStyle: ChatBubbleStyle = ChatBubbleStyle.FROSTED,
+    val enableChatTextReadability: Boolean = true,
+    val chatTextLineHeightRatio: Float = 1.5f,
+    val chatParagraphSpacingRatio: Float = 0.65f,
+    val richContentStyle: RichContentStyle = RichContentStyle.TRANSLUCENT,
+    val richContentSurfaceOpacity: Float = 0.62f,
+    val enableAutoAccent: Boolean = false,
+    val autoAccentColorArgb: Long? = null,
+)
+
+@Serializable
+enum class BackgroundSurfaceStyle {
+    @SerialName("opaque")
+    OPAQUE,
+
+    @SerialName("translucent")
+    TRANSLUCENT,
+
+    @SerialName("frosted")
+    FROSTED,
+
+    @SerialName("liquid_glass")
+    LIQUID_GLASS,
+}
+
+fun AdvancedAppearanceSetting.normalizedChatTextLineHeightRatio(): Float =
+    chatTextLineHeightRatio.coerceIn(
+        MIN_CHAT_TEXT_LINE_HEIGHT_RATIO,
+        MAX_CHAT_TEXT_LINE_HEIGHT_RATIO,
+    )
+
+fun AdvancedAppearanceSetting.normalizedChatParagraphSpacingRatio(): Float =
+    chatParagraphSpacingRatio.coerceIn(
+        MIN_CHAT_PARAGRAPH_SPACING_RATIO,
+        MAX_CHAT_PARAGRAPH_SPACING_RATIO,
+    )
+
+@Serializable
+enum class ChatBubbleStyle {
+    @SerialName("frosted")
+    FROSTED,
+
+    @SerialName("outlined")
+    OUTLINED,
+
+    @SerialName("liquid_glass")
+    LIQUID_GLASS,
+}
+
+@Serializable
+enum class RichContentStyle {
+    @SerialName("translucent")
+    TRANSLUCENT,
+
+    @SerialName("outlined")
+    OUTLINED,
+}
+
+fun Settings.isGlobalBackgroundActive(): Boolean =
+    advancedAppearanceSetting.enableGlobalBackground &&
+        !advancedAppearanceSetting.globalBackground.isNullOrBlank()
+
+fun Settings.configuredAssistantBackgroundCount(): Int =
+    assistants.count { assistant ->
+        !assistant.background.isNullOrBlank() || assistant.useGradientBackground
+    }
+
+data class ResolvedChatBackground(
+    val background: String?,
+    val opacity: Float,
+    val blurRadius: Float,
+    val useGradientBackground: Boolean,
+    val usesGlobalBackground: Boolean,
+) {
+    val isActive: Boolean
+        get() = !background.isNullOrBlank() || useGradientBackground
+}
+
+fun Settings.isGlobalBackgroundAppliedToChat(): Boolean =
+    advancedAppearanceSetting.applyGlobalBackgroundToChat && isGlobalBackgroundActive()
+
+fun Settings.resolveChatBackground(): ResolvedChatBackground {
+    val appearance = advancedAppearanceSetting
+    if (isGlobalBackgroundAppliedToChat()) {
+        val blurRadius = when (appearance.pageSurfaceStyle) {
+            BackgroundSurfaceStyle.FROSTED -> appearance.globalBackgroundBlurRadius.coerceIn(
+                MIN_GLOBAL_BACKGROUND_BLUR_RADIUS,
+                MAX_GLOBAL_BACKGROUND_BLUR_RADIUS,
+            )
+
+            BackgroundSurfaceStyle.LIQUID_GLASS -> appearance.pageLiquidGlassBlurRadius.coerceIn(
+                MIN_LIQUID_GLASS_BLUR_RADIUS,
+                MAX_LIQUID_GLASS_BLUR_RADIUS,
+            )
+
+            BackgroundSurfaceStyle.OPAQUE,
+            BackgroundSurfaceStyle.TRANSLUCENT -> 0f
+        }
+        return ResolvedChatBackground(
+            background = appearance.globalBackground,
+            opacity = appearance.globalBackgroundOpacity.coerceIn(0f, 1f),
+            blurRadius = blurRadius,
+            useGradientBackground = false,
+            usesGlobalBackground = true,
+        )
+    }
+
+    val assistant = getCurrentAssistant()
+    return ResolvedChatBackground(
+        background = assistant.background,
+        opacity = assistant.backgroundOpacity.coerceIn(0f, 1f),
+        blurRadius = assistant.backgroundBlurRadius.coerceIn(0f, MAX_GLOBAL_BACKGROUND_BLUR_RADIUS),
+        useGradientBackground = assistant.useGradientBackground,
+        usesGlobalBackground = false,
+    )
+}
+
+fun Settings.hasActiveChatBackground(): Boolean = resolveChatBackground().isActive
+
+fun Settings.isNavigationGlassActive(): Boolean =
+    advancedAppearanceSetting.enableNavigationGlass &&
+        advancedAppearanceSetting.navigationSurfaceStyle != BackgroundSurfaceStyle.OPAQUE &&
+        hasActiveChatBackground()
+
+fun Settings.isChatDockGlassActive(): Boolean =
+    advancedAppearanceSetting.enableChatDockGlass && hasActiveChatBackground()
+
+fun Settings.isEnhancedChatBubbleActive(): Boolean =
+    displaySetting.showAssistantBubble && hasActiveChatBackground()
+
+fun Settings.isChatInputGlassActive(): Boolean =
+    displaySetting.enableBlurEffect && hasActiveChatBackground()
+
+fun Settings.isAutoAccentActive(): Boolean =
+    isGlobalBackgroundActive() &&
+        advancedAppearanceSetting.enableAutoAccent &&
+        advancedAppearanceSetting.autoAccentColorArgb != null
 
 @Serializable
 enum class ChatFontFamily {
@@ -692,6 +904,12 @@ data class DisplaySetting(
     val enableAutoScroll: Boolean = true,
     val enableLatexRendering: Boolean = true,
     val enableBlurEffect: Boolean = false,
+    val inputBlurRadius: Float = 12f,
+    val inputSurfaceOpacity: Float = 0.55f,
+    val enableTopBarBlur: Boolean = true,
+    val topBarBlurRadius: Float = 20f,
+    val topBarSurfaceOpacity: Float = 0.65f,
+    val showInspirationCards: Boolean = true,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val chatCustomFontPath: String = "",
     val chatCustomFontName: String = "",

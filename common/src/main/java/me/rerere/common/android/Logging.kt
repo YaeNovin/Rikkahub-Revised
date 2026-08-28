@@ -59,6 +59,11 @@ sealed class LogEntry {
         val responseCode: Int? = null,
         val durationMs: Long? = null,
         val error: String? = null,
+        val url: String? = null,
+        val method: String? = null,
+        val requestHeaders: Map<String, String> = emptyMap(),
+        val requestBody: String? = null,
+        val responseHeaders: Map<String, String> = emptyMap(),
     ) : LogEntry()
 
     @Serializable
@@ -69,6 +74,7 @@ sealed class LogEntry {
         val name: String,
         val summary: String,
         val details: String,
+        val reason: String? = null,
     ) : LogEntry()
 }
 
@@ -112,6 +118,11 @@ object Logging {
             errorLogs += restored
                 .asSequence()
                 .filter { it.timestamp >= errorLogCutoff() }
+                .map { log ->
+                    if (log.reason != null) log else log.copy(
+                        reason = extractErrorReason(log.details, log.summary),
+                    )
+                }
                 .sortedByDescending(LogEntry.ErrorLog::timestamp)
                 .take(MAX_ERROR_LOGS)
             persistErrorLogsLocked()
@@ -135,11 +146,16 @@ object Logging {
         name: String,
         summary: String,
         details: String,
+        reason: String? = null,
         tag: String = "ERROR",
     ) {
         val normalizedName = name.trim().ifEmpty { "Error" }
         val normalizedSummary = summary.trim().ifEmpty { normalizedName }
         val normalizedDetails = details.ifBlank { normalizedSummary }
+        val normalizedReason = reason
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: extractErrorReason(normalizedDetails, normalizedSummary)
         synchronized(lock) {
             errorLogs.add(
                 0,
@@ -148,6 +164,7 @@ object Logging {
                     name = normalizedName,
                     summary = normalizedSummary,
                     details = normalizedDetails,
+                    reason = normalizedReason,
                 )
             )
             pruneErrorLogsLocked()
@@ -228,3 +245,44 @@ object Logging {
     private fun errorLogCutoff(nowMillis: Long = System.currentTimeMillis()): Long =
         nowMillis - ERROR_LOG_RETENTION_MILLIS
 }
+
+fun extractErrorReason(details: String, summary: String = ""): String? {
+    fun meaningful(value: String): String? = value
+        .trim()
+        .takeIf(String::isNotEmpty)
+        ?.takeUnless { it.equals(summary.trim(), ignoreCase = true) }
+
+    JSON_ERROR_REASON_PATTERN.findAll(details).forEach { match ->
+        val decoded = runCatching {
+            Json.decodeFromString<String>(match.groupValues[1])
+        }.getOrNull()
+        meaningful(decoded.orEmpty())?.let { return it }
+    }
+
+    return details.lineSequence()
+        .map(String::trim)
+        .filterNot { line ->
+            line.isEmpty() ||
+                line.startsWith("at ") ||
+                line.startsWith("Suppressed:") ||
+                line.matches(STACK_TRACE_REMAINDER_PATTERN)
+        }
+        .map { it.removePrefix("Caused by:").trim().removeThrowableClassPrefix() }
+        .mapNotNull(::meaningful)
+        .lastOrNull()
+}
+
+private fun String.removeThrowableClassPrefix(): String {
+    val separator = indexOf(':')
+    if (separator <= 0) return this
+    val prefix = substring(0, separator).trim()
+    val isThrowableClass = prefix.endsWith("Exception") ||
+        prefix.endsWith("Error") ||
+        prefix.contains('.') && prefix.none(Char::isWhitespace)
+    return if (isThrowableClass) substring(separator + 1).trim() else this
+}
+
+private val JSON_ERROR_REASON_PATTERN = Regex(
+    """(?i)\"(?:message|detail|error_description)\"\s*:\s*(\"(?:\\.|[^\"\\])*\")"""
+)
+private val STACK_TRACE_REMAINDER_PATTERN = Regex("""\.\.\.\s+\d+\s+more""")

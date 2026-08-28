@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -29,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -42,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -53,6 +57,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
@@ -60,6 +65,11 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.FlowPreview
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.flow.debounce
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -77,6 +87,10 @@ import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.datastore.ChatBubbleStyle
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.hasActiveChatBackground
+import me.rerere.rikkahub.data.datastore.isEnhancedChatBubbleActive
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
@@ -86,11 +100,14 @@ import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.Favicon
+import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.theme.LocalChatBackgroundForeground
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
+import me.rerere.rikkahub.ui.theme.resolveChatBodyTextStyle
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.openUrl
@@ -105,6 +122,7 @@ fun ChatMessage(
     loading: Boolean = false,
     model: Model? = null,
     assistant: Assistant? = null,
+    hazeState: HazeState? = null,
     lastMessage: Boolean = false,
     onFork: () -> Unit,
     onRegenerate: () -> Unit,
@@ -120,12 +138,23 @@ fun ChatMessage(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
-    val settings = LocalSettings.current.displaySetting
+    val appSettings = LocalSettings.current
+    val settings = appSettings.displaySetting
+    val chatBackgroundActive = appSettings.hasActiveChatBackground()
+    val chatBackgroundForeground = LocalChatBackgroundForeground.current
+        .takeUnless { it == Color.Unspecified }
+        ?: MaterialTheme.colorScheme.onSurface
     val chatFontFamily = LocalChatFontFamily.current ?: rememberChatFontFamily(settings)
-    val textStyle = LocalTextStyle.current.copy(
-        fontSize = LocalTextStyle.current.fontSize * settings.fontSizeRatio,
-        lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
-        fontFamily = chatFontFamily
+    val textStyle = resolveChatBodyTextStyle(
+        baseStyle = MaterialTheme.typography.bodyLarge,
+        fontSizeRatio = settings.fontSizeRatio,
+        fontFamily = chatFontFamily,
+        color = if (chatBackgroundActive) {
+            chatBackgroundForeground.copy(alpha = 0.96f)
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        appearance = appSettings.advancedAppearanceSetting,
     )
     var showActionsSheet by remember { mutableStateOf(false) }
     var showSelectCopySheet by remember { mutableStateOf(false) }
@@ -159,24 +188,27 @@ fun ChatMessage(
                 )
             }
         }
-        ProvideTextStyle(textStyle) {
-            MessagePartsBlock(
-                assistant = assistant,
-                role = message.role,
-                parts = message.parts,
-                annotations = message.annotations,
-                loading = loading,
-                model = model,
-                onToolApproval = onToolApproval,
-                onToolAnswer = onToolAnswer,
-                onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
-            )
-
-            message.translation?.let { translation ->
-                CollapsibleTranslationText(
-                    content = translation,
-                    onClickCitation = {}
+        CompositionLocalProvider(LocalContentColor provides textStyle.color) {
+            ProvideTextStyle(textStyle) {
+                MessagePartsBlock(
+                    assistant = assistant,
+                    role = message.role,
+                    parts = message.parts,
+                    annotations = message.annotations,
+                    loading = loading,
+                    model = model,
+                    hazeState = hazeState,
+                    onToolApproval = onToolApproval,
+                    onToolAnswer = onToolAnswer,
+                    onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
                 )
+
+                message.translation?.let { translation ->
+                    CollapsibleTranslationText(
+                        content = translation,
+                        onClickCitation = {}
+                    )
+                }
             }
         }
 
@@ -214,7 +246,14 @@ fun ChatMessage(
         )
 
         ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
+            ChatMessageNerdLine(
+                message = message,
+                color = if (chatBackgroundActive) {
+                    chatBackgroundForeground.copy(alpha = 0.82f)
+                } else {
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
+                },
+            )
         }
 
     }
@@ -262,12 +301,131 @@ fun ChatMessage(
     }
 }
 
+private data class MessageBubbleAppearance(
+    val modifier: Modifier,
+    val color: Color,
+    val border: BorderStroke?,
+    val shadowElevation: Dp,
+)
+
+private const val MAX_LIVE_BLUR_TEXT_LENGTH = 800
+private const val MAX_LIVE_BLUR_LINE_COUNT = 10
+
+internal fun canUseLiveChatBubbleBlur(isUser: Boolean, text: String): Boolean {
+    if (!isUser || text.length > MAX_LIVE_BLUR_TEXT_LENGTH) return false
+    if (text.count { it == '\n' } + 1 > MAX_LIVE_BLUR_LINE_COUNT) return false
+    return !text.contains("```") &&
+        !text.contains("<svg", ignoreCase = true) &&
+        !text.contains("<table", ignoreCase = true)
+}
+
+internal fun shouldRenderAssistantMessageBubble(settings: Settings): Boolean =
+    settings.displaySetting.showAssistantBubble
+
+@Composable
+private fun messageBubbleAppearance(
+    settings: Settings,
+    isUser: Boolean,
+    hazeState: HazeState?,
+    allowLiveBlur: Boolean,
+): MessageBubbleAppearance {
+    val opacity = settings.displaySetting.bubbleOpacity.coerceIn(0f, 1f)
+    val baseColor = if (isUser) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    if (!settings.isEnhancedChatBubbleActive()) {
+        return MessageBubbleAppearance(
+            modifier = Modifier,
+            color = baseColor.copy(alpha = opacity),
+            border = null,
+            shadowElevation = 0.dp,
+        )
+    }
+
+    val capabilities = LocalAdvancedAppearanceCapabilities.current
+    val style = capabilities.effectiveBubbleStyle(
+        settings.advancedAppearanceSetting.chatBubbleStyle
+    )
+    val needsLiveBlur = hazeState != null &&
+        capabilities.supportsRealtimeBlur &&
+        settings.hasActiveChatBackground() &&
+        allowLiveBlur &&
+        style != ChatBubbleStyle.OUTLINED
+    val modifier = if (needsLiveBlur) {
+        val blurRadius = capabilities.limitLiveBlur(
+            when (style) {
+                ChatBubbleStyle.FROSTED -> 18f
+                ChatBubbleStyle.LIQUID_GLASS -> 24f
+                ChatBubbleStyle.OUTLINED -> 0f
+            }
+        ).dp
+        Modifier.hazeBlur(
+            input = HazeInput.Sources(requireNotNull(hazeState)),
+            style = HazeBlurStyle.Material3 {
+                blurRadius(blurRadius)
+            },
+        )
+    } else {
+        Modifier
+    }
+
+    return when (style) {
+        ChatBubbleStyle.FROSTED -> MessageBubbleAppearance(
+            modifier = modifier,
+            color = baseColor.copy(alpha = (opacity * 0.78f).coerceIn(0.46f, 0.82f)),
+            border = BorderStroke(
+                width = 0.75.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+            ),
+            shadowElevation = 0.dp,
+        )
+
+        ChatBubbleStyle.OUTLINED -> MessageBubbleAppearance(
+            modifier = Modifier,
+            color = baseColor.copy(alpha = (opacity * 0.24f).coerceIn(0.16f, 0.28f)),
+            border = BorderStroke(
+                width = 1.dp,
+                color = if (isUser) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.58f)
+                } else {
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.62f)
+                },
+            ),
+            shadowElevation = 0.dp,
+        )
+
+        ChatBubbleStyle.LIQUID_GLASS -> MessageBubbleAppearance(
+            modifier = modifier,
+            color = baseColor.copy(
+                alpha = (opacity * 0.78f).coerceIn(
+                    if (isUser) 0.66f else 0.72f,
+                    0.86f,
+                )
+            ),
+            border = BorderStroke(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.42f),
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
+                    )
+                ),
+            ),
+            shadowElevation = 2.dp,
+        )
+    }
+}
+
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
     assistant: Assistant?,
     role: MessageRole,
     model: Model?,
+    hazeState: HazeState?,
     parts: List<UIMessagePart>,
     annotations: List<UIMessageAnnotation>,
     loading: Boolean,
@@ -276,11 +434,18 @@ private fun MessagePartsBlock(
     onUserMessageClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+    val settings = LocalSettings.current
+    val contentColor = if (settings.hasActiveChatBackground()) {
+        LocalChatBackgroundForeground.current
+            .takeUnless { it == Color.Unspecified }
+            ?.copy(alpha = 0.90f)
+            ?: MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+    }
 
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
-    val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
 
     val handleClickCitation: (String) -> Unit = remember {
@@ -364,15 +529,34 @@ private fun MessagePartsBlock(
             is MessagePartBlock.ContentBlock -> key(block.index) {
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
+                        val isUserMessage = role == MessageRole.USER
+                        val bubbleAppearance = messageBubbleAppearance(
+                            settings = settings,
+                            isUser = isUserMessage,
+                            hazeState = hazeState,
+                            allowLiveBlur = canUseLiveChatBubbleBlur(
+                                isUser = isUserMessage,
+                                text = part.text,
+                            ),
+                        )
                         val textContent = @Composable {
-                            if (role == MessageRole.USER) {
+                            if (isUserMessage) {
                                 Surface(
-                                    modifier = if (loading) Modifier else Modifier.animateContentSize(),
+                                    modifier = bubbleAppearance.modifier.then(
+                                        if (loading) Modifier else Modifier.animateContentSize()
+                                    ),
                                     shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = settings.displaySetting.bubbleOpacity),
+                                    color = bubbleAppearance.color,
+                                    border = bubbleAppearance.border,
+                                    shadowElevation = bubbleAppearance.shadowElevation,
                                     onClick = { onUserMessageClick?.invoke() },
                                 ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
+                                    Column(
+                                        modifier = Modifier.padding(
+                                            horizontal = 12.dp,
+                                            vertical = 10.dp,
+                                        )
+                                    ) {
                                         MarkdownBlock(
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
@@ -384,13 +568,22 @@ private fun MessagePartsBlock(
                                     }
                                 }
                             } else {
-                                if (settings.displaySetting.showAssistantBubble) {
+                                if (shouldRenderAssistantMessageBubble(settings)) {
                                     Surface(
-                                        modifier = if (loading) Modifier else Modifier.animateContentSize(),
+                                        modifier = bubbleAppearance.modifier.then(
+                                            if (loading) Modifier else Modifier.animateContentSize()
+                                        ),
                                         shape = RoundedCornerShape(16.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
+                                        color = bubbleAppearance.color,
+                                        border = bubbleAppearance.border,
+                                        shadowElevation = bubbleAppearance.shadowElevation,
                                     ) {
-                                        Column(modifier = Modifier.padding(8.dp)) {
+                                        Column(
+                                            modifier = Modifier.padding(
+                                                horizontal = 12.dp,
+                                                vertical = 10.dp,
+                                            )
+                                        ) {
                                             MarkdownBlock(
                                                 content = part.text.replaceRegexes(
                                                     assistant = assistant,

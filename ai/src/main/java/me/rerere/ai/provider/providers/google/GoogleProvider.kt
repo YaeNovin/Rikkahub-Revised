@@ -86,7 +86,6 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.removeElements
-import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -116,6 +115,7 @@ private const val MEDIA_UPLOAD_RETRY_DELAY_MILLIS = 600L
 private const val MEDIA_ACTIVE_POLL_INITIAL_MILLIS = 250L
 private const val MEDIA_ACTIVE_POLL_MAX_MILLIS = 1_000L
 private const val MEDIA_CACHE_TTL_MILLIS = 24L * 60L * 60L * 1_000L
+private const val MAX_PROVIDER_ERROR_BODY_BYTES = 64L * 1024L
 private const val MAX_IMAGE_RESPONSE_BYTES = 96L * 1024L * 1024L
 internal val GOOGLE_IMAGE_ASPECT_RATIOS = linkedSetOf(
     "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
@@ -392,11 +392,18 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         return client.newCall(request).await().use { response ->
             if (!response.isSuccessful) {
-                val detail = response.body?.string()
+                val detail = runCatching {
+                    response.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES).string()
+                }.getOrNull()
+                val action = if (operation == ProviderRequestOperation.IMAGE_EDIT) {
+                    "edit image"
+                } else {
+                    "generate image"
+                }
                 throw providerRequestFailure(
                     response = response,
                     cause = null,
-                    detail = "Failed to generate image: ${response.code} $detail",
+                    detail = "Failed to $action: ${response.code} $detail",
                 )
             }
             val responseBody = response.body ?: error("Empty image generation response")
@@ -632,7 +639,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                    Log.w(TAG, "onEvent: chunk dropped (${e?.javaClass?.simpleName ?: "unknown"})")
                 }
             }
         }
@@ -644,14 +651,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.i(TAG, "onEvent: $data")
+                Log.d(TAG, "onEvent: type=$type, dataLength=${data.length}")
 
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
                     if (result.completed) close()
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to parse stream event: $data", e)
+                    Log.e(TAG, "Failed to parse stream event: type=$type, dataLength=${data.length}", e)
                     close(e)
                 }
             }
@@ -663,15 +670,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             ) {
                 var detail = t?.message
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.message}")
+                Log.e(TAG, "Stream failed: status=${response?.code}, type=${t?.javaClass?.simpleName}")
 
                 try {
                     if (t == null && response != null) {
-                        val bodyStr = response.body.stringSafe()
+                        val bodyStr = response.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES).string()
                         if (!bodyStr.isNullOrEmpty()) {
                             val bodyElement = json.parseToJsonElement(bodyStr)
-                            println(bodyElement)
                             if (bodyElement is JsonObject) {
                                 detail = bodyElement["error"]?.jsonObject?.get("message")
                                     ?.jsonPrimitive?.content ?: bodyStr
@@ -680,15 +685,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                             detail = "Unknown error: ${response.code}"
                         }
                     }
-                } catch (e: Throwable) {
-                    e.printStackTrace()
+                } catch (_: Throwable) {
                 } finally {
                     close(providerRequestFailure(response, t, detail ?: "Stream failed"))
                 }
             }
 
             override fun onClosed(eventSource: EventSource) {
-                println("[onClosed] 连接已关闭")
+                Log.d(TAG, "Event source closed")
                 try {
                     sendChunks(decoder.onClosed())
                     close()
@@ -702,7 +706,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource")
+            Log.d(TAG, "Closing event source")
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -978,7 +982,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         val uploaded = cached ?: runCatching {
                             uploadFile(providerSetting, file, mimeType)
                         }.onFailure {
-                            Log.w(TAG, "Files API upload failed for ${file.name}; using inline media", it)
+                            Log.w(TAG, "Files API upload failed; using inline media (${it.javaClass.simpleName})")
                         }.getOrNull()?.also { uploadedFileCache[cacheKey] = it }
                         url to uploaded
                     }
@@ -1164,7 +1168,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         } ?: emptyList()
 
         val groundingMetadata = message["groundingMetadata"]?.jsonObject
-        Log.i(TAG, "parseMessage: $groundingMetadata")
+        Log.d(TAG, "parseMessage: groundingMetadata=${groundingMetadata != null}")
         val annotations = parseSearchGroundingMetadata(groundingMetadata)
 
         return UIMessage(
@@ -1186,7 +1190,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 url = uri
             )
         }
-        Log.i(TAG, "parseSearchGroundingMetadata: $chunks")
+        Log.d(TAG, "parseSearchGroundingMetadata: chunkCount=${chunks.size}")
         return chunks
     }
 
@@ -1521,6 +1525,11 @@ internal fun buildGoogleRequestDiagnostics(
         .joinToString(", ")
         .ifBlank { apiDefault }
     parameters["responseModalities"] = responseModalities
+    val contentParts = (requestBody["contents"] as? JsonArray)
+        .orEmpty()
+        .flatMap { content ->
+            (((content as? JsonObject)?.get("parts")) as? JsonArray).orEmpty()
+        }
 
     when (operation) {
         ProviderRequestOperation.IMAGE_GENERATION,
@@ -1542,11 +1551,41 @@ internal fun buildGoogleRequestDiagnostics(
                 (googleSearch != null && (searchTypes == null || searchTypes.containsKey("webSearch"))).toString()
             parameters["tools.googleSearch.imageSearch"] =
                 (searchTypes?.containsKey("imageSearch") == true).toString()
-            (requestBody["safetySettings"] as? JsonArray).orEmpty().forEach { settingElement ->
-                val setting = settingElement as? JsonObject ?: return@forEach
-                val category = setting.value("category") ?: return@forEach
-                val threshold = setting.value("threshold") ?: return@forEach
-                parameters["safety.${category.removePrefix("HARM_CATEGORY_").lowercase()}"] = threshold
+            parameters["prompt.characters"] = contentParts.sumOf { part ->
+                (((part as? JsonObject)?.get("text")) as? JsonPrimitive)
+                    ?.contentOrNull
+                    ?.length
+                    ?: 0
+            }.toString()
+            val encodedImageCharacters = contentParts.sumOf { part ->
+                val inlineData = (part as? JsonObject)?.let {
+                    (it["inlineData"] ?: it["inline_data"]) as? JsonObject
+                }
+                (inlineData?.get("data") as? JsonPrimitive)
+                    ?.contentOrNull
+                    ?.length
+                    ?.toLong()
+                    ?: 0L
+            }
+            parameters["referenceImages.encodedBytes"] =
+                (encodedImageCharacters * 3L / 4L).toString()
+            val configuredSafety = (requestBody["safetySettings"] as? JsonArray)
+                .orEmpty()
+                .mapNotNull { settingElement ->
+                    val setting = settingElement as? JsonObject ?: return@mapNotNull null
+                    val category = setting.value("category") ?: return@mapNotNull null
+                    val threshold = setting.value("threshold") ?: return@mapNotNull null
+                    category to threshold
+                }
+                .toMap()
+            listOf(
+                "HARM_CATEGORY_HARASSMENT",
+                "HARM_CATEGORY_HATE_SPEECH",
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "HARM_CATEGORY_DANGEROUS_CONTENT",
+            ).forEach { category ->
+                parameters["safety.${category.removePrefix("HARM_CATEGORY_").lowercase()}"] =
+                    configuredSafety[category] ?: apiDefault
             }
             parameters["referenceImages"] = referenceImageCount.toString()
         }
@@ -1594,7 +1633,7 @@ internal fun buildGoogleRequestDiagnostics(
 
     parameters["customBody"] = if (hasCustomBody) "configured" else "none"
     return ProviderRequestDiagnostics(
-        provider = providerSetting.name,
+        provider = providerSetting.name.ifBlank { "Google" },
         model = model.modelId,
         channel = providerSetting.requestChannel(),
         operation = operation,

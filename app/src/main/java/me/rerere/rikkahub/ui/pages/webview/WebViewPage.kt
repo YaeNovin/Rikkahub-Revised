@@ -13,13 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.DropdownMenu
+import me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu as DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -33,9 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
@@ -97,28 +99,37 @@ fun WebViewPage(url: String, contentId: String) {
                 },
                 actions = {
                     IconButton(onClick = { state.reload() }) {
-                        Icon(HugeIcons.Refresh01, contentDescription = "Refresh")
+                        Icon(
+                            HugeIcons.Refresh01,
+                            contentDescription = stringResource(R.string.webview_refresh),
+                        )
                     }
 
                     IconButton(
                         onClick = { state.goForward() },
                         enabled = state.canGoForward
                     ) {
-                        Icon(HugeIcons.ArrowRight01, contentDescription = "Forward")
+                        Icon(
+                            HugeIcons.ArrowRight01,
+                            contentDescription = stringResource(R.string.webview_forward),
+                        )
                     }
 
                     val urlHandler = LocalUriHandler.current
                     IconButton(
                         onClick = { showDropdown = true }
                     ) {
-                        Icon(HugeIcons.MoreVertical, contentDescription = "More options")
+                        Icon(
+                            HugeIcons.MoreVertical,
+                            contentDescription = stringResource(R.string.more_options),
+                        )
 
                         DropdownMenu(
                             expanded = showDropdown,
                             onDismissRequest = { showDropdown = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Open in Browser") },
+                                text = { Text(stringResource(R.string.webview_open_in_browser)) },
                                 leadingIcon = { Icon(HugeIcons.Earth, contentDescription = null) },
                                 onClick = {
                                     showDropdown = false
@@ -130,7 +141,7 @@ fun WebViewPage(url: String, contentId: String) {
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Console Logs") },
+                                text = { Text(stringResource(R.string.webview_console_logs)) },
                                 leadingIcon = { Icon(HugeIcons.Bug01, contentDescription = null) },
                                 onClick = {
                                     showDropdown = false
@@ -162,7 +173,7 @@ fun WebViewPage(url: String, contentId: String) {
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "Console Logs",
+                    text = stringResource(R.string.webview_console_logs),
                     style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )

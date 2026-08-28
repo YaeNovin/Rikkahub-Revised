@@ -11,8 +11,14 @@ import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderRequestException
 import me.rerere.ai.provider.ProviderSetting
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +29,27 @@ import java.io.File
 
 class OpenAIImageRequestTest {
     private val provider = OpenAIProvider(OkHttpClient())
+
+    @Test
+    fun `image request failure preserves provider response detail and retry metadata`() {
+        val response = Response.Builder()
+            .request(Request.Builder().url("https://api.openai.com/v1/images/edits").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(400)
+            .message("Bad Request")
+            .header("Retry-After", "2")
+            .body(
+                """{"error":{"message":"Source image format is not supported"}}"""
+                    .toResponseBody("application/json".toMediaType())
+            )
+            .build()
+
+        val error = openAIImageRequestFailure("edit image", response) as ProviderRequestException
+
+        assertEquals(400, error.statusCode)
+        assertEquals(2_000L, error.retryAfterMillis)
+        assertTrue(error.message.orEmpty().contains("Source image format is not supported"))
+    }
 
     @Test
     fun `xAI generation uses documented batch aspect ratio resolution and format fields`() {

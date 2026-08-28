@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -32,6 +33,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
+import me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle
+import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
 
 private val CardGroupCorner = 20.dp
 private val CardGroupItemSpacing = 2.dp
@@ -104,7 +108,6 @@ private fun CardGroupListItem(
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-
     val topCorner by animateDpAsState(
         targetValue = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner,
         animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
@@ -114,18 +117,17 @@ private fun CardGroupListItem(
         animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
     )
 
+    val itemShape = RoundedCornerShape(
+        topStart = topCorner,
+        topEnd = topCorner,
+        bottomStart = bottomCorner,
+        bottomEnd = bottomCorner,
+    )
     ListItem(
         headlineContent = item.headlineContent,
         modifier = item.modifier
             .fillMaxWidth()
-            .clip(
-                RoundedCornerShape(
-                    topStart = topCorner,
-                    topEnd = topCorner,
-                    bottomStart = bottomCorner,
-                    bottomEnd = bottomCorner,
-                )
-            )
+            .clip(itemShape)
             .then(
                 if (item.onClick != null) {
                     Modifier.clickable(
@@ -151,6 +153,10 @@ fun CardGroup(
 ) {
     val scope = CardGroupScopeImpl()
     scope.content()
+    val globalGlassActive = LocalGlobalBackgroundActive.current
+    val liquidGlassActive = globalGlassActive &&
+        LocalPageSurfaceStyle.current == BackgroundSurfaceStyle.LIQUID_GLASS
+    val groupShape = RoundedCornerShape(CardGroupCorner)
 
     Column(modifier = modifier) {
         if (title != null) {
@@ -162,11 +168,25 @@ fun CardGroup(
                 }
             }
         }
-        val count = scope.items.size
-        scope.items.fastForEachIndexed { index, item ->
-            CardGroupListItem(item = item, count = count, index = index)
-            if (index != count - 1) {
-                Spacer(modifier = Modifier.height(CardGroupItemSpacing))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (liquidGlassActive) {
+                        Modifier
+                            .clip(groupShape)
+                            .border(liquidGlassBorder(strength = 0.28f), groupShape)
+                    } else {
+                        Modifier
+                    }
+                )
+        ) {
+            val count = scope.items.size
+            scope.items.fastForEachIndexed { index, item ->
+                CardGroupListItem(item = item, count = count, index = index)
+                if (index != count - 1) {
+                    Spacer(modifier = Modifier.height(CardGroupItemSpacing))
+                }
             }
         }
     }

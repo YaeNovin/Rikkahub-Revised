@@ -6,18 +6,17 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.AlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PermanentNavigationDrawer
@@ -32,6 +31,7 @@ import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,11 +47,15 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.blur.material3.Material3
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
@@ -72,6 +76,8 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.hasActiveChatBackground
+import me.rerere.rikkahub.data.datastore.resolveChatBackground
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -79,6 +85,10 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
+import me.rerere.rikkahub.ui.components.ui.AppearanceBackgroundSpec
+import me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground
 import me.rerere.rikkahub.ui.components.ai.ChatContextUsage
 import me.rerere.rikkahub.ui.components.ai.ContextUsageSummary
 import me.rerere.rikkahub.ui.components.ai.calculateChatContextUsage
@@ -92,6 +102,9 @@ import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
+import me.rerere.rikkahub.ui.theme.LocalChatBackgroundForeground
+import me.rerere.rikkahub.ui.theme.BackgroundReadabilityTheme
+import me.rerere.rikkahub.ui.theme.rememberChatBackgroundForeground
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -126,6 +139,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val errors by vm.errors.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val chatChromeHazeState = rememberHazeState()
+    val navigationHazeState = rememberHazeState()
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
 
     // Handle back press when drawer is open
@@ -202,8 +217,30 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    when {
-        isBigScreen -> {
+    val resolvedChatBackground = setting.resolveChatBackground()
+    val appearanceForeground = rememberChatBackgroundForeground(
+        background = resolvedChatBackground.background,
+        backgroundOpacity = resolvedChatBackground.opacity,
+        useGradientBackground = resolvedChatBackground.useGradientBackground,
+    )
+    val assistantBackgroundSpec = AppearanceBackgroundSpec(
+        background = resolvedChatBackground.background,
+        opacity = resolvedChatBackground.opacity,
+        blurRadius = resolvedChatBackground.blurRadius,
+        useGradientBackground = resolvedChatBackground.useGradientBackground,
+        foreground = appearanceForeground,
+    )
+
+    CompositionLocalProvider(
+        LocalAppearanceBackground provides assistantBackgroundSpec,
+        LocalChatBackgroundForeground provides appearanceForeground,
+    ) {
+        BackgroundReadabilityTheme(
+            active = setting.hasActiveChatBackground(),
+            foreground = appearanceForeground,
+        ) {
+            when {
+            isBigScreen -> {
             PermanentNavigationDrawer(
                 drawerContent = {
                     ChatDrawerContent(
@@ -211,42 +248,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         current = conversation,
                         vm = vm,
                         settings = setting,
-                    )
-                }
-            ) {
-                ChatPageContent(
-                    inputState = inputState,
-                    loadingJob = loadingJob,
-                    processingStatus = processingStatus,
-                    setting = setting,
-                    conversation = conversation,
-                    drawerState = drawerState,
-                    navController = navController,
-                    vm = vm,
-                    chatListState = chatListState,
-                    enableWebSearch = enableWebSearch,
-                    currentChatModel = currentChatModel,
-                    bigScreen = true,
-                    errors = errors,
-                    onDismissError = { vm.dismissError(it) },
-                    onClearAllErrors = { vm.clearAllErrors() },
-                )
-            }
-        }
-
-        else -> {
-            ModalNavigationDrawer(
-                drawerState = drawerState,
-                drawerContent = {
-                    ChatDrawerContent(
-                        navController = navController,
-                        current = conversation,
-                        vm = vm,
-                        settings = setting,
-                        onNavigate = { destination ->
-                            scope.launch {
-                                drawerState.close()
-                                navController.navigate(destination)
+                        onSelectConversation = { selectedConversation ->
+                            if (selectedConversation.id != conversation.id) {
+                                navigateToChatPage(navController, selectedConversation.id)
                             }
                         },
                     )
@@ -262,16 +266,78 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     navController = navController,
                     vm = vm,
                     chatListState = chatListState,
+                    chatChromeHazeState = chatChromeHazeState,
+                    navigationHazeState = navigationHazeState,
+                    enableWebSearch = enableWebSearch,
+                    currentChatModel = currentChatModel,
+                    bigScreen = true,
+                    errors = errors,
+                    onDismissError = { vm.dismissError(it) },
+                    onClearAllErrors = { vm.clearAllErrors() },
+                )
+            }
+            }
+
+            else -> {
+            ModalNavigationDrawer(
+                drawerState = drawerState,
+                scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.56f),
+                drawerContent = {
+                    ChatDrawerContent(
+                        navController = navController,
+                        current = conversation,
+                        vm = vm,
+                        settings = setting,
+                        onSelectConversation = { selectedConversation ->
+                            scope.launch {
+                                drawerState.close()
+                                if (selectedConversation.id != conversation.id) {
+                                    navigateToChatPage(navController, selectedConversation.id)
+                                }
+                            }
+                        },
+                        onNavigate = { destination ->
+                            scope.launch {
+                                drawerState.close()
+                                navController.navigate(destination)
+                            }
+                        },
+                    )
+                }
+            ) {
+                val drawerOccludesContent = drawerState.currentValue != DrawerValue.Closed ||
+                    drawerState.targetValue != DrawerValue.Closed
+                if (drawerOccludesContent) {
+                    AssistantBackground(
+                        setting = setting,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    ChatPageContent(
+                    inputState = inputState,
+                    loadingJob = loadingJob,
+                    processingStatus = processingStatus,
+                    setting = setting,
+                    conversation = conversation,
+                    drawerState = drawerState,
+                    navController = navController,
+                    vm = vm,
+                    chatListState = chatListState,
+                    chatChromeHazeState = chatChromeHazeState,
+                    navigationHazeState = navigationHazeState,
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
                     bigScreen = false,
                     errors = errors,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
-                )
+                    )
+                }
             }
             BackHandler(drawerState.isOpen) {
                 scope.launch { drawerState.close() }
+            }
+            }
             }
         }
     }
@@ -289,6 +355,8 @@ private fun ChatPageContent(
     navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
+    chatChromeHazeState: HazeState,
+    navigationHazeState: HazeState,
     enableWebSearch: Boolean,
     currentChatModel: Model?,
     errors: List<ChatError>,
@@ -300,7 +368,6 @@ private fun ChatPageContent(
     val selectModelRequired = stringResource(R.string.chat_page_select_model_required)
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
-    val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
     val contextUsage by produceState(
         initialValue = calculateChatContextUsage(
@@ -337,16 +404,31 @@ private fun ChatPageContent(
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
 
+    val chatBackgroundForeground = LocalChatBackgroundForeground.current
+
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = if (setting.hasActiveChatBackground()) {
+            Color.Transparent
+        } else {
+            MaterialTheme.colorScheme.background
+        },
         modifier = Modifier.fillMaxSize()
     ) {
-        AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState))
-        Scaffold(
+        CompositionLocalProvider(
+            LocalChatBackgroundForeground provides chatBackgroundForeground,
+        ) {
+            AssistantBackground(
+                setting = setting,
+                modifier = Modifier
+                    .hazeSource(chatChromeHazeState)
+                    .hazeSource(navigationHazeState),
+            )
+            Scaffold(
             topBar = {
                 TopBar(
                     settings = setting,
                     conversation = conversation,
+                    hazeState = chatChromeHazeState,
                     bigScreen = bigScreen,
                     drawerState = drawerState,
                     previewMode = previewMode,
@@ -366,7 +448,7 @@ private fun ChatPageContent(
                     state = inputState,
                     loading = loadingJob != null,
                     settings = setting,
-                    hazeState = hazeState,
+                    hazeState = chatChromeHazeState,
                     completionProviders = completionProviders,
                     onCancelClick = {
                         vm.stopGeneration()
@@ -472,7 +554,7 @@ private fun ChatPageContent(
                 processingStatus = processingStatus,
                 previewMode = previewMode,
                 settings = setting,
-                hazeState = hazeState,
+                hazeState = chatChromeHazeState,
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
@@ -541,16 +623,17 @@ private fun ChatPageContent(
             )
         }
 
-        if (showFilesSheet) {
-            ChatFilesPickerSheet(
-                inputState = inputState,
-                setting = setting,
-                conversation = conversation,
-                assistant = assistant,
-                vm = vm,
-                contextUsage = contextUsage,
-                onDismiss = { showFilesSheet = false },
-            )
+            if (showFilesSheet) {
+                ChatFilesPickerSheet(
+                    inputState = inputState,
+                    setting = setting,
+                    conversation = conversation,
+                    assistant = assistant,
+                    vm = vm,
+                    contextUsage = contextUsage,
+                    onDismiss = { showFilesSheet = false },
+                )
+            }
         }
     }
 }
@@ -585,10 +668,8 @@ private fun ChatFilesPickerSheet(
     var cameraOutputFile by remember { mutableStateOf<File?>(null) }
     val (_, launchCameraCrop) = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            scope.launch {
-                inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
-                dismissAll()
-            }
+            inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            dismissAll()
         },
         onCleanup = {
             cameraOutputFile?.delete()
@@ -631,10 +712,8 @@ private fun ChatFilesPickerSheet(
     var preCropTempFile by remember { mutableStateOf<File?>(null) }
     val (_, launchImageCrop) = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            scope.launch {
-                inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
-                dismissAll()
-            }
+            inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            dismissAll()
         },
         onCleanup = {
             preCropTempFile?.delete()
@@ -760,49 +839,48 @@ private fun ChatFilesPickerSheet(
         initialValue = SheetValue.Hidden,
         enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
     )
-    ModalBottomSheet(
+    AppearanceModalBottomSheet(
         sheetState = filesSheetState,
         onDismissRequest = { dismissAll() },
+        modifier = Modifier.fillMaxHeight(0.88f),
     ) {
-        Column {
-            ContextUsageSummary(usage = contextUsage)
-            FilesPicker(
-                conversation = conversation,
-                state = inputState,
-                assistant = assistant,
-                mcpManager = vm.mcpManager,
-                onRefreshRollingContext = { additionalPrompt, targetTokens ->
-                    vm.handleRefreshRollingContext(additionalPrompt, targetTokens)
-                },
-                onUpdateAssistant = {
-                    vm.updateSettings(
-                        setting.copy(
-                            assistants = setting.assistants.map { assistant ->
-                                if (assistant.id == it.id) {
-                                    it
-                                } else {
-                                    assistant
-                                }
+        ContextUsageSummary(usage = contextUsage)
+        FilesPicker(
+            conversation = conversation,
+            state = inputState,
+            assistant = assistant,
+            mcpManager = vm.mcpManager,
+            onRefreshRollingContext = { additionalPrompt, targetTokens ->
+                vm.handleRefreshRollingContext(additionalPrompt, targetTokens)
+            },
+            onUpdateAssistant = {
+                vm.updateSettings(
+                    setting.copy(
+                        assistants = setting.assistants.map { assistant ->
+                            if (assistant.id == it.id) {
+                                it
+                            } else {
+                                assistant
                             }
-                        )
+                        }
                     )
-                },
-                onUpdateConversation = {
-                    vm.updateConversation(it)
-                    vm.saveConversationAsync()
-                },
-                showInjectionSheet = showInjectionSheet,
-                onShowInjectionSheetChange = { showInjectionSheet = it },
-                showCompressDialog = showCompressDialog,
-                onShowCompressDialogChange = { showCompressDialog = it },
-                onDismiss = { dismissAll() },
-                onTakePic = onLaunchCamera,
-                onPickImage = { imagePickerLauncher.launch("image/*") },
-                onPickVideo = { videoPickerLauncher.launch("video/*") },
-                onPickAudio = { audioPickerLauncher.launch("audio/*") },
-                onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
-            )
-        }
+                )
+            },
+            onUpdateConversation = {
+                vm.updateConversation(it)
+                vm.saveConversationAsync()
+            },
+            showInjectionSheet = showInjectionSheet,
+            onShowInjectionSheetChange = { showInjectionSheet = it },
+            showCompressDialog = showCompressDialog,
+            onShowCompressDialogChange = { showCompressDialog = it },
+            onDismiss = { dismissAll() },
+            onTakePic = onLaunchCamera,
+            onPickImage = { imagePickerLauncher.launch("image/*") },
+            onPickVideo = { videoPickerLauncher.launch("video/*") },
+            onPickAudio = { audioPickerLauncher.launch("audio/*") },
+            onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
+        )
     }
 }
 
@@ -810,6 +888,7 @@ private fun ChatFilesPickerSheet(
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
+    hazeState: HazeState,
     drawerState: DrawerState,
     bigScreen: Boolean,
     previewMode: Boolean,
@@ -822,9 +901,50 @@ private fun TopBar(
     val titleState = useEditState<String> {
         onUpdateTitle(it)
     }
+    val displaySetting = settings.displaySetting
+    val appearanceCapabilities = LocalAdvancedAppearanceCapabilities.current
+    val currentAssistant = settings.getCurrentAssistant()
+    val topBarContentColor = if (settings.hasActiveChatBackground()) {
+        LocalChatBackgroundForeground.current
+            .takeUnless { it == Color.Unspecified }
+            ?: MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val useTopBarBlur = displaySetting.enableTopBarBlur &&
+        appearanceCapabilities.supportsRealtimeBlur &&
+        settings.hasActiveChatBackground()
+    val topBarHazeStyle = HazeBlurStyle.Material3 {
+        blurRadius(
+            appearanceCapabilities.limitLiveBlur(
+                displaySetting.topBarBlurRadius.coerceIn(0f, 40f)
+            ).dp
+        )
+    }
+    val topBarColor = if (useTopBarBlur) {
+        MaterialTheme.colorScheme.surface.copy(
+            alpha = displaySetting.topBarSurfaceOpacity.coerceIn(0f, 1f)
+        )
+    } else {
+        Color.Transparent
+    }
 
     TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+        modifier = if (useTopBarBlur) {
+            Modifier.hazeBlur(
+                input = HazeInput.Sources(hazeState),
+                style = topBarHazeStyle,
+            )
+        } else {
+            Modifier
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = topBarColor,
+            scrolledContainerColor = topBarColor,
+            navigationIconContentColor = topBarContentColor,
+            titleContentColor = topBarContentColor,
+            actionIconContentColor = topBarContentColor,
+        ),
         navigationIcon = {
             if (!bigScreen) {
                 IconButton(
@@ -849,7 +969,6 @@ private fun TopBar(
                 color = Color.Transparent,
             ) {
                 Column {
-                    val assistant = settings.getCurrentAssistant()
                     val model = settings.getCurrentChatModel()
                     val provider = model?.findProvider(providers = settings.providers, checkOverwrite = false)
                     Text(
@@ -860,13 +979,11 @@ private fun TopBar(
                     )
                     if (model != null && provider != null) {
                         Text(
-                            text = "${assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
+                            text = "${currentAssistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
                             overflow = TextOverflow.Ellipsis,
                             maxLines = 1,
-                            color = LocalContentColor.current.copy(0.65f),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 8.sp,
-                            )
+                            color = topBarContentColor,
+                            style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 }

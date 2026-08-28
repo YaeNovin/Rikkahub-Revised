@@ -77,12 +77,28 @@ fun ProviderSetting.Claude.requestChannel(): ProviderRequestChannel {
 internal fun JsonObject.claudeRequestDiagnostics(
     providerSetting: ProviderSetting.Claude,
     operation: ProviderRequestOperation,
+    hasCustomBody: Boolean = false,
 ): ProviderRequestDiagnostics {
     val thinking = this["thinking"] as? JsonObject
     val toolChoice = this["tool_choice"] as? JsonObject
     val outputConfig = this["output_config"] as? JsonObject
     val format = outputConfig?.get("format") as? JsonObject
     val parameters = linkedMapOf("api" to "messages")
+    val messages = (this["messages"] as? JsonArray).orEmpty()
+    val messageContentBlocks = messages.flatMap { message ->
+        (((message as? JsonObject)?.get("content")) as? JsonArray).orEmpty()
+    }
+    val systemBlocks = (this["system"] as? JsonArray).orEmpty()
+    val tools = (this["tools"] as? JsonArray).orEmpty()
+
+    parameters["messages.count"] = messages.size.toString()
+    parameters["system.blocks"] = systemBlocks.size.toString()
+    parameters["content.textBlocks"] = messageContentBlocks.count { block ->
+        ((block as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull == "text"
+    }.toString()
+    parameters["content.imageBlocks"] = messageContentBlocks.count { block ->
+        ((block as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull == "image"
+    }.toString()
 
     listOf(
         "temperature",
@@ -117,7 +133,24 @@ internal fun JsonObject.claudeRequestDiagnostics(
     ((this["metadata"] as? JsonObject)?.get("user_id") as? JsonPrimitive)?.contentOrNull?.let {
         parameters["metadata.user_id"] = "configured"
     }
-    (this["tools"] as? JsonArray)?.let { parameters["tools.count"] = it.size.toString() }
+    parameters["tools.count"] = tools.size.toString()
+    parameters["tools.function.count"] = tools.count { tool ->
+        (tool as? JsonObject)?.containsKey("input_schema") == true
+    }.toString()
+    parameters["tools.server.count"] = tools.count { tool ->
+        ((tool as? JsonObject)?.get("type") as? JsonPrimitive)
+            ?.contentOrNull
+            ?.isNotBlank() == true
+    }.toString()
+    (this["cache_control"] as? JsonObject)?.let { cacheControl ->
+        (cacheControl["type"] as? JsonPrimitive)?.contentOrNull?.let {
+            parameters["cache_control.type"] = it
+        }
+        (cacheControl["ttl"] as? JsonPrimitive)?.contentOrNull?.let {
+            parameters["cache_control.ttl"] = it
+        }
+    }
+    parameters["customBody"] = if (hasCustomBody) "configured" else "none"
 
     return ProviderRequestDiagnostics(
         provider = providerSetting.name.ifBlank { "Claude" },

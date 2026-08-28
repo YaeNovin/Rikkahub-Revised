@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.claude
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.float
 import kotlinx.serialization.json.int
@@ -20,6 +21,7 @@ import me.rerere.ai.provider.ClaudeToolChoice
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
@@ -189,6 +191,50 @@ class ClaudeOptionsRequestTest {
             "output_config",
         )
             .forEach { assertFalse("field=$it", body.containsKey(it)) }
+    }
+
+    @Test
+    fun `diagnostics summarize Anthropic messages media tools cache and custom body`() {
+        val requestBody = Json.parseToJsonElement(
+            """
+            {
+              "model":"claude-opus-4-8",
+              "messages":[
+                {"role":"user","content":[
+                  {"type":"text","text":"private prompt"},
+                  {"type":"image","source":{"type":"base64","media_type":"image/png","data":"private image"}}
+                ]}
+              ],
+              "system":[{"type":"text","text":"private system"}],
+              "max_tokens":4096,
+              "tools":[
+                {"name":"lookup","input_schema":{"type":"object"}},
+                {"type":"web_search_20250305","name":"web_search"}
+              ],
+              "cache_control":{"type":"ephemeral","ttl":"1h"}
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val diagnostics = requestBody.claudeRequestDiagnostics(
+            providerSetting = ProviderSetting.Claude(
+                baseUrl = "https://api.anthropic.com/v1",
+            ),
+            operation = ProviderRequestOperation.TEXT_GENERATION,
+            hasCustomBody = true,
+        )
+
+        assertEquals("1", diagnostics.parameters["messages.count"])
+        assertEquals("1", diagnostics.parameters["system.blocks"])
+        assertEquals("1", diagnostics.parameters["content.textBlocks"])
+        assertEquals("1", diagnostics.parameters["content.imageBlocks"])
+        assertEquals("2", diagnostics.parameters["tools.count"])
+        assertEquals("1", diagnostics.parameters["tools.function.count"])
+        assertEquals("1", diagnostics.parameters["tools.server.count"])
+        assertEquals("ephemeral", diagnostics.parameters["cache_control.type"])
+        assertEquals("1h", diagnostics.parameters["cache_control.ttl"])
+        assertEquals("configured", diagnostics.parameters["customBody"])
+        assertFalse(diagnostics.parameters.values.any { "private" in it })
     }
 
     private fun fullOptions() = ClaudeGenerationOptions(
