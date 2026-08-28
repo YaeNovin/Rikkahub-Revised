@@ -10,7 +10,6 @@ import me.rerere.rikkahub.data.datastore.AdvancedAppearanceSetting
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 
 class SettingVM(

@@ -41,8 +41,6 @@ import me.rerere.ai.provider.GeminiImageGenerationOptions
 import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
-import me.rerere.ai.provider.GeminiImageGenerationOptions
-import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderRequestException

@@ -96,9 +96,6 @@ import me.rerere.ai.provider.GeminiImageGenerationOptions
 import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.GeminiSafetyThreshold
 import me.rerere.ai.provider.ModelType
-import me.rerere.ai.provider.GeminiImageGenerationOptions
-import me.rerere.ai.provider.GeminiSafetySettings
-import me.rerere.ai.provider.GeminiSafetyThreshold
 import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.google.requestChannel
