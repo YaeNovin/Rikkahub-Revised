@@ -37,6 +37,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import me.rerere.ai.provider.GeminiImageGenerationOptions
+import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.GeminiImageGenerationOptions

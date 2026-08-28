@@ -92,6 +92,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.ai.provider.GeminiImageGenerationOptions
+import me.rerere.ai.provider.GeminiSafetySettings
+import me.rerere.ai.provider.GeminiSafetyThreshold
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.GeminiImageGenerationOptions
 import me.rerere.ai.provider.GeminiSafetySettings

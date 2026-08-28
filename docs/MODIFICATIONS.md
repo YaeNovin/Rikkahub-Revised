@@ -1,16 +1,66 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-08-18
+Notice date: 2026-08-21
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.3`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.5`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2.4.8-revised.5 Maintenance Changes / 维护变更
+
+- English: Added model-aware request parameters for OpenAI, Claude, Gemini,
+  Grok, Qwen, and DeepSeek, with sanitized request diagnostics that omit
+  credentials, prompts, schemas, and binary content.
+  中文：为 OpenAI、Claude、Gemini、Grok、Qwen 和 DeepSeek 增加按模型能力适配的
+  请求参数，并提供不记录凭据、提示词、Schema 与二进制内容的脱敏请求诊断。
+- English: Improved stream reliability with premature-termination detection,
+  corrected retry time budgets, and event-stream connection keepalive settings.
+  中文：通过流提前终止检测、正确的重试时间预算及事件流连接保活设置，提高流式
+  生成可靠性。
+- English: Added Gemini image-generation controls and unified source, inline,
+  and full-screen previews for supported rich code blocks; crop output now
+  remains available until persistence completes.
+  中文：增加 Gemini 生图参数，并统一受支持富代码块的源码、内嵌与全屏预览；裁剪
+  输出会在持久化完成后再清理。
+- English: Fixed stale settings writes that could block conversation switching,
+  made navigation replacement atomic, and restored the provider model action bar
+  to the bottom of the model list.
+  中文：修复可能导致无法切换对话的旧设置快照写入，使导航替换成为原子操作，并将
+  供应商模型操作栏恢复到模型列表底部。
+
+## 2.4.8-revised.4 Maintenance Changes / 维护变更
+
+- English: Improved model capability, context-window, and reasoning-parameter
+  detection for Qwen, DeepSeek, Doubao, and compatible providers.
+  中文：优化千问、DeepSeek、豆包及兼容供应商的模型能力、上下文窗口与推理参数识别。
+- English: Standardized GPT Image 2 size, aspect-ratio, and quality parameters,
+  and improved Gemini, Grok, and Seedream image-generation compatibility.
+  中文：规范 GPT Image 2 的图片尺寸、比例和质量参数，并完善 Gemini、Grok 与
+  Seedream 生图兼容性。
+- English: Upgraded the image gallery with previews, details, folders, image
+  import, metadata backup, and batch add, move, and delete operations.
+  中文：升级图库预览、详情、文件夹、图片导入、元数据备份，以及批量添加、移动和删除。
+- English: Improved automatic reconnection for network changes, rate limits,
+  interrupted connections, chat continuation, and image generation or editing.
+  中文：改进网络切换、限流、连接中断、聊天续答，以及生图和图片编辑过程中的自动重连。
+- English: Improved full-conversation and file token accounting, context-window
+  detection, and automatic context compression reliability.
+  中文：提升完整对话和文件的 Token 统计、上下文窗口识别与自动压缩可靠性。
+- English: Fixed DOC, DOCX, and XLSX parsing and improved large multimedia
+  attachments and complex MIDI processing.
+  中文：修复 DOC、DOCX、XLSX 解析，并优化大型多媒体附件和复杂 MIDI 文件处理。
+- English: Localized software error messages and added a seven-day,
+  entry-based diagnostic log viewer.
+  中文：汉化软件错误提示，增加按条目保存七天的诊断日志及查看入口。
+- English: Improved MCP OAuth authorization, connection status, and reconnect
+  feedback.
+  中文：完善 MCP OAuth 授权、连接状态和重连反馈。
 
 ## 2.4.8-revised.3 Maintenance Changes / 维护变更
 
@@ -108,7 +158,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.3` and signing values
+- `release` uses `2.4.8-revised.5` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.

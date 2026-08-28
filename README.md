@@ -29,7 +29,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`v2.4.8-revised.3`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.3) |
+| Current release | [`v2.4.8-revised.5`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.5) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -64,6 +64,19 @@ repository.
 
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
+
+### Current Formal Release: v2.4.8-revised.5
+
+- Added model-aware request parameters for OpenAI, Claude, Gemini, Grok, Qwen,
+  and DeepSeek, plus sanitized diagnostics that omit credentials, prompts,
+  schemas, and binary content.
+- Added premature stream termination detection, corrected retry time budgets,
+  and improved event-stream keepalive behavior.
+- Added Gemini image-generation controls and unified source, inline, and
+  full-screen previews for supported rich code blocks.
+- Fixed crop cleanup before persistence completed, conversation switching after
+  repeated settings changes, non-atomic navigation replacement, and misplaced
+  provider model actions.
 
 - Token-aware rolling context summaries, automatic context-window discovery,
   animated compression feedback, and context usage display.
