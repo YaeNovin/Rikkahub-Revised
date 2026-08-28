@@ -1,14 +1,16 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
@@ -44,10 +46,14 @@ private fun AIIcon(
             )
             .build()
     }
-    Surface(
-        modifier = modifier.size(24.dp),
-        shape = rememberAvatarShape(loading),
-        color = color,
+    val shape = rememberAvatarShape(loading)
+    Box(
+        modifier = modifier
+            .size(24.dp)
+            .clip(shape)
+            .then(
+                if (color.alpha > 0f) Modifier.background(color, shape) else Modifier
+            ),
     ) {
         AsyncImage(
             model = model,

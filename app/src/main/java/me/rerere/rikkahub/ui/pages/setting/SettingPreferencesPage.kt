@@ -20,6 +20,7 @@ import me.rerere.hugeicons.stroke.Notification01
 import me.rerere.hugeicons.stroke.PaintBoard
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sun01
+import me.rerere.hugeicons.stroke.MagicWand01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -81,6 +82,12 @@ fun SettingPreferencesPage() {
                         leadingContent = { Icon(HugeIcons.PaintBoard, null) },
                         headlineContent = { Text(stringResource(R.string.setting_page_preferences_ui)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_preferences_ui_desc)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingPreferencesAdvancedAppearance) },
+                        leadingContent = { Icon(HugeIcons.MagicWand01, null) },
+                        headlineContent = { Text(stringResource(R.string.setting_advanced_appearance_entry)) },
+                        supportingContent = { Text(stringResource(R.string.setting_advanced_appearance_entry_desc)) },
                     )
                 }
             }

@@ -301,9 +301,10 @@ object HeaderStyle {
 
         return TextStyle(
             fontStyle = FontStyle.Normal,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             fontSize = fontSize,
             lineHeight = fontSize * LINE_HEIGHT_RATIO,
+            letterSpacing = 0.sp,
         )
     }
 
@@ -439,20 +440,21 @@ private fun MarkdownNode(
         // 引用块
         MarkdownElementTypes.BLOCK_QUOTE -> {
             ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
-                val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                val richContent = richContentColors()
                 Column(
                     modifier = Modifier
                         .drawWithContent {
+                            drawRect(
+                                color = richContent.quoteContainer,
+                                size = size,
+                            )
+                            drawRect(
+                                color = richContent.border,
+                                size = Size(3.dp.toPx(), size.height),
+                            )
                             drawContent()
-                            drawRect(
-                                color = bgColor, size = size
-                            )
-                            drawRect(
-                                color = borderColor, size = Size(10f, size.height)
-                            )
                         }
-                        .padding(8.dp)) {
+                        .padding(horizontal = 12.dp, vertical = 8.dp)) {
                     node.children.fastForEach { child ->
                         MarkdownNode(
                             node = child, content = content, onClickCitation = onClickCitation
@@ -581,7 +583,15 @@ private fun MarkdownNode(
         MarkdownElementTypes.CODE_SPAN -> {
             val code = node.getTextInNode(content).trim('`')
             Text(
-                text = code, fontFamily = JetbrainsMono, modifier = modifier
+                text = code,
+                fontFamily = JetbrainsMono,
+                fontSize = LocalTextStyle.current.fontSize * 0.9f,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
             )
         }
 
@@ -711,7 +721,7 @@ private fun OrderedListNode(
 private fun ListItemNode(
     node: ASTNode, content: String, bulletText: String, onClickCitation: (String) -> Unit = {}, level: Int
 ) {
-    Column {
+    Column(modifier = Modifier.padding(vertical = 2.dp)) {
         // 分离列表项的直接内容和嵌套列表
         val (directContent, nestedLists) = separateContentAndLists(node)
         // directContent 渲染处理
@@ -798,7 +808,7 @@ private fun Paragraph(
     val latexColorArgb = LocalContentColor.current.toArgb()
     FlowRow(
         modifier = modifier.then(
-            if (node.nextSibling() != null) Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
+            if (node.nextSibling() != null) Modifier.padding(bottom = markdownParagraphSpacing())
             else Modifier
         )
     ) {
@@ -900,17 +910,18 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
     }
 
     // 渲染表格卡片（工具栏 + 表格）
+    val richContent = richContentColors()
     Column(
         modifier = modifier
             .padding(vertical = 8.dp)
             .clip(MaterialTheme.shapes.large)
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(BorderStroke(1.dp, richContent.border), MaterialTheme.shapes.large)
+            .background(richContent.container)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .background(richContent.toolbar)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -967,6 +978,8 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
             rows = rowComposables,
             columnMinWidths = List(columnCount) { 80.dp },
             columnMaxWidths = List(columnCount) { 200.dp },
+            cellBorder = BorderStroke(0.5.dp, richContent.cellBorder),
+            headerBackground = richContent.toolbar,
             outerBorder = null,
             shape = RectangleShape,
         )
@@ -1127,7 +1140,9 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 withLink(LinkAnnotation.Url(linkDest)) {
                     withStyle(
                         SpanStyle(
-                            color = colorScheme.primary, textDecoration = TextDecoration.Underline
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
+                            textDecoration = TextDecoration.Underline,
                         )
                     ) {
                         append(linkText)
@@ -1153,7 +1168,9 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 SpanStyle(
                     fontFamily = JetbrainsMono,
                     fontSize = 0.9.em,
-                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    color = colorScheme.onSurface,
+                    background = colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
                 )
             ) {
                 append(' ')

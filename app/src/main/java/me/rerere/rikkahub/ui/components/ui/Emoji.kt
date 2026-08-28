@@ -275,14 +275,11 @@ private fun EmojiModifierPicker(
             dismissOnClickOutside = true
         )
     ) {
-        Surface(
+        IsolatedOverlaySurface(
             modifier = Modifier
                 .wrapContentSize()
                 .padding(16.dp),
             shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 8.dp,
-            tonalElevation = 8.dp
         ) {
             Column(
                 modifier = Modifier.padding(16.dp)

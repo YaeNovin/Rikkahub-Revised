@@ -39,6 +39,8 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderRequestDiagnostics
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
@@ -47,6 +49,7 @@ import me.rerere.ai.provider.contextWindowTokensOrNull
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
+import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.StreamChunk
@@ -66,7 +69,6 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
-import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -81,32 +83,10 @@ import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ClaudeProvider"
+private const val MAX_PROVIDER_ERROR_BODY_BYTES = 64L * 1024L
 private const val ANTHROPIC_VERSION = "2023-06-01"
 private const val CLAUDE_PAUSE_TURN = "pause_turn"
 private const val MAX_PAUSE_TURN_CONTINUATIONS = 5
-
-internal fun supportsAnthropicMaxEffort(modelId: String): Boolean {
-    val normalized = modelId.lowercase().replace('.', '-').replace('_', '-')
-    val match = Regex("(?:^|-)opus-(\\d+)-(\\d+)(?:-|$)").find(normalized) ?: return false
-    val major = match.groupValues[1].toIntOrNull() ?: return false
-    val minor = match.groupValues[2].toIntOrNull() ?: return false
-    return major > 4 || (major == 4 && minor >= 6)
-}
-
-internal fun resolveAnthropicReasoningEffort(
-    modelId: String,
-    level: ReasoningLevel,
-): String? = when (level) {
-    ReasoningLevel.OFF,
-    ReasoningLevel.AUTO -> null
-
-    ReasoningLevel.LOW -> "low"
-    ReasoningLevel.MEDIUM -> "medium"
-    ReasoningLevel.HIGH,
-    ReasoningLevel.XHIGH -> "high"
-
-    ReasoningLevel.MAX -> if (supportsAnthropicMaxEffort(modelId)) "max" else "high"
-}
 
 internal suspend fun generateClaudeWithPauseTurn(
     messages: List<UIMessage>,
@@ -332,6 +312,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val requestBody = buildMessageRequest(providerSetting, messages, params)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                requestBody.claudeRequestDiagnostics(
+                    providerSetting = providerSetting,
+                    operation = ProviderRequestOperation.TEXT_GENERATION,
+                    hasCustomBody = params.customBody.isNotEmpty(),
+                ),
+            )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
@@ -339,11 +327,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        Log.d(TAG, "generateText: model=${params.model.modelId}, messages=${messages.size}")
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
-            val body = response.body?.string()
+            val body = runCatching {
+                response.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES).string()
+            }.getOrNull()
             throw providerRequestFailure(
                 response = response,
                 cause = null,
@@ -386,6 +376,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                requestBody.claudeRequestDiagnostics(
+                    providerSetting = providerSetting,
+                    operation = ProviderRequestOperation.STREAM_TEXT,
+                    hasCustomBody = params.customBody.isNotEmpty(),
+                ),
+            )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
@@ -394,18 +392,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
-
-        requestBody["messages"]!!.jsonArray.forEach {
-            Log.i(TAG, "streamText: $it")
-        }
+        Log.d(TAG, "streamText: model=${params.model.modelId}, messages=${messages.size}")
 
         val decoder = ClaudeStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                    Log.w(TAG, "onEvent: chunk dropped (${e?.javaClass?.simpleName ?: "unknown"})")
                 }
             }
         }
@@ -417,7 +411,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, data=$data")
+                Log.d(TAG, "onEvent: type=$type, dataLength=${data.length}")
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -430,27 +424,33 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var detail = t?.message
 
-                t?.printStackTrace()
-                Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
+                Log.e(
+                    TAG,
+                    "Stream failed: status=${response?.code}, type=${t?.javaClass?.simpleName}",
+                )
 
-                val bodyRaw = response?.body?.stringSafe()
+                val bodyRaw = runCatching {
+                    response?.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES)?.string()
+                }.getOrNull()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
                         detail = bodyElement.parseErrorDetail().message ?: bodyRaw
                     }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                } catch (_: Throwable) {
+                    Log.w(TAG, "onFailure: failed to parse error response (${bodyRaw?.length ?: 0} chars)")
                 } finally {
                     close(providerRequestFailure(response, t, detail ?: bodyRaw))
                 }
             }
 
             override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (error: Throwable) {
+                    close(error)
+                }
             }
         }
 
@@ -470,24 +470,46 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams,
         stream: Boolean = false
     ): JsonObject {
+        val support = resolveClaudeModelParameterSupport(params.model.modelId)
+        val deepSeekSupport = resolveDeepSeekModelParameterSupport(params.model.modelId)
+        val maxTokens = params.maxTokens ?: 64_000
+        val supportsReasoning = deepSeekSupport.available ||
+            params.model.abilities.contains(ModelAbility.REASONING) ||
+            support.supportsAdaptiveThinking || support.supportsManualThinking
+        val reasoningEnabled = if (deepSeekSupport.available) {
+            params.reasoningLevel.isEnabled
+        } else {
+            supportsReasoning && (params.reasoningLevel.isEnabled || support.requiresAdaptiveThinking)
+        }
+        val reasoningEffort = resolveAnthropicReasoningEffort(
+            modelId = params.model.modelId,
+            level = params.reasoningLevel,
+        )
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
                 "messages",
                 buildMessages(messages, providerSetting.promptCaching, providerSetting.promptCacheTtl)
             )
-            put("max_tokens", params.maxTokens ?: 64_000)
+            put("max_tokens", maxTokens)
 
             // 顶层 cache_control: 让 Anthropic 自动管理缓存断点
             if (providerSetting.promptCaching) {
                 put("cache_control", cacheControlEphemeral(providerSetting.promptCacheTtl))
             }
 
-            if (params.temperature != null && !params.reasoningLevel.isEnabled) put(
-                "temperature",
-                params.temperature
-            )
-            if (params.topP != null) put("top_p", params.topP)
+            if (!reasoningEnabled) {
+                params.temperature?.let { temperature ->
+                    when {
+                        deepSeekSupport.available -> temperature.takeIf { it in 0f..2f }
+                        support.supportsSamplingParameters -> temperature.takeIf { it in 0f..1f }
+                        else -> null
+                    }?.let { put("temperature", it) }
+                }
+                if (deepSeekSupport.available || support.supportsSamplingParameters) {
+                    params.topP?.takeIf { it in 0f..1f }?.let { put("top_p", it) }
+                }
+            }
 
             put("stream", stream)
 
@@ -508,18 +530,27 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 })
             }
 
-            // 处理 thinking
-            // Anthropic 新 API: adaptive 模式 + output_config.effort 控制强度
-            // 旧的 type=enabled + budget_tokens 在 Opus 4.7+ 上已不支持
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (deepSeekSupport.available) {
+                put("thinking", buildJsonObject {
+                    put("type", if (params.reasoningLevel == ReasoningLevel.OFF) "disabled" else "enabled")
+                })
+            } else if (supportsReasoning) {
                 when (params.reasoningLevel) {
                     ReasoningLevel.OFF -> {
-                        put("thinking", buildJsonObject { put("type", "disabled") })
+                        if (support.requiresAdaptiveThinking) {
+                            put("thinking", buildJsonObject {
+                                put("type", "adaptive")
+                                params.claudeOptions.thinkingDisplay.apiValue?.let {
+                                    put("display", it)
+                                }
+                            })
+                        } else if (support.supportsAdaptiveThinking || support.supportsManualThinking) {
+                            put("thinking", buildJsonObject { put("type", "disabled") })
+                        }
                     }
 
                     else -> {
                         if (providerSetting.baseUrl.contains("api.minimaxi.com", ignoreCase = true)) {
-                            val maxTokens = params.maxTokens ?: 64_000
                             if (maxTokens > 1_024) {
                                 val requestedBudget = if (params.reasoningLevel == ReasoningLevel.AUTO) {
                                     ReasoningLevel.HIGH.budgetTokens
@@ -533,22 +564,26 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                             } else {
                                 put("thinking", buildJsonObject { put("type", "disabled") })
                             }
-                        } else {
+                        } else if (support.supportsAdaptiveThinking) {
                             put("thinking", buildJsonObject {
                                 put("type", "adaptive")
-                                put("display", "summarized")
+                                params.claudeOptions.thinkingDisplay.apiValue?.let {
+                                    put("display", it)
+                                }
                             })
-                            if (params.reasoningLevel != ReasoningLevel.AUTO) {
-                                put("output_config", buildJsonObject {
-                                    put(
-                                        "effort",
-                                        resolveAnthropicReasoningEffort(
-                                            modelId = params.model.modelId,
-                                            level = params.reasoningLevel,
-                                        )!!,
-                                    )
-                                })
+                        } else if (support.supportsManualThinking && maxTokens > 1_024) {
+                            val requestedBudget = if (params.reasoningLevel == ReasoningLevel.AUTO) {
+                                ReasoningLevel.HIGH.budgetTokens
+                            } else {
+                                params.reasoningLevel.budgetTokens
                             }
+                            put("thinking", buildJsonObject {
+                                put("type", "enabled")
+                                put("budget_tokens", requestedBudget.coerceIn(1_024, maxTokens - 1))
+                                params.claudeOptions.thinkingDisplay.apiValue?.let {
+                                    put("display", it)
+                                }
+                            })
                         }
                     }
                 }
@@ -594,6 +629,19 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 }
             }
+
+            applyClaudeRequestOptions(
+                params = params,
+                support = support,
+                hasTools = toolDefinitions.isNotEmpty(),
+                reasoningEnabled = reasoningEnabled,
+                reasoningEffort = reasoningEffort,
+            )
+            applyDeepSeekAnthropicRequestOptions(
+                params = params,
+                support = deepSeekSupport,
+                hasTools = toolDefinitions.isNotEmpty(),
+            )
         }.mergeCustomBody(params.customBody)
     }
 
@@ -795,7 +843,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     put("data", encoded.base64)
                 })
             }.onFailure {
-                Log.w(TAG, "encode image failed: $url", it)
+                Log.w(TAG, "encode image failed: ${it.javaClass.simpleName}")
                 put("type", "text")
                 put("text", "")
             }
@@ -858,8 +906,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 "redacted_thinking" -> {
-                    val data = block["data"]?.jsonPrimitiveOrNull?.contentOrNull
-                    println(data)
+                    Log.d(TAG, "Received redacted thinking block")
                 }
 
                 "tool_use" -> {

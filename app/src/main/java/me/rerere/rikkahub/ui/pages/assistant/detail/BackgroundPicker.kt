@@ -3,12 +3,13 @@ package me.rerere.rikkahub.ui.pages.assistant.detail
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.dokar.sonner.ToastType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -20,16 +21,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.context.LocalToaster
 import org.koin.compose.koinInject
 import kotlinx.coroutines.launch
 
@@ -38,10 +43,16 @@ fun BackgroundPicker(
     modifier: Modifier = Modifier,
     background: String?,
     backgroundOpacity: Float = 1.0f,
+    enabled: Boolean = true,
+    label: String? = null,
+    description: String? = null,
     onUpdate: (String?) -> Unit
 ) {
     val filesManager: FilesManager = koinInject()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
+    val currentOnUpdate by rememberUpdatedState(onUpdate)
     var showPickOption by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
@@ -51,9 +62,16 @@ fun BackgroundPicker(
     ) { uri: Uri? ->
         uri?.let {
             scope.launch {
-                val localUris = filesManager.createChatFilesByContents(listOf(it))
-                localUris.firstOrNull()?.let { localUri ->
-                    onUpdate(localUri.toString())
+                runCatching {
+                    filesManager.createChatFilesByContents(listOf(it)).firstOrNull()
+                        ?: error("Failed to save selected background image")
+                }.onSuccess { localBackground ->
+                    currentOnUpdate(localBackground.toString())
+                }.onFailure { error ->
+                    toaster.show(
+                        message = context.formatUserFacingError(error),
+                        type = ToastType.Error,
+                    )
                 }
             }
         }
@@ -64,20 +82,21 @@ fun BackgroundPicker(
     FormItem(
         modifier = modifier,
         label = {
-            Text(stringResource(R.string.assistant_page_chat_background))
+            Text(label ?: stringResource(R.string.assistant_page_chat_background))
         },
         description = {
-            Text(stringResource(R.string.assistant_page_chat_background_desc))
+            Text(description ?: stringResource(R.string.assistant_page_chat_background_desc))
         }
     ) {
         Button(
             onClick = {
                 showPickOption = true
             },
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = if (background != null) {
+                text = if (!background.isNullOrBlank()) {
                     stringResource(R.string.assistant_page_change_background)
                 } else {
                     stringResource(R.string.assistant_page_select_background)
@@ -85,7 +104,7 @@ fun BackgroundPicker(
             )
         }
 
-        if (background != null) {
+        if (!background.isNullOrBlank()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -100,7 +119,8 @@ fun BackgroundPicker(
                 TextButton(
                     onClick = {
                         onUpdate(null)
-                    }
+                    },
+                    enabled = enabled,
                 ) {
                     Text(stringResource(R.string.assistant_page_remove))
                 }
@@ -147,7 +167,7 @@ fun BackgroundPicker(
                     ) {
                         Text(stringResource(R.string.assistant_page_enter_image_url))
                     }
-                    if (background != null) {
+                    if (!background.isNullOrBlank()) {
                         Button(
                             onClick = {
                                 showPickOption = false

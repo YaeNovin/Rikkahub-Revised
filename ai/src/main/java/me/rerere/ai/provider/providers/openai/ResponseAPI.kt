@@ -29,6 +29,8 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ProviderRequestDiagnostics
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
@@ -88,6 +90,14 @@ class ResponseAPI(
         )
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                requestBody.openAIRequestDiagnostics(
+                    providerSetting = providerSetting,
+                    operation = ProviderRequestOperation.TEXT_GENERATION,
+                    api = "responses",
+                ),
+            )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
@@ -131,6 +141,14 @@ class ResponseAPI(
         )
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                requestBody.openAIRequestDiagnostics(
+                    providerSetting = providerSetting,
+                    operation = ProviderRequestOperation.STREAM_TEXT,
+                    api = "responses",
+                ),
+            )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
@@ -192,8 +210,12 @@ class ResponseAPI(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (error: Throwable) {
+                    close(error)
+                }
             }
         }
 
@@ -215,6 +237,13 @@ class ResponseAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
+        val modelSupport = resolveOpenAIModelParameterSupport(params.model.modelId)
+        val grokSupport = resolveGrokModelParameterSupport(params.model.modelId)
+        val deepSeekSupport = resolveDeepSeekModelParameterSupport(params.model.modelId)
+        val useFunctionTools =
+            params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
+        val hasAnyTools = useFunctionTools || params.model.tools.isNotEmpty()
+        val toolCount = (if (useFunctionTools) params.tools.size else 0) + params.model.tools.size
         val maximumReasoningEffort = resolveResponseMaximumReasoningEffort(
             host = host,
             modelId = params.model.modelId,
@@ -224,11 +253,39 @@ class ResponseAPI(
             put("stream", stream)
             put("store", false)
 
-            if (isModelAllowTemperature(params.model)) {
+            if (isModelAllowTemperature(params)) {
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
             if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
+
+            if (modelSupport.available) {
+                params.openAIOptions.verbosity.apiValue
+                    ?.takeIf { modelSupport.supportsVerbosity }
+                    ?.let { verbosity ->
+                        put("text", buildJsonObject { put("verbosity", verbosity) })
+                    }
+                params.openAIOptions.serviceTier.apiValue
+                    ?.takeIf {
+                        it != "ultrafast" ||
+                            (host == OPENAI_API_HOST && modelSupport.supportsUltrafast)
+                    }
+                    ?.let { put("service_tier", it) }
+                if (hasAnyTools) {
+                    params.openAIOptions.parallelToolCalls.apiValue?.let {
+                        put("parallel_tool_calls", it)
+                    }
+                    params.openAIOptions.toolChoice.apiValue?.let { put("tool_choice", it) }
+                }
+                if (params.model.tools.isNotEmpty()) {
+                    params.openAIOptions.maxToolCalls
+                        ?.takeIf { it > 0 }
+                        ?.let { put("max_tool_calls", it) }
+                }
+            }
+            applyGrokResponseOptions(params = params, hasAnyTools = hasAnyTools)
+            applyQwenResponseOptions(params = params, toolCount = toolCount)
+            applyDeepSeekResponseOptions(params = params, hasAnyTools = hasAnyTools)
 
             // system instructions
             if (messages.any { it.role == MessageRole.SYSTEM }) {
@@ -239,17 +296,31 @@ class ResponseAPI(
             }
 
             // messages
-            put("input", buildMessages(messages))
+            put("input", buildMessages(messages, params.deepSeekImageDetail()))
 
             // reasoning
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
                 put("reasoning", buildJsonObject {
                     if (capabilities.supportsReasoningSummary) {
-                        put("summary", "auto")
+                        val summary = if (modelSupport.available) {
+                            params.openAIOptions.reasoningSummary.apiValue
+                        } else {
+                            "auto"
+                        }
+                        summary?.let { put("summary", it) }
                     }
-                    if (level != ReasoningLevel.AUTO) {
-                        put("effort", level.cappedEffort(maximumReasoningEffort)!!)
+                    val effort = when {
+                        grokSupport.available -> grokSupport.reasoningEffort(level)
+                        deepSeekSupport.available -> deepSeekSupport.reasoningEffort(level)
+                        else -> level.cappedEffort(maximumReasoningEffort)
+                    }
+                    effort?.let { put("effort", it) }
+                    if (host == OPENAI_API_HOST && modelSupport.supportsReasoningContext) {
+                        params.openAIOptions.reasoningContext.apiValue?.let { put("context", it) }
+                    }
+                    if (host == OPENAI_API_HOST && modelSupport.supportsReasoningMode) {
+                        params.openAIOptions.reasoningMode.apiValue?.let { put("mode", it) }
                     }
                 })
                 if (capabilities.supportEncryptedContent) {
@@ -262,9 +333,7 @@ class ResponseAPI(
             // tools
             // Response API 的 tools 是扁平数组, 函数工具和内置工具可以共存, 必须写在同一个 key 下,
             // 否则后写入的会覆盖前者
-            val useFunctionTools =
-                params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
-            if (useFunctionTools || params.model.tools.isNotEmpty()) {
+            if (hasAnyTools) {
                 putJsonArray("tools") {
                     if (useFunctionTools) {
                         params.tools.forEach { tool ->
@@ -305,7 +374,10 @@ class ResponseAPI(
         }.mergeCustomBody(params.customBody)
     }
 
-    internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
+    internal fun buildMessages(
+        messages: List<UIMessage>,
+        deepSeekImageDetail: String? = null,
+    ) = buildJsonArray {
         messages
             .filter { message ->
                 message.role != MessageRole.SYSTEM && (
@@ -317,14 +389,17 @@ class ResponseAPI(
             }
             .forEach { message ->
                 if (message.role == MessageRole.ASSISTANT) {
-                    addAssistantItems(message)
+                    addAssistantItems(message, deepSeekImageDetail)
                 } else {
-                    addUserItems(message)
+                    addUserItems(message, deepSeekImageDetail)
                 }
             }
     }
 
-    private fun JsonArrayBuilder.addAssistantItems(message: UIMessage) {
+    private fun JsonArrayBuilder.addAssistantItems(
+        message: UIMessage,
+        deepSeekImageDetail: String?,
+    ) {
         val groups = groupPartsByToolBoundary(message.parts)
         val contentBuffer = mutableListOf<UIMessagePart>()
 
@@ -342,7 +417,7 @@ class ResponseAPI(
                                 }
                                 // 先输出累积的文本/图片内容
                                 if (contentBuffer.isNotEmpty()) {
-                                    addContentItem(MessageRole.ASSISTANT, contentBuffer)
+                                    addContentItem(MessageRole.ASSISTANT, contentBuffer, deepSeekImageDetail)
                                     contentBuffer.clear()
                                 }
                                 // 输出 reasoning item
@@ -388,10 +463,10 @@ class ResponseAPI(
 
                             is UIMessagePart.Image -> {
                                 if (contentBuffer.isNotEmpty()) {
-                                    addContentItem(MessageRole.ASSISTANT, contentBuffer)
+                                    addContentItem(MessageRole.ASSISTANT, contentBuffer, deepSeekImageDetail)
                                     contentBuffer.clear()
                                 }
-                                addContentItem(MessageRole.USER, listOf(part))
+                                addContentItem(MessageRole.USER, listOf(part), deepSeekImageDetail)
                             }
 
                             is UIMessagePart.Text -> {
@@ -400,7 +475,7 @@ class ResponseAPI(
 
                             is UIMessagePart.ServerTool -> {
                                 if (contentBuffer.isNotEmpty()) {
-                                    addContentItem(MessageRole.ASSISTANT, contentBuffer)
+                                    addContentItem(MessageRole.ASSISTANT, contentBuffer, deepSeekImageDetail)
                                     contentBuffer.clear()
                                 }
                                 addServerToolItem(part)
@@ -414,7 +489,7 @@ class ResponseAPI(
                 is PartGroup.Tools -> {
                     // 先输出累积的内容
                     if (contentBuffer.isNotEmpty()) {
-                        addContentItem(MessageRole.ASSISTANT, contentBuffer)
+                        addContentItem(MessageRole.ASSISTANT, contentBuffer, deepSeekImageDetail)
                         contentBuffer.clear()
                     }
 
@@ -441,6 +516,7 @@ class ResponseAPI(
                                                 part.encodeBase64().onSuccess { encoded ->
                                                     put("type", "input_image")
                                                     put("image_url", encoded.base64)
+                                                    deepSeekImageDetail?.let { put("detail", it) }
                                                 }.onFailure {
                                                     it.printStackTrace()
                                                     put("type", "input_text")
@@ -470,7 +546,7 @@ class ResponseAPI(
 
         // 输出剩余内容
         if (contentBuffer.isNotEmpty()) {
-            addContentItem(MessageRole.ASSISTANT, contentBuffer)
+            addContentItem(MessageRole.ASSISTANT, contentBuffer, deepSeekImageDetail)
         }
     }
 
@@ -498,14 +574,21 @@ class ResponseAPI(
         })
     }
 
-    private fun JsonArrayBuilder.addUserItems(message: UIMessage) {
+    private fun JsonArrayBuilder.addUserItems(
+        message: UIMessage,
+        deepSeekImageDetail: String?,
+    ) {
         val contentParts = message.parts.filter { it is UIMessagePart.Text || it is UIMessagePart.Image }
         if (contentParts.isNotEmpty()) {
-            addContentItem(message.role, contentParts)
+            addContentItem(message.role, contentParts, deepSeekImageDetail)
         }
     }
 
-    private fun JsonArrayBuilder.addContentItem(role: MessageRole, parts: List<UIMessagePart>) {
+    private fun JsonArrayBuilder.addContentItem(
+        role: MessageRole,
+        parts: List<UIMessagePart>,
+        deepSeekImageDetail: String?,
+    ) {
         if (parts.isEmpty()) return
 
         add(buildJsonObject {
@@ -529,6 +612,7 @@ class ResponseAPI(
                                     part.encodeBase64().onSuccess { encodedImage ->
                                         put("type", "input_image")
                                         put("image_url", encodedImage.base64)
+                                        deepSeekImageDetail?.let { put("detail", it) }
                                     }.onFailure {
                                         it.printStackTrace()
                                         put("type", "input_text")
@@ -707,8 +791,10 @@ private fun ServerToolStatus.toOpenAIStatus(): String = when (this) {
     ServerToolStatus.FAILED -> "failed"
 }
 
-private fun isModelAllowTemperature(model: Model): Boolean {
-    return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) && !ModelRegistry.GPT_5.match(model.modelId)
+private fun isModelAllowTemperature(params: TextGenerationParams): Boolean {
+    return !ModelRegistry.OPENAI_O_MODELS.match(params.model.modelId) &&
+        !isOpenAIGpt5Model(params.model.modelId) &&
+        !params.usesDeepSeekThinkingMode()
 }
 
 private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
@@ -724,6 +810,11 @@ internal data class ResponseProviderCapabilities(
 
 internal fun resolveResponseProviderCapabilities(host: String): ResponseProviderCapabilities {
     return when (host) {
+        DEEPSEEK_API_HOST -> ResponseProviderCapabilities(
+            supportsReasoningSummary = false,
+            supportEncryptedContent = false,
+        )
+
         "ark.cn-beijing.volces.com" -> ResponseProviderCapabilities(
             supportsReasoningSummary = false,
             supportEncryptedContent = false,
@@ -734,9 +825,6 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
 }
 
 internal fun resolveResponseMaximumReasoningEffort(host: String, modelId: String): ReasoningLevel {
-    if (host != "api.openai.com") return ReasoningLevel.HIGH
-    val normalizedModel = modelId.lowercase()
-    val supportsXHigh = "codex" in normalizedModel ||
-        Regex("gpt-5\\.(?:[2-9]|\\d{2,})").containsMatchIn(normalizedModel)
-    return if (supportsXHigh) ReasoningLevel.XHIGH else ReasoningLevel.HIGH
+    if (host != OPENAI_API_HOST) return ReasoningLevel.HIGH
+    return resolveOpenAIMaximumReasoningEffort(modelId)
 }

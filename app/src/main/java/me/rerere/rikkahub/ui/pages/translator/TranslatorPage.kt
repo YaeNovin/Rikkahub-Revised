@@ -56,6 +56,7 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.ui.AppearanceMenuSurface
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -155,7 +156,10 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
                     }
                 ) {
                     Icon(HugeIcons.Clipboard, null)
-                    Text("粘贴文本", modifier = Modifier.padding(start = 4.dp))
+                    Text(
+                        stringResource(R.string.translator_page_paste_text),
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
                 }
             }
 
@@ -200,7 +204,10 @@ fun TranslatorPage(vm: TranslatorVM = koinViewModel()) {
                     }
                 ) {
                     Icon(HugeIcons.Clipboard, null)
-                    Text("复制翻译结果", modifier = Modifier.padding(start = 4.dp))
+                    Text(
+                        stringResource(R.string.translator_page_copy_result),
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
                 }
             }
         }
@@ -268,16 +275,23 @@ private fun LanguageSelector(
 
             ExposedDropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false }
+                onDismissRequest = { expanded = false },
+                containerColor = Color.Transparent,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
             ) {
-                Locales.forEach { language ->
-                    DropdownMenuItem(
-                        text = { Text(getLanguageDisplayName(language)) },
-                        onClick = {
-                            onLanguageSelected(language)
-                            expanded = false
-                        }
-                    )
+                AppearanceMenuSurface(
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Locales.forEach { language ->
+                        DropdownMenuItem(
+                            text = { Text(getLanguageDisplayName(language)) },
+                            onClick = {
+                                onLanguageSelected(language)
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
         }

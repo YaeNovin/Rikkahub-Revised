@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.rerere.rikkahub.data.datastore.AdvancedAppearanceSetting
+import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.ai.mcp.McpManager
@@ -21,6 +23,22 @@ class SettingVM(
     fun updateSettings(settings: Settings) {
         viewModelScope.launch {
             settingsStore.update(settings)
+        }
+    }
+
+    fun updateAdvancedAppearance(
+        transform: (AdvancedAppearanceSetting) -> AdvancedAppearanceSetting,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateAdvancedAppearance(transform)
+        }
+    }
+
+    fun updateDisplaySetting(
+        transform: (DisplaySetting) -> DisplaySetting,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateDisplaySetting(transform)
         }
     }
 }

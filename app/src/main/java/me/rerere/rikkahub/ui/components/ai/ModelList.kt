@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -28,7 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -84,6 +84,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.icons.HeartIcon
@@ -272,16 +273,17 @@ fun ModelListSheet(
         }
     }
 
-    ModalBottomSheet(
+    AppearanceModalBottomSheet(
         onDismissRequest = {
             state.close()
         },
         sheetState = sheetState,
+        modifier = Modifier.fillMaxHeight(0.8f),
     ) {
         Column(
             modifier = Modifier
+                .fillMaxSize()
                 .padding(8.dp)
-                .fillMaxHeight(0.8f)
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -690,7 +692,11 @@ private fun ModelItem(
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = if (select) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+            containerColor = if (select) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+            } else {
+                Color.Transparent
+            },
             contentColor = if (select) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
         )
     ) {
@@ -722,7 +728,7 @@ private fun ModelItem(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    color = Color.Transparent,
                     shape = MaterialTheme.shapes.small,
                 ) {
                     AutoAIIcon(

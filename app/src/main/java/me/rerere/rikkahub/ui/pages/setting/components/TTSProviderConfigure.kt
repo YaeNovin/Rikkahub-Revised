@@ -588,8 +588,8 @@ private fun QwenTTSConfiguration(
     val languageTypes = listOf("Auto", "Chinese", "English", "Japanese", "Korean")
 
     FormItem(
-        label = { Text("Language Type") },
-        description = { Text("Language type for TTS synthesis") }
+        label = { Text(stringResource(R.string.setting_tts_page_language_type)) },
+        description = { Text(stringResource(R.string.setting_tts_page_language_type_description)) }
     ) {
         SelectTextField(
             value = setting.languageType,
@@ -762,7 +762,7 @@ private fun XAITTSConfiguration(
     )
 
     FormItem(
-        label = { Text("Language") },
+        label = { Text(stringResource(R.string.setting_tts_page_language)) },
     ) {
         SelectTextField(
             value = setting.language,
@@ -1000,7 +1000,7 @@ private fun StepTTSConfiguration(
     // API Key
     FormItem(
         label = { Text(stringResource(R.string.setting_tts_page_api_key)) },
-        description = { Text("从阶跃星辰官网获取密钥: platform.stepfun.com/interface-key") }
+        description = { Text(stringResource(R.string.setting_tts_page_stepfun_api_key_description)) }
     ) {
         OutlinedTextField(
             value = setting.apiKey,
@@ -1008,7 +1008,7 @@ private fun StepTTSConfiguration(
                 onValueChange(setting.copy(apiKey = newApiKey))
             },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("从阶跃星辰官网获取密钥") },
+            placeholder = { Text(stringResource(R.string.setting_tts_page_stepfun_api_key_placeholder)) },
         )
     }
 
@@ -1112,8 +1112,8 @@ private fun StepTTSConfiguration(
     val formats = listOf("mp3", "wav", "pcm", "opus", "flac")
 
     FormItem(
-        label = { Text("Response Format") },
-        description = { Text("音频编码格式 (注意 StepFun API 字段名为 camelCase)") }
+        label = { Text(stringResource(R.string.setting_tts_page_response_format)) },
+        description = { Text(stringResource(R.string.setting_tts_page_stepfun_response_format_description)) }
     ) {
         SelectTextField(
             value = setting.responseFormat,
@@ -1131,7 +1131,7 @@ private fun StepTTSConfiguration(
     // Speed
     FormItem(
         label = { Text(stringResource(R.string.setting_tts_page_speed)) },
-        description = { Text("语速 (0.5 - 2.0, 1.0 为正常)") }
+        description = { Text(stringResource(R.string.setting_tts_page_stepfun_speed_description)) }
     ) {
         OutlinedNumberInput(
             value = setting.speed,
@@ -1147,8 +1147,8 @@ private fun StepTTSConfiguration(
 
     // Volume
     FormItem(
-        label = { Text("Volume") },
-        description = { Text("音量 (0.1 - 2.0, 1.0 为正常)") }
+        label = { Text(stringResource(R.string.setting_tts_page_volume)) },
+        description = { Text(stringResource(R.string.setting_tts_page_stepfun_volume_description)) }
     ) {
         OutlinedNumberInput(
             value = setting.volume,
@@ -1158,7 +1158,7 @@ private fun StepTTSConfiguration(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            label = "Volume"
+            label = stringResource(R.string.setting_tts_page_volume)
         )
     }
 
@@ -1166,8 +1166,8 @@ private fun StepTTSConfiguration(
     val sampleRates = listOf(8000, 16000, 22050, 24000)
 
     FormItem(
-        label = { Text("Sample Rate") },
-        description = { Text("采样率 (Hz)") }
+        label = { Text(stringResource(R.string.setting_tts_page_sample_rate)) },
+        description = { Text(stringResource(R.string.setting_tts_page_sample_rate_description)) }
     ) {
         SelectTextField(
             value = setting.sampleRate.toString(),
@@ -1183,8 +1183,8 @@ private fun StepTTSConfiguration(
 
     // Instruction (仅 stepaudio-2.5-tts 生效)
     FormItem(
-        label = { Text("Instruction") },
-        description = { Text("全局语境指令, 仅 stepaudio-2.5-tts 生效 (≤200 字符, 留空不下发)") }
+        label = { Text(stringResource(R.string.setting_tts_page_instruction)) },
+        description = { Text(stringResource(R.string.setting_tts_page_stepfun_instruction_description)) }
     ) {
         OutlinedTextField(
             value = setting.instruction,
@@ -1195,7 +1195,7 @@ private fun StepTTSConfiguration(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("例如: 语气温柔, 语速偏慢") },
+            placeholder = { Text(stringResource(R.string.setting_tts_page_stepfun_instruction_placeholder)) },
             minLines = 2,
             maxLines = 4,
         )

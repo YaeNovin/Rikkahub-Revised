@@ -6,10 +6,15 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.GeminiImageGenerationOptions
+import me.rerere.ai.provider.GeminiSafetySettings
+import me.rerere.ai.provider.GeminiSafetyThreshold
 import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderRequestException
+import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.isRetryableProviderFailure
@@ -31,6 +36,11 @@ class GoogleImageProtocolTest {
         supportedSizes = GOOGLE_EXTENDED_IMAGE_ASPECT_RATIOS,
         supportsCustomSize = false,
         supportedResolutionValues = GOOGLE_31_IMAGE_RESOLUTIONS,
+        supportedThinkingValues = GOOGLE_31_IMAGE_THINKING_LEVELS,
+        supportsTextResponse = true,
+        supportsSafetySettings = true,
+        supportsWebSearchGrounding = true,
+        supportsImageSearchGrounding = true,
     )
 
     @Test
@@ -49,13 +59,27 @@ class GoogleImageProtocolTest {
             setting,
             Model(modelId = "gemini-2.5-flash-image"),
         )
+        val flashLite31 = provider.imageGenerationConstraints(
+            setting,
+            Model(modelId = "gemini-3.1-flash-lite-image"),
+        )
 
         assertTrue("1:8" in flash31.supportedSizes.orEmpty())
         assertEquals(linkedSetOf("512", "1K", "2K", "4K"), flash31.supportedResolutionValues)
         assertFalse("1:8" in pro3.supportedSizes.orEmpty())
         assertEquals(linkedSetOf("1K", "2K", "4K"), pro3.supportedResolutionValues)
+        assertEquals(linkedSetOf("1K"), flashLite31.supportedResolutionValues)
+        assertEquals(linkedSetOf("minimal", "high"), flashLite31.supportedThinkingValues)
+        assertEquals(linkedSetOf("minimal", "high"), flash31.supportedThinkingValues)
+        assertEquals(emptySet<String>(), pro3.supportedThinkingValues)
         assertEquals(emptySet<String>(), flash25.supportedResolutionValues)
         assertEquals("aspect_ratio", flash31.sizeRequestField)
+        assertTrue(flash31.supportsWebSearchGrounding)
+        assertTrue(flash31.supportsImageSearchGrounding)
+        assertTrue(pro3.supportsWebSearchGrounding)
+        assertFalse(pro3.supportsImageSearchGrounding)
+        assertFalse(flashLite31.supportsWebSearchGrounding)
+        assertFalse(flashLite31.supportsImageSearchGrounding)
     }
 
     @Test
@@ -68,6 +92,17 @@ class GoogleImageProtocolTest {
             prompt = "Draw a lighthouse",
             size = "16:9",
             resolution = "2K",
+            thinkingLevel = "high",
+            geminiOptions = GeminiImageGenerationOptions(
+                webSearchGrounding = true,
+                imageSearchGrounding = true,
+                safetySettings = GeminiSafetySettings(
+                    harassment = GeminiSafetyThreshold.BLOCK_ONLY_HIGH,
+                    hateSpeech = GeminiSafetyThreshold.DEFAULT,
+                    sexuallyExplicit = GeminiSafetyThreshold.DEFAULT,
+                    dangerousContent = GeminiSafetyThreshold.DEFAULT,
+                ),
+            ),
             customBody = emptyList(),
             constraints = constraints,
             imageParts = listOf(imagePart),
@@ -83,6 +118,20 @@ class GoogleImageProtocolTest {
         assertEquals(listOf("TEXT", "IMAGE"), generationConfig["responseModalities"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals("16:9", imageConfig["aspectRatio"]!!.jsonPrimitive.content)
         assertEquals("2K", imageConfig["imageSize"]!!.jsonPrimitive.content)
+        assertEquals(
+            "high",
+            generationConfig["thinkingConfig"]!!.jsonObject["thinkingLevel"]!!.jsonPrimitive.content,
+        )
+        val searchTypes = body["tools"]!!.jsonArray.single().jsonObject["googleSearch"]!!
+            .jsonObject["searchTypes"]!!.jsonObject
+        assertTrue(searchTypes.containsKey("webSearch"))
+        assertTrue(searchTypes.containsKey("imageSearch"))
+        val safetySettings = body["safetySettings"]!!.jsonArray
+        assertEquals(1, safetySettings.size)
+        assertEquals(
+            "BLOCK_ONLY_HIGH",
+            safetySettings.single().jsonObject["threshold"]!!.jsonPrimitive.content,
+        )
     }
 
     @Test
@@ -91,11 +140,13 @@ class GoogleImageProtocolTest {
             prompt = "Draw a lighthouse",
             size = "1024x1024",
             resolution = "8K",
+            thinkingLevel = "medium",
             customBody = emptyList(),
             constraints = constraints,
             imageParts = emptyList(),
         )
         assertFalse(body["generationConfig"]!!.jsonObject.containsKey("imageConfig"))
+        assertFalse(body["generationConfig"]!!.jsonObject.containsKey("thinkingConfig"))
 
         val response = Json.parseToJsonElement(
             """
@@ -112,6 +163,99 @@ class GoogleImageProtocolTest {
         assertEquals("final", images.single().data)
         assertEquals("image/webp", images.single().mimeType)
         assertTrue(images.none { it.data == "draft" })
+    }
+
+    @Test
+    fun `supports image-only output and filters unsupported grounding`() {
+        val body = buildGoogleImageRequestBody(
+            prompt = "Draw a lighthouse",
+            size = "1:1",
+            resolution = "1K",
+            geminiOptions = GeminiImageGenerationOptions(
+                includeTextResponse = false,
+                webSearchGrounding = true,
+                imageSearchGrounding = true,
+            ),
+            customBody = emptyList(),
+            constraints = constraints.copy(
+                supportsWebSearchGrounding = false,
+                supportsImageSearchGrounding = false,
+            ),
+            imageParts = emptyList(),
+        )
+
+        assertEquals(
+            listOf("IMAGE"),
+            body["generationConfig"]!!.jsonObject["responseModalities"]!!
+                .jsonArray.map { it.jsonPrimitive.content },
+        )
+        assertFalse(body.containsKey("tools"))
+        assertFalse(body.containsKey("safetySettings"))
+    }
+
+    @Test
+    fun `diagnostics report final Gemini image fields and AI Studio channel`() {
+        val setting = ProviderSetting.Google(
+            baseUrl = "https://generativelanguage.googleapis.com/v1beta/",
+        )
+        val body = buildGoogleImageRequestBody(
+            prompt = "private prompt",
+            size = "16:9",
+            resolution = "4K",
+            thinkingLevel = "minimal",
+            customBody = emptyList(),
+            constraints = constraints.copy(
+                supportedThinkingValues = GOOGLE_31_IMAGE_THINKING_LEVELS,
+            ),
+            imageParts = emptyList(),
+        )
+
+        val diagnostics = buildGoogleRequestDiagnostics(
+            providerSetting = setting,
+            model = Model(modelId = "gemini-3.1-flash-image"),
+            operation = ProviderRequestOperation.IMAGE_GENERATION,
+            requestBody = body,
+        )
+
+        assertEquals(ProviderRequestChannel.GOOGLE_AI_STUDIO, diagnostics.channel)
+        assertEquals("16:9", diagnostics.parameters["imageConfig.aspectRatio"])
+        assertEquals("4K", diagnostics.parameters["imageConfig.imageSize"])
+        assertEquals("minimal", diagnostics.parameters["thinkingConfig.thinkingLevel"])
+        assertEquals("false", diagnostics.parameters["tools.googleSearch.webSearch"])
+        assertEquals("false", diagnostics.parameters["tools.googleSearch.imageSearch"])
+        assertEquals("14", diagnostics.parameters["prompt.characters"])
+        assertEquals("0", diagnostics.parameters["referenceImages.encodedBytes"])
+        assertEquals("0", diagnostics.parameters["referenceImages"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.harassment"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.hate_speech"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.sexually_explicit"])
+        assertEquals("omitted (API default)", diagnostics.parameters["safety.dangerous_content"])
+        assertEquals("none", diagnostics.parameters["customBody"])
+        assertFalse(diagnostics.parameters.values.any { "private prompt" in it })
+
+        val editDiagnostics = buildGoogleRequestDiagnostics(
+            providerSetting = setting,
+            model = Model(modelId = "gemini-3.1-flash-image"),
+            operation = ProviderRequestOperation.IMAGE_EDIT,
+            requestBody = body,
+            referenceImageCount = 1,
+            hasCustomBody = true,
+        )
+        assertEquals(ProviderRequestOperation.IMAGE_EDIT, editDiagnostics.operation)
+        assertEquals("1", editDiagnostics.parameters["referenceImages"])
+        assertEquals("configured", editDiagnostics.parameters["customBody"])
+    }
+
+    @Test
+    fun `classifies Vertex and compatible Google endpoints`() {
+        assertEquals(
+            ProviderRequestChannel.VERTEX_AI,
+            ProviderSetting.Google(vertexAI = true).requestChannel(),
+        )
+        assertEquals(
+            ProviderRequestChannel.COMPATIBLE_ENDPOINT,
+            ProviderSetting.Google(baseUrl = "https://google.example.com/v1beta").requestChannel(),
+        )
     }
 
     @Test

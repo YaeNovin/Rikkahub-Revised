@@ -35,6 +35,7 @@ import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
 import me.rerere.ai.provider.inferModelTypeFromId
+import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.usesVolcengineMultimodalEmbeddingApi
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ImageGenSize
@@ -54,6 +55,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
@@ -299,7 +301,7 @@ class OpenAIProvider(
 
         client.newCall(request).awaitAndUse { response ->
             if (!response.isSuccessful) {
-                throw imageRequestFailure("generate image", response.code)
+                throw openAIImageRequestFailure("generate image", response)
             }
             ensureImageResponseSize(response.body.contentLength())
             val requestedFormat = params.requestedImageFileFormat(constraints)
@@ -406,7 +408,7 @@ class OpenAIProvider(
 
         client.newCall(request).awaitAndUse { response ->
             if (!response.isSuccessful) {
-                throw imageRequestFailure("edit image", response.code)
+                throw openAIImageRequestFailure("edit image", response)
             }
             ensureImageResponseSize(response.body.contentLength())
             val requestedFormat = params.requestedImageFileFormat(constraints)
@@ -429,7 +431,7 @@ class OpenAIProvider(
 
         return client.newCall(request).awaitAndUse { response ->
             if (!response.isSuccessful) {
-                throw imageRequestFailure("download generated image", response.code)
+                throw openAIImageRequestFailure("download generated image", response)
             }
             ensureGeneratedImageSize(response.body.contentLength())
             val mimeType = response.body.contentType()?.toString()?.substringBefore(';') ?: "image/png"
@@ -651,13 +653,6 @@ class OpenAIProvider(
         )
     }
 
-    private fun imageRequestFailure(operation: String, statusCode: Int) =
-        me.rerere.ai.provider.ProviderRequestException(
-            statusCode = statusCode,
-            retryAfterMillis = null,
-            message = "Failed to $operation: HTTP $statusCode",
-        )
-
     companion object {
         private const val MAX_GENERATED_IMAGE_BYTES = 64L * 1024L * 1024L
         private const val MAX_IMAGE_RESPONSE_CHARS = 96L * 1024L * 1024L
@@ -740,6 +735,17 @@ class OpenAIProvider(
             "hunyuan-image",
         )
     }
+}
+
+internal fun openAIImageRequestFailure(operation: String, response: Response): Throwable {
+    val responseDetail = runCatching {
+        response.peekBody(MAX_IMAGE_ERROR_RESPONSE_BYTES).string().trim()
+    }.getOrNull()
+    val detail = buildString {
+        append("Failed to ").append(operation).append(": HTTP ").append(response.code)
+        responseDetail?.takeIf(String::isNotEmpty)?.let { append(": ").append(it) }
+    }
+    return providerRequestFailure(response = response, cause = null, detail = detail)
 }
 
 internal fun buildOpenAIImageGenerationRequestBody(
@@ -1018,5 +1024,6 @@ private val RESERVED_XAI_EDIT_FIELDS =
 private val RESERVED_SEEDREAM_EDIT_FIELDS =
     setOf("model", "prompt", "n", "image", "images", "image[]", "size", "aspect_ratio")
 private const val IMAGE_EDIT_COPY_BUFFER_BYTES = 256 * 1024
+private const val MAX_IMAGE_ERROR_RESPONSE_BYTES = 64L * 1024L
 
 internal fun inferOpenAIModelType(modelId: String): ModelType = inferModelTypeFromId(modelId)

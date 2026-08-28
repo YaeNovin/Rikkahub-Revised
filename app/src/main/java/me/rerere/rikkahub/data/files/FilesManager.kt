@@ -52,17 +52,25 @@ class FilesManager(
         val resolvedName = displayName ?: getFileNameFromUri(uri) ?: "file"
         val resolvedMime = mimeType ?: getFileMimeType(uri) ?: "application/octet-stream"
         val target = createTargetFile(folder, resolvedName, resolvedMime)
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            target.outputStream().use { output ->
-                input.copyTo(output)
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output ->
+                    input.copyTo(output, bufferSize = 256 * 1024)
+                }
+            } ?: error("Failed to open input stream for $uri")
+            check(target.isFile && target.length() > 0L) {
+                "Selected file is empty: $uri"
             }
+            createManagedFileEntity(
+                folder = folder,
+                file = target,
+                displayName = resolvedName,
+                mimeType = resolvedMime,
+            )
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
         }
-        createManagedFileEntity(
-            folder = folder,
-            file = target,
-            displayName = resolvedName,
-            mimeType = resolvedMime,
-        )
     }
 
     suspend fun saveManagedFromBytes(
@@ -600,6 +608,8 @@ private fun deleteFileIfPresent(file: File): Boolean =
 
 object FileFolders {
     const val UPLOAD = "upload"
+    const val AVATARS = "avatars"
+    const val BACKGROUNDS = "backgrounds"
     const val SKILLS = "skills"
     const val FONTS = "fonts"
     const val TOOL_OUTPUTS = "tool_outputs"

@@ -447,7 +447,7 @@ private fun ProviderConfigureGoogle(
                 !provider.baseUrl.isValidBaseUrl() || !provider.baseUrl.endsWith("/v1beta")
                 ),
             supportingText = if (!provider.baseUrl.endsWith("/v1beta")) {
-                { Text("The base URL usually ends with `/v1beta`") }
+                { Text(stringResource(R.string.setting_provider_page_google_base_url_hint)) }
             } else null,
         )
     }

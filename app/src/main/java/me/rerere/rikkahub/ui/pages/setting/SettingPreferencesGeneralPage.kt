@@ -16,7 +16,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,7 +52,7 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
-        vm.updateSettings(settings.copy(displaySetting = setting))
+        vm.updateDisplaySetting { setting }
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -159,13 +161,13 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_blur_effect_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_inspiration_cards_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_inspiration_cards_desc)) },
                         trailingContent = {
                             Switch(
-                                checked = displaySetting.enableBlurEffect,
+                                checked = displaySetting.showInspirationCards,
                                 onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(enableBlurEffect = it))
+                                    updateDisplaySetting(displaySetting.copy(showInspirationCards = it))
                                 }
                             )
                         },
@@ -218,7 +220,13 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                     Slider(
                                         value = displaySetting.pasteLongTextThreshold.toFloat(),
                                         onValueChange = {
-                                            updateDisplaySetting(displaySetting.copy(pasteLongTextThreshold = it.toInt()))
+                                            displaySetting = displaySetting.copy(pasteLongTextThreshold = it.toInt())
+                                        },
+                                        onValueChangeFinished = {
+                                            val committed = displaySetting.pasteLongTextThreshold
+                                            vm.updateDisplaySetting { current ->
+                                                current.copy(pasteLongTextThreshold = committed)
+                                            }
                                         },
                                         valueRange = 100f..10000f,
                                         modifier = Modifier.weight(1f)
@@ -252,7 +260,13 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                     Slider(
                                         value = displaySetting.volumeKeyScrollRatio,
                                         onValueChange = {
-                                            updateDisplaySetting(displaySetting.copy(volumeKeyScrollRatio = it))
+                                            displaySetting = displaySetting.copy(volumeKeyScrollRatio = it)
+                                        },
+                                        onValueChangeFinished = {
+                                            val committed = displaySetting.volumeKeyScrollRatio
+                                            vm.updateDisplaySetting { current ->
+                                                current.copy(volumeKeyScrollRatio = committed)
+                                            }
                                         },
                                         valueRange = 0.25f..1.0f,
                                         steps = 2,
@@ -421,15 +435,38 @@ private fun RetryIntegerSlider(
 ) {
     val segmentCount = (valueRange.last - valueRange.first) / step
     val normalizedValue = value.coerceIn(valueRange)
+    val externalPosition = ((normalizedValue - valueRange.first) / step).toFloat()
+    var sliderPosition by remember(valueRange, step) { mutableFloatStateOf(externalPosition) }
+    var dragging by remember { mutableStateOf(false) }
+    var pendingCommit by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(value) {
+        if (!dragging || pendingCommit != null) {
+            sliderPosition = externalPosition
+            dragging = false
+            pendingCommit = null
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Slider(
-            value = ((normalizedValue - valueRange.first) / step).toFloat(),
+            value = sliderPosition,
             onValueChange = { position ->
-                onValueChange(valueRange.first + position.roundToInt() * step)
+                dragging = true
+                pendingCommit = null
+                sliderPosition = position
+            },
+            onValueChangeFinished = {
+                val committed = valueRange.first + sliderPosition.roundToInt() * step
+                if (committed == normalizedValue) {
+                    dragging = false
+                } else {
+                    pendingCommit = committed
+                    onValueChange(committed)
+                }
             },
             valueRange = 0f..segmentCount.toFloat(),
             steps = (segmentCount - 1).coerceAtLeast(0),

@@ -41,6 +41,16 @@ class ModelRegistryTest {
     }
 
     @Test
+    fun testGemini3Series() {
+        assertTrue(ModelRegistry.GEMINI_3_SERIES.match("gemini-3-pro-preview"))
+        assertTrue(ModelRegistry.GEMINI_3_SERIES.match("gemini-3.1-flash-image-preview"))
+        assertTrue(ModelRegistry.GEMINI_3_7_FLASH.match("gemini-3.7-flash"))
+        assertTrue(ModelRegistry.GEMINI_3_SERIES.match("vendor/gemini-3.7-flash"))
+        assertTrue(ModelRegistry.GEMINI_3_SERIES.match("vendor/gemini-3.5-flash"))
+        assertFalse(ModelRegistry.GEMINI_3_SERIES.match("gemini-2.5-pro"))
+    }
+
+    @Test
     fun testImageModelTypes() {
         assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gemini-3-pro-image-preview"))
         assertEquals(ModelType.IMAGE, ModelRegistry.MODEL_TYPE.getData("gemini-3.1-flash-image-preview"))
@@ -59,13 +69,19 @@ class ModelRegistryTest {
 
     @Test
     fun testClaudeSeries() {
-        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-sonnet-4.5-20250929"))
-        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-4.5-sonnet"))
-        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-sonnet-4-20250929"))
-        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-4-sonnet"))
-        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-3.5-sonnet"))
+        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-sonnet-4-6"))
+        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-opus-4-6"))
+        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-opus-4-7"))
+        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-opus-4-8"))
         assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-sonnet-5"))
         assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-opus-5"))
+        assertTrue(ModelRegistry.CLAUDE_SERIES.match("claude-fable-5"))
+        assertFalse(ModelRegistry.CLAUDE_SERIES.match("claude-sonnet-4-5-20250929"))
+        assertFalse(ModelRegistry.CLAUDE_SERIES.match("claude-opus-4-5-20251101"))
+        assertFalse(ModelRegistry.CLAUDE_SERIES.match("claude-haiku-4-5-20251001"))
+        assertFalse(ModelRegistry.CLAUDE_SERIES.match("claude-3-7-sonnet-20250219"))
+        assertFalse(ModelRegistry.CLAUDE_SERIES.match("claude-mythos-5"))
+        assertFalse(ModelRegistry.CLAUDE_SERIES.match("claude-mythos-preview"))
         assertEquals(
             listOf(Modality.TEXT, Modality.IMAGE),
             ModelRegistry.MODEL_INPUT_MODALITIES.getData("claude-sonnet-5")
@@ -73,6 +89,10 @@ class ModelRegistryTest {
         assertEquals(
             listOf(ModelAbility.TOOL, ModelAbility.REASONING),
             ModelRegistry.MODEL_ABILITIES.getData("claude-opus-5")
+        )
+        assertEquals(
+            listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+            ModelRegistry.MODEL_ABILITIES.getData("claude-fable-5")
         )
     }
 

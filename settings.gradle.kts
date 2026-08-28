@@ -29,8 +29,13 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://jitpack.io")
-        mavenLocal()
+        maven("https://jitpack.io") {
+            content {
+                includeGroupByRegex("com\\.github\\..*")
+                includeGroupByRegex("io\\.github\\..*")
+                includeGroup("com.termux.termux-app")
+            }
+        }
     }
 }
 

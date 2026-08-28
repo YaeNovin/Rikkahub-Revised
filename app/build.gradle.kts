@@ -2,6 +2,7 @@ import com.android.build.api.dsl.Packaging
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
+import java.security.MessageDigest
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -20,6 +21,19 @@ val sourceLicenseUrl = providers.gradleProperty("rikkahub.sourceLicenseUrl")
 val enableFirebase = providers.gradleProperty("rikkahub.enableFirebase")
     .map { it.equals("true", ignoreCase = true) }
     .getOrElse(false)
+val bundledHugeIcons = rootProject.file("third_party/hugeicons-compose/hugeicons-compose-1.3.aar")
+check(bundledHugeIcons.isFile) {
+    "Missing bundled HugeIcons artifact: ${bundledHugeIcons.path}. " +
+        "Restore the repository file before building."
+}
+val bundledHugeIconsSha256 = "19EC2878F4B36C8D5570F45B96C8A6A162FD7B4E41B94CA28FD93B37175F02BE"
+val actualHugeIconsSha256 = MessageDigest.getInstance("SHA-256")
+    .digest(bundledHugeIcons.readBytes())
+    .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+check(actualHugeIconsSha256 == bundledHugeIconsSha256) {
+    "HugeIcons artifact checksum mismatch: expected $bundledHugeIconsSha256, " +
+        "got $actualHugeIconsSha256"
+}
 fun String.asBuildConfigString() = "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 plugins {
@@ -297,6 +311,9 @@ dependencies {
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
 
+    // Background image accent extraction
+    implementation(libs.androidx.palette)
+
     // Apache Commons Text
     implementation(libs.commons.text)
 
@@ -308,7 +325,8 @@ dependencies {
 
     // lucide icons
     implementation(libs.lucide.icons)
-    implementation(libs.huge.icons)
+    // Bundled to avoid a non-reproducible JitPack build during QA/offline builds.
+    implementation(files(bundledHugeIcons))
 
     // image viewer
     implementation(libs.image.viewer)

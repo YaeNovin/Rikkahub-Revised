@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.context
 
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.navigation3.runtime.NavKey
 import me.rerere.rikkahub.Screen
 
@@ -26,8 +27,10 @@ class Navigator(private val backStack: MutableList<NavKey>) {
     }
 
     fun clearAndNavigate(screen: Screen) {
-        backStack.clear()
-        backStack.add(screen)
+        Snapshot.withMutableSnapshot {
+            backStack.clear()
+            backStack.add(screen)
+        }
     }
 
     fun popBackStack() {

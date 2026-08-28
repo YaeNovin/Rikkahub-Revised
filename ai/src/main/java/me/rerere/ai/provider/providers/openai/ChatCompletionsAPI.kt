@@ -34,6 +34,8 @@ import me.rerere.ai.core.cappedEffort
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ProviderRequestDiagnostics
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
@@ -73,11 +75,6 @@ import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
-
-private fun isAlibabaModelStudioHost(host: String): Boolean =
-    host == "dashscope.aliyuncs.com" ||
-        host.endsWith(".dashscope.aliyuncs.com") ||
-        host.endsWith(".maas.aliyuncs.com")
 
 private fun isVolcengineArkHost(host: String): Boolean =
     host.startsWith("ark.") && host.endsWith(".volces.com")
@@ -147,6 +144,14 @@ class ChatCompletionsAPI(
 
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                requestBody.openAIRequestDiagnostics(
+                    providerSetting = providerSetting,
+                    operation = ProviderRequestOperation.TEXT_GENERATION,
+                    api = "chat_completions",
+                ),
+            )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
@@ -203,6 +208,14 @@ class ChatCompletionsAPI(
 
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                requestBody.openAIRequestDiagnostics(
+                    providerSetting = providerSetting,
+                    operation = ProviderRequestOperation.STREAM_TEXT,
+                    api = "chat_completions",
+                ),
+            )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
@@ -265,8 +278,12 @@ class ChatCompletionsAPI(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (error: Throwable) {
+                    close(error)
+                }
             }
         }
 
@@ -287,6 +304,10 @@ class ChatCompletionsAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
+        val modelSupport = resolveOpenAIModelParameterSupport(params.model.modelId)
+        val grokSupport = resolveGrokModelParameterSupport(params.model.modelId)
+        val useFunctionTools =
+            params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
@@ -296,14 +317,54 @@ class ChatCompletionsAPI(
                     includeHistoryReasoning = providerSetting.includeHistoryReasoning,
                     includeOpenRouterReasoningDetails = isOpenRouter,
                     supportInputModalities = params.model.inputModalities,
+                    deepSeekImageDetail = params.deepSeekImageDetail(),
                 )
             )
 
-            if (isModelAllowTemperature(params.model)) {
+            if (isModelAllowTemperature(params)) {
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_tokens", params.maxTokens)
+            if (params.maxTokens != null && !params.usesQwenStructuredOutput()) {
+                val tokenLimitKey = if (
+                    ModelRegistry.OPENAI_O_MODELS.match(params.model.modelId) ||
+                    isOpenAIGpt5Model(params.model.modelId) ||
+                    grokSupport.available
+                ) {
+                    "max_completion_tokens"
+                } else {
+                    "max_tokens"
+                }
+                put(tokenLimitKey, params.maxTokens)
+            }
+
+            if (modelSupport.available) {
+                params.openAIOptions.verbosity.apiValue
+                    ?.takeIf { modelSupport.supportsVerbosity }
+                    ?.let { put("verbosity", it) }
+                params.openAIOptions.serviceTier.apiValue
+                    ?.takeIf {
+                        it != "ultrafast" ||
+                            (host == OPENAI_API_HOST && modelSupport.supportsUltrafast)
+                    }
+                    ?.let { put("service_tier", it) }
+                if (useFunctionTools) {
+                    params.openAIOptions.parallelToolCalls.apiValue?.let {
+                        put("parallel_tool_calls", it)
+                    }
+                    params.openAIOptions.toolChoice.apiValue?.let { put("tool_choice", it) }
+                }
+            }
+            applyGrokChatOptions(params = params, hasFunctionTools = useFunctionTools)
+            applyQwenChatOptions(
+                params = params,
+                hasFunctionTools = useFunctionTools,
+                stream = stream,
+                hasImageInput = messages.any { message ->
+                    message.parts.any { it is UIMessagePart.Image }
+                },
+            )
+            applyDeepSeekChatOptions(params = params, hasFunctionTools = useFunctionTools)
 
             put("stream", stream)
             if (stream) {
@@ -336,6 +397,10 @@ class ChatCompletionsAPI(
                                 else -> put("effort", level.cappedEffort(ReasoningLevel.XHIGH)!!)
                             }
                         })
+                    }
+
+                    grokSupport.available -> {
+                        grokSupport.reasoningEffort(level)?.let { put("reasoning_effort", it) }
                     }
 
                     isAlibabaModelStudioHost(host) -> {
@@ -379,6 +444,17 @@ class ChatCompletionsAPI(
                             modelId.supportsVolcengineReasoningEffort()
                         ) {
                             put("reasoning_effort", level.volcengineReasoningEffort())
+                        }
+                    }
+
+                    host == OPENAI_API_HOST -> {
+                        if (level != ReasoningLevel.AUTO) {
+                            put(
+                                "reasoning_effort",
+                                level.cappedEffort(
+                                    resolveOpenAIMaximumReasoningEffort(params.model.modelId)
+                                )!!,
+                            )
                         }
                     }
 
@@ -448,7 +524,7 @@ class ChatCompletionsAPI(
                         })
                     }
 
-                    host == "api.deepseek.com" -> {
+                    host == DEEPSEEK_API_HOST -> {
                         val modelId = params.model.modelId.normalizedReasoningModelId()
                         if (!modelId.isDeepSeekThinkingOnlyModel()) {
                             put("thinking", buildJsonObject {
@@ -518,7 +594,7 @@ class ChatCompletionsAPI(
                 }
             }
 
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
+            if (useFunctionTools) {
                 putJsonArray("tools") {
                     params.tools.forEach { tool ->
                         add(buildJsonObject {
@@ -540,14 +616,16 @@ class ChatCompletionsAPI(
         }.mergeCustomBody(params.customBody)
     }
 
-    private fun isModelAllowTemperature(model: Model): Boolean {
+    private fun isModelAllowTemperature(params: TextGenerationParams): Boolean {
+        val model = params.model
         val isMoonshotRestricted = ModelRegistry.KIMI_K2_5.match(model.modelId) ||
                 ModelRegistry.KIMI_K2_6.match(model.modelId) ||
                 ModelRegistry.KIMI_K3.match(model.modelId) ||
                 ModelRegistry.KIMI_K3_ALIAS.match(model.modelId)
-        return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) && 
-               !ModelRegistry.GPT_5.match(model.modelId) && 
-               !isMoonshotRestricted
+        return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) &&
+               !isOpenAIGpt5Model(model.modelId) &&
+               !isMoonshotRestricted &&
+               !params.usesDeepSeekThinkingMode()
     }
 
     private fun buildMessages(
@@ -555,6 +633,7 @@ class ChatCompletionsAPI(
         includeHistoryReasoning: Boolean = true,
         includeOpenRouterReasoningDetails: Boolean = false,
         supportInputModalities: List<Modality> = listOf(Modality.TEXT, Modality.IMAGE),
+        deepSeekImageDetail: String? = null,
     ) = buildJsonArray {
         val filteredMessages = messages.filter { it.isValidToUpload() }
 
@@ -567,10 +646,24 @@ class ChatCompletionsAPI(
                     supportInputModalities = supportInputModalities,
                 )
             } else {
-                addNonAssistantMessage(message)
+                addNonAssistantMessage(message, deepSeekImageDetail)
             }
         }
     }
+
+    @Suppress("unused")
+    private fun buildMessages(
+        messages: List<UIMessage>,
+        includeHistoryReasoning: Boolean,
+        includeOpenRouterReasoningDetails: Boolean,
+        supportInputModalities: List<Modality>,
+    ) = buildMessages(
+        messages = messages,
+        includeHistoryReasoning = includeHistoryReasoning,
+        includeOpenRouterReasoningDetails = includeOpenRouterReasoningDetails,
+        supportInputModalities = supportInputModalities,
+        deepSeekImageDetail = null,
+    )
 
     private fun JsonArrayBuilder.addAssistantMessages(
         message: UIMessage,
@@ -726,7 +819,10 @@ class ChatCompletionsAPI(
         }
     }
 
-    private fun JsonArrayBuilder.addNonAssistantMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addNonAssistantMessage(
+        message: UIMessage,
+        deepSeekImageDetail: String?,
+    ) {
         add(buildJsonObject {
             put("role", JsonPrimitive(message.role.name.lowercase()))
 
@@ -749,6 +845,7 @@ class ChatCompletionsAPI(
                                         put("type", "image_url")
                                         put("image_url", buildJsonObject {
                                             put("url", encodedImage.base64)
+                                            deepSeekImageDetail?.let { put("detail", it) }
                                         })
                                     }.onFailure {
                                         it.printStackTrace()

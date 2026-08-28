@@ -15,12 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.material3.AlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -31,7 +31,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,13 +54,16 @@ import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import org.koin.compose.koinInject
-import kotlinx.coroutines.launch
 import java.io.File
+import com.dokar.sonner.ToastType
 
 @Composable
 fun TextAvatar(
@@ -103,19 +105,28 @@ fun UIAvatar(
 ) {
     val filesManager: FilesManager = koinInject()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val toaster = LocalToaster.current
     var showPickOption by remember { mutableStateOf(false) }
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var preCropTempFile by remember { mutableStateOf<File?>(null) }
 
-    fun saveAvatarImage(uri: Uri) {
-        scope.launch {
-            val localUris = filesManager.createChatFilesByContents(listOf(uri))
-            localUris.firstOrNull()?.let { localUri ->
-                onUpdate?.invoke(Avatar.Image(localUri.toString()))
-            }
+    suspend fun saveAvatarImage(uri: Uri) {
+        runCatching {
+            filesManager.saveManagedFromUri(
+                folder = FileFolders.AVATARS,
+                uri = uri,
+                displayName = "avatar.png",
+                mimeType = "image/png",
+            )
+        }.onSuccess { managedAvatar ->
+            onUpdate?.invoke(Avatar.Image(filesManager.getFile(managedAvatar).toUri().toString()))
+        }.onFailure { error ->
+            toaster.show(
+                context.formatUserFacingError(error),
+                type = ToastType.Error,
+            )
         }
     }
 

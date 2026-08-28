@@ -8,6 +8,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -16,11 +17,14 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.hasActiveChatBackground
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.theme.LocalChatBackgroundForeground
+import me.rerere.rikkahub.ui.theme.withBackgroundReadability
 
 @Composable
 fun ChatMessageUserAvatar(
@@ -30,6 +34,7 @@ fun ChatMessageUserAvatar(
     modifier: Modifier = Modifier,
 ) {
     val settings = LocalSettings.current
+    val labelColor = chatMessageHeaderLabelColor()
     if (message.role == MessageRole.USER && !message.parts.isEmptyUIMessage() && settings.displaySetting.showUserAvatar) {
         Row(
             modifier = modifier,
@@ -38,7 +43,9 @@ fun ChatMessageUserAvatar(
         ) {
             Text(
                 text = nickname.ifEmpty { stringResource(R.string.user_default_name) },
-                style = MaterialTheme.typography.labelLargeEmphasized,
+                style = MaterialTheme.typography.labelLargeEmphasized
+                    .withBackgroundReadability(labelColor),
+                color = labelColor,
                 maxLines = 1,
             )
             UIAvatar(
@@ -62,6 +69,7 @@ fun ChatMessageAssistantAvatar(
     val settings = LocalSettings.current
     val showIcon = settings.displaySetting.showModelIcon
     val useAssistantAvatar = assistant?.useAssistantAvatar == true
+    val labelColor = chatMessageHeaderLabelColor()
     if (message.role == MessageRole.ASSISTANT && (model != null || useAssistantAvatar)) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -85,7 +93,9 @@ fun ChatMessageAssistantAvatar(
                     if (settings.displaySetting.showModelName) {
                         Text(
                             text = assistant.name.ifEmpty { stringResource(R.string.assistant_page_default_assistant) },
-                            style = MaterialTheme.typography.labelLargeEmphasized,
+                            style = MaterialTheme.typography.labelLargeEmphasized
+                                .withBackgroundReadability(labelColor),
+                            color = labelColor,
                             maxLines = 1,
                         )
                     }
@@ -106,7 +116,9 @@ fun ChatMessageAssistantAvatar(
                     if (settings.displaySetting.showModelName) {
                         Text(
                             text = model.displayName,
-                            style = MaterialTheme.typography.labelLargeEmphasized,
+                            style = MaterialTheme.typography.labelLargeEmphasized
+                                .withBackgroundReadability(labelColor),
+                            color = labelColor,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -114,5 +126,18 @@ fun ChatMessageAssistantAvatar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun chatMessageHeaderLabelColor(): Color {
+    val settings = LocalSettings.current
+    return if (settings.hasActiveChatBackground()) {
+        LocalChatBackgroundForeground.current
+            .takeUnless { it == Color.Unspecified }
+            ?.copy(alpha = 0.92f)
+            ?: MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface
     }
 }

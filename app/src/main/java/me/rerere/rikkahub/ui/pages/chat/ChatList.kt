@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Edit01
+import me.rerere.hugeicons.stroke.Idea01
+import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
@@ -9,6 +12,10 @@ import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.BookOpen01
+import me.rerere.hugeicons.stroke.ChartColumn
+import me.rerere.hugeicons.stroke.Code
+import me.rerere.hugeicons.stroke.Files02
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -33,9 +40,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
@@ -71,6 +80,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -104,6 +114,7 @@ import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.utils.plus
 import kotlin.math.roundToInt
+import kotlin.random.Random
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
@@ -270,6 +281,7 @@ private fun ChatListNormal(
             .associateBy { it.id }
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
+    val captureProgress = LocalScrollCaptureInProgress.current
 
     Box(
         modifier = Modifier
@@ -313,6 +325,23 @@ private fun ChatListNormal(
                     .hazeSource(state = hazeState)
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
+            if (
+                conversation.messageNodes.isEmpty() &&
+                !loading &&
+                !captureProgress &&
+                settings.displaySetting.showInspirationCards
+            ) {
+                item(key = "InspirationStarterCards") {
+                    InspirationStarterCards(
+                        modifier = Modifier
+                            .fillParentMaxWidth()
+                            .fillParentMaxHeight(0.78f),
+                        onClickSuggestion = onClickSuggestion,
+                        conversationId = conversation.id,
+                    )
+                }
+            }
+
             itemsIndexed(
                 items = conversation.messageNodes,
                 key = { index, item -> item.id },
@@ -334,6 +363,7 @@ private fun ChatListNormal(
                             node = node,
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
+                            hazeState = hazeState,
                             loading = loading && index == lastMessageIndex,
                             onRegenerate = {
                                 onRegenerate(node.currentMessage)
@@ -459,7 +489,7 @@ private fun ChatListNormal(
                 ) {
                     Tooltip(
                         tooltip = {
-                            Text("Clear selection")
+                            Text(stringResource(R.string.clear_selection))
                         }
                     ) {
                         IconButton(
@@ -473,7 +503,7 @@ private fun ChatListNormal(
                     }
                     Tooltip(
                         tooltip = {
-                            Text("Select all")
+                            Text(stringResource(R.string.select_all))
                         }
                     ) {
                         IconButton(
@@ -490,7 +520,7 @@ private fun ChatListNormal(
                     }
                     Tooltip(
                         tooltip = {
-                            Text("Confirm")
+                            Text(stringResource(R.string.confirm))
                         }
                     ) {
                         FilledIconButton(
@@ -520,8 +550,6 @@ private fun ChatListNormal(
                     .map { it.currentMessage }
             )
 
-            val captureProgress = LocalScrollCaptureInProgress.current
-
             // 消息快速跳转
             MessageJumper(
                 show = isRecentScroll && !state.isScrollInProgress && settings.displaySetting.showMessageJumper && !captureProgress,
@@ -537,6 +565,138 @@ private fun ChatListNormal(
                     onClickSuggestion = onClickSuggestion,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
+            }
+        }
+    }
+}
+
+private data class InspirationStarter(
+    val title: String,
+    val prompt: String,
+    val icon: ImageVector,
+)
+
+@Composable
+private fun InspirationStarterCards(
+    modifier: Modifier = Modifier,
+    onClickSuggestion: (String) -> Unit,
+    conversationId: Uuid,
+) {
+    val starters = listOf(
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_explain_title),
+            prompt = stringResource(R.string.chat_inspiration_explain_prompt),
+            icon = HugeIcons.Search01,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_plan_title),
+            prompt = stringResource(R.string.chat_inspiration_plan_prompt),
+            icon = HugeIcons.Idea01,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_write_title),
+            prompt = stringResource(R.string.chat_inspiration_write_prompt),
+            icon = HugeIcons.Edit01,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_brainstorm_title),
+            prompt = stringResource(R.string.chat_inspiration_brainstorm_prompt),
+            icon = HugeIcons.Sparkles,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_summarize_title),
+            prompt = stringResource(R.string.chat_inspiration_summarize_prompt),
+            icon = HugeIcons.Files02,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_compare_title),
+            prompt = stringResource(R.string.chat_inspiration_compare_prompt),
+            icon = HugeIcons.ChartColumn,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_learn_title),
+            prompt = stringResource(R.string.chat_inspiration_learn_prompt),
+            icon = HugeIcons.BookOpen01,
+        ),
+        InspirationStarter(
+            title = stringResource(R.string.chat_inspiration_code_title),
+            prompt = stringResource(R.string.chat_inspiration_code_prompt),
+            icon = HugeIcons.Code,
+        ),
+    )
+    val visibleStarters = remember(conversationId, starters) {
+        starters.shuffled(Random(conversationId.hashCode())).take(4)
+    }
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.chat_inspiration_title),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(20.dp))
+            val starterRows = visibleStarters.chunked(2)
+            starterRows.forEachIndexed { index, rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    rowItems.forEach { starter ->
+                        Surface(
+                            onClick = { onClickSuggestion(starter.prompt) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 112.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                            ),
+                            shadowElevation = 0.dp,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = starter.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    text = starter.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = starter.prompt,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                    if (rowItems.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+                if (index < starterRows.lastIndex) {
+                    Spacer(Modifier.height(10.dp))
+                }
             }
         }
     }

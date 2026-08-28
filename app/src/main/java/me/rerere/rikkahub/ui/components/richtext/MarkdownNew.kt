@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.components.richtext
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -209,7 +211,7 @@ private fun HtmlBlockElement(
             element = element,
             onClickCitation = onClickCitation,
             modifier = if (element.nextElementSibling() != null)
-                Modifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
+                Modifier.padding(bottom = markdownParagraphSpacing())
             else Modifier,
         )
 
@@ -553,16 +555,18 @@ private fun HtmlCodeBlock(element: Element) {
 @Composable
 private fun HtmlBlockquote(element: Element, onClickCitation: (String) -> Unit) {
     ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
-        val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-        val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+        val richContent = richContentColors()
         Column(
             modifier = Modifier
                 .drawWithContent {
+                    drawRect(color = richContent.quoteContainer, size = size)
+                    drawRect(
+                        color = richContent.border,
+                        size = Size(3.dp.toPx(), size.height),
+                    )
                     drawContent()
-                    drawRect(color = bgColor, size = size)
-                    drawRect(color = borderColor, size = Size(10f, size.height))
                 }
-                .padding(8.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             element.childNodes().fastForEach { HtmlBodyNode(it, onClickCitation) }
         }
@@ -627,10 +631,18 @@ private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
         }
     }
 
+    val richContent = richContentColors()
     DataTable(
         headers = headers,
         rows = rows,
-        modifier = Modifier.padding(vertical = 8.dp),
+        modifier = Modifier
+            .padding(vertical = 8.dp)
+            .background(richContent.container, MaterialTheme.shapes.medium)
+            .border(BorderStroke(1.dp, richContent.border), MaterialTheme.shapes.medium),
+        cellBorder = BorderStroke(0.5.dp, richContent.cellBorder),
+        headerBackground = richContent.toolbar,
+        outerBorder = null,
+        shape = MaterialTheme.shapes.medium,
         columnMinWidths = List(columnCount) { 80.dp },
         columnMaxWidths = List(columnCount) { 200.dp },
     )
@@ -892,7 +904,9 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             SpanStyle(
                 fontFamily = JetbrainsMono,
                 fontSize = 0.9.em,
-                color = colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+                color = colorScheme.onSurface,
+                background = colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
             ).merge(cssStyle ?: SpanStyle())
         ) {
             append(' ')
@@ -948,6 +962,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                 href.isNotEmpty() -> {
                     val linkStyle = SpanStyle(
                         color = colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
                         textDecoration = TextDecoration.Underline,
                     ).merge(cssStyle ?: SpanStyle())
                     withLink(LinkAnnotation.Url(href)) {

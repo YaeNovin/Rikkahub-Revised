@@ -128,7 +128,7 @@ private fun OpenAIRealtimeASRConfiguration(
             onValueChange = { onValueChange(setting.copy(prompt = it)) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
-            placeholder = { Text("Optional") }
+            placeholder = { Text(stringResource(R.string.optional)) }
         )
     }
 
@@ -526,7 +526,7 @@ private fun StepASRConfiguration(
                 onValueChange(setting.copy(hotwords = list))
             },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("热词1, 热词2, 热词3") }
+            placeholder = { Text(stringResource(R.string.setting_asr_configure_hotwords_placeholder)) }
         )
     }
 }

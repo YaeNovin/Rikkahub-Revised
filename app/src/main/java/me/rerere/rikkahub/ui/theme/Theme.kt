@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.datastore.isAutoAccentActive
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberCurrentColorMode
 import me.rerere.rikkahub.ui.hooks.rememberUserSettingsState
@@ -53,8 +54,13 @@ fun RikkahubTheme(
         ColorMode.DARK -> true
     }
     val amoledDarkMode by rememberAmoledDarkMode()
+    val autoAccentColorArgb = settings.advancedAppearanceSetting.autoAccentColorArgb
+        .takeIf { settings.isAutoAccentActive() }
 
     val colorScheme = when {
+        autoAccentColorArgb != null -> remember(autoAccentColorArgb, darkTheme) {
+            CustomTheme(primaryColorArgb = autoAccentColorArgb).generateColorScheme(dark = darkTheme)
+        }
         settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)

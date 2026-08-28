@@ -2,8 +2,8 @@ package me.rerere.rikkahub
 
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
+import android.os.Build
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -57,14 +57,25 @@ import coil3.svg.SvgDecoder
 import com.dokar.sonner.Toaster
 import com.dokar.sonner.rememberToasterState
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.isGlobalBackgroundActive
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.ui.activity.SafeModeActivity
 import me.rerere.rikkahub.ui.components.ui.TTSController
+import me.rerere.rikkahub.ui.components.ui.AppearanceBackgroundSpec
+import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
+import me.rerere.rikkahub.ui.components.ui.GlobalAppBackground
+import me.rerere.rikkahub.ui.components.ui.GlobalGlassTheme
+import me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground
+import me.rerere.rikkahub.ui.components.ui.advancedAppearanceCapabilities
 import me.rerere.rikkahub.ui.context.LocalASRState
+import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
+import me.rerere.rikkahub.ui.context.LocalGlobalGlassSurfaceOpacity
+import me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
@@ -77,7 +88,13 @@ import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantClaudePage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDeepSeekPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGeminiPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGrokPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantOpenAIPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantQwenPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantExtensionsPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantLocalToolPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
@@ -108,6 +125,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
+import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesAdvancedAppearancePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesUIPage
 import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
@@ -127,6 +145,7 @@ import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
+import me.rerere.rikkahub.ui.theme.rememberChatBackgroundForeground
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.openUsageAccessSettings
 import okhttp3.OkHttpClient
@@ -268,15 +287,47 @@ class RouteActivity : ComponentActivity() {
         }
 
         val backStack = rememberNavBackStack(startScreen)
+        val navigator = remember(backStack) { Navigator(backStack) }
         SideEffect { this@RouteActivity.navStack = backStack }
+        val globalBackgroundActive = settings.isGlobalBackgroundActive() &&
+            backStack.lastOrNull() !is Screen.Chat
+        val appearanceCapabilities = remember {
+            advancedAppearanceCapabilities(Build.VERSION.SDK_INT)
+        }
+        val pageSurfaceStyle = appearanceCapabilities.effectiveSurfaceStyle(
+            settings.advancedAppearanceSetting.pageSurfaceStyle
+        )
+        val globalBackgroundVisible = globalBackgroundActive &&
+            pageSurfaceStyle != BackgroundSurfaceStyle.OPAQUE
+        val globalBackgroundForeground = rememberChatBackgroundForeground(
+            background = settings.advancedAppearanceSetting.globalBackground
+                .takeIf { globalBackgroundActive },
+            backgroundOpacity = settings.advancedAppearanceSetting.globalBackgroundOpacity,
+            useGradientBackground = false,
+        )
+        val globalBackgroundSpec = if (globalBackgroundActive) {
+            AppearanceBackgroundSpec(
+                background = settings.advancedAppearanceSetting.globalBackground,
+                opacity = settings.advancedAppearanceSetting.globalBackgroundOpacity,
+                blurRadius = settings.advancedAppearanceSetting.globalBackgroundBlurRadius,
+                foreground = globalBackgroundForeground,
+            )
+        } else {
+            null
+        }
 
         ShareHandler(backStack)
 
         SharedTransitionLayout {
             CompositionLocalProvider(
-                LocalNavController provides Navigator(backStack),
+                LocalNavController provides navigator,
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
+                LocalGlobalBackgroundActive provides globalBackgroundVisible,
+                LocalGlobalGlassSurfaceOpacity provides settings.advancedAppearanceSetting.pageSurfaceOpacity,
+                LocalPageSurfaceStyle provides pageSurfaceStyle,
+                LocalAdvancedAppearanceCapabilities provides appearanceCapabilities,
+                LocalAppearanceBackground provides globalBackgroundSpec,
                 LocalToaster provides toastState,
                 LocalTTSState provides tts,
                 LocalASRState provides asr,
@@ -295,7 +346,18 @@ class RouteActivity : ComponentActivity() {
                         .semantics { testTagsAsResourceId = true }
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    NavDisplay(
+                    if (globalBackgroundVisible) {
+                        GlobalAppBackground(
+                            settings = settings,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    GlobalGlassTheme(
+                        active = globalBackgroundVisible,
+                        surfaceOpacity = settings.advancedAppearanceSetting.pageSurfaceOpacity,
+                        style = pageSurfaceStyle,
+                    ) {
+                        NavDisplay(
                         backStack = backStack,
                         entryDecorators = listOf(
                             rememberSaveableStateHolderNavEntryDecorator(),
@@ -363,6 +425,30 @@ class RouteActivity : ComponentActivity() {
                                 AssistantBasicPage(key.id)
                             }
 
+                            entry<Screen.AssistantClaude> { key ->
+                                AssistantClaudePage(key.id)
+                            }
+
+                            entry<Screen.AssistantDeepSeek> { key ->
+                                AssistantDeepSeekPage(key.id)
+                            }
+
+                            entry<Screen.AssistantGemini> { key ->
+                                AssistantGeminiPage(key.id)
+                            }
+
+                            entry<Screen.AssistantGrok> { key ->
+                                AssistantGrokPage(key.id)
+                            }
+
+                            entry<Screen.AssistantOpenAI> { key ->
+                                AssistantOpenAIPage(key.id)
+                            }
+
+                            entry<Screen.AssistantQwen> { key ->
+                                AssistantQwenPage(key.id)
+                            }
+
                             entry<Screen.AssistantPrompt> { key ->
                                 AssistantPromptPage(key.id)
                             }
@@ -425,6 +511,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingPreferencesGeneral> {
                                 SettingPreferencesGeneralPage()
+                            }
+
+                            entry<Screen.SettingPreferencesAdvancedAppearance> {
+                                SettingPreferencesAdvancedAppearancePage()
                             }
 
                             entry<Screen.SettingPreferencesUI> {
@@ -537,7 +627,8 @@ class RouteActivity : ComponentActivity() {
                                 StatsPage()
                             }
                         }
-                    )
+                        )
+                    }
                     if (BuildConfig.DEBUG) {
                         Text(
                             text = "[开发模式]",
@@ -614,6 +705,24 @@ sealed interface Screen : NavKey {
     data class AssistantBasic(val id: String) : Screen
 
     @Serializable
+    data class AssistantClaude(val id: String) : Screen
+
+    @Serializable
+    data class AssistantDeepSeek(val id: String) : Screen
+
+    @Serializable
+    data class AssistantGemini(val id: String) : Screen
+
+    @Serializable
+    data class AssistantGrok(val id: String) : Screen
+
+    @Serializable
+    data class AssistantOpenAI(val id: String) : Screen
+
+    @Serializable
+    data class AssistantQwen(val id: String) : Screen
+
+    @Serializable
     data class AssistantPrompt(val id: String) : Screen
 
     @Serializable
@@ -660,6 +769,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingPreferencesGeneral : Screen
+
+    @Serializable
+    data object SettingPreferencesAdvancedAppearance : Screen
 
     @Serializable
     data object SettingPreferencesUI : Screen

@@ -7,8 +7,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_ASSET_URL
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
@@ -70,6 +72,7 @@ internal fun InteractiveCodeBlock(
         state = webViewState,
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
             .height(240.dp),
     )
 }
@@ -106,6 +109,17 @@ internal fun buildInteractiveRendererHtml(
     val background = colorScheme.surface.toCssHex()
     val foreground = colorScheme.onSurface.toCssHex()
     val error = colorScheme.error.toCssHex()
+    val rendererLayoutCss = when (renderer) {
+        InteractiveCodeRenderer.ABC,
+        InteractiveCodeRenderer.RAILROAD -> """
+            html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
+            #renderer { width: 100%; min-height: 100%; height: auto; overflow: visible; }
+        """.trimIndent()
+        InteractiveCodeRenderer.ECHARTS,
+        InteractiveCodeRenderer.LEAFLET -> """
+            html, body, #renderer { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+        """.trimIndent()
+    }
 
     return """
         <!DOCTYPE html>
@@ -116,7 +130,7 @@ internal fun buildInteractiveRendererHtml(
             $stylesheet
             <script src="$WEB_VIEW_ASSET_URL/html/$scriptPath"></script>
             <style>
-                html, body, #renderer { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+                $rendererLayoutCss
                 body { background: $background; color: $foreground; font-family: sans-serif; }
                 #renderer { box-sizing: border-box; padding: 8px; }
                 #render-error { display: none; white-space: pre-wrap; margin: 0; padding: 12px; color: $error; overflow: auto; }

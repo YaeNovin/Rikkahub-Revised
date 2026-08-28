@@ -11,6 +11,7 @@ import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.stream.StreamChunkDecoder
+import me.rerere.ai.provider.stream.prematureStreamTermination
 import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolStatus
@@ -35,7 +36,10 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         return DecodeResult(chunks, completed)
     }
 
-    override fun onClosed(): List<StreamChunk> = state.finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (state.finished) return emptyList()
+        prematureStreamTermination("Responses API")
+    }
 
     private fun parseEvent(payload: JsonObject): List<StreamChunk> {
         val chunkType = payload["type"]?.jsonPrimitive?.content ?: error("chunk type not found")

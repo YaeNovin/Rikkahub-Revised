@@ -71,7 +71,7 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
-        vm.updateSettings(settings.copy(displaySetting = setting))
+        vm.updateDisplaySetting { setting }
     }
 
     val importSuccessMsg = stringResource(R.string.setting_display_page_custom_font_import_success)
@@ -162,7 +162,12 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                                 Slider(
                                     value = displaySetting.bubbleOpacity,
                                     onValueChange = {
-                                        updateDisplaySetting(displaySetting.copy(bubbleOpacity = it))
+                                        displaySetting = displaySetting.copy(bubbleOpacity = it)
+                                    },
+                                    onValueChangeFinished = {
+                                        vm.updateDisplaySetting {
+                                            it.copy(bubbleOpacity = displaySetting.bubbleOpacity)
+                                        }
                                     },
                                     valueRange = 0.1f..1.0f,
                                     steps = 8,
@@ -341,7 +346,12 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                                     Slider(
                                         value = displaySetting.fontSizeRatio,
                                         onValueChange = {
-                                            updateDisplaySetting(displaySetting.copy(fontSizeRatio = it))
+                                            displaySetting = displaySetting.copy(fontSizeRatio = it)
+                                        },
+                                        onValueChangeFinished = {
+                                            vm.updateDisplaySetting {
+                                                it.copy(fontSizeRatio = displaySetting.fontSizeRatio)
+                                            }
                                         },
                                         valueRange = 0.5f..2f,
                                         steps = 11,
