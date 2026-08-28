@@ -27,7 +27,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`v2.4.8-revised.5`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.5) |
+| 当前版本 | [`v2.4.8-revised.6`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.6) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -59,7 +59,7 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-### 当前正式版：v2.4.8-revised.5
+### 当前正式版：v2.4.8-revised.6
 
 - 为 OpenAI、Claude、Gemini、Grok、Qwen 和 DeepSeek 增加按模型能力适配的请求
   参数，并新增不记录凭据、提示词、Schema 与二进制内容的脱敏诊断。
