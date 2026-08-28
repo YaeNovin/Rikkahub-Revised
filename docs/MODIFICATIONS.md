@@ -6,11 +6,53 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.5`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.6`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2.4.8-revised.6 Maintenance Changes / 维护变更
+
+- English: Added advanced appearance controls for global and assistant
+  backgrounds, page and overlay surfaces, navigation, chat controls, bubbles,
+  typography, rich content, and automatic accent colors.
+  中文：增加全局与助手背景、页面与浮层、导航、聊天控件、气泡、排版、富内容及
+  自动强调色等高级外观设置。
+- English: Added safe global-background override behavior that preserves
+  assistant backgrounds, defaults new background opacity to 100%, and improves
+  contrast and readability across supported surfaces.
+  中文：增加安全的全局背景覆盖机制，保留原有助手背景，将新背景默认透明度调整为
+  100%，并改善受支持界面的对比度与可读性。
+- English: Added Android-version capability detection with reduced effects on
+  Android 12 and disabled unsupported blur or glass controls on older systems,
+  together with compatibility and performance notices.
+  中文：增加 Android 版本能力检测，在 Android 12 上降低效果，并在更旧系统上停用
+  不受支持的模糊或玻璃控件，同时补充兼容性与性能提示。
+- English: Improved chat Dock, input, sidebar, drawer, dialog, menu, and sheet
+  rendering, including stable fallbacks for long or complex message content.
+  中文：改善聊天 Dock、输入框、侧边栏、抽屉、对话框、菜单和弹出页渲染，并为长
+  消息或复杂内容提供稳定的回退效果。
+- English: Expanded diagnostics with concrete provider error reasons,
+  localized parameter labels and values, troubleshooting guidance, and reduced
+  duplicate request entries.
+  中文：扩展诊断日志，显示具体供应商错误原因、本地化参数名称和值、排查建议，并
+  减少重复请求记录。
+- English: Improved Gemini image and Anthropic Messages diagnostics while
+  preventing full prompts, response streams, image Base64 data, credentials,
+  and source image URLs from being written to logs.
+  中文：改善 Gemini 图片与 Anthropic Messages 诊断，并防止完整提示词、响应流、图片
+  Base64、凭据及源图片地址写入日志。
+- English: Completed Simplified Chinese resources and expanded Traditional
+  Chinese coverage for appearance, diagnostics, Gemini, Claude, and image
+  generation, plus several previously hard-coded interface labels.
+  中文：补齐简体中文资源，并扩展高级外观、诊断、Gemini、Claude 与图片生成的繁体
+  中文覆盖，同时汉化多处原先硬编码的界面文字。
+- English: Fixed the search-provider picker so its provider list scrolls while
+  Confirm and Cancel remain visible, and improved reproducible QA and offline
+  builds with a verified bundled icon dependency.
+  中文：修复搜索供应商选择列表遮挡“确定”和“取消”的问题，并通过校验后的内置图标
+  依赖改善 QA 与离线构建的可复现性。
 
 ## 2.4.8-revised.5 Maintenance Changes / 维护变更
 
@@ -158,7 +200,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.5` and signing values
+- `release` uses `2.4.8-revised.6` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.
