@@ -38,7 +38,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
@@ -51,9 +50,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -282,6 +283,22 @@ private fun ImageGenScreen(
     val outputCompression by vm.outputCompression.collectAsStateWithLifecycle()
     val resolution by vm.resolution.collectAsStateWithLifecycle()
     val thinkingLevel by vm.thinkingLevel.collectAsStateWithLifecycle()
+    val seed by vm.seed.collectAsStateWithLifecycle()
+    val steps by vm.steps.collectAsStateWithLifecycle()
+    val guidanceScale by vm.guidanceScale.collectAsStateWithLifecycle()
+    val negativePrompt by vm.negativePrompt.collectAsStateWithLifecycle()
+    val promptEnhancement by vm.promptEnhancement.collectAsStateWithLifecycle()
+    val promptEnhancementMode by vm.promptEnhancementMode.collectAsStateWithLifecycle()
+    val imageThinking by vm.imageThinking.collectAsStateWithLifecycle()
+    val watermark by vm.watermark.collectAsStateWithLifecycle()
+    val moderation by vm.moderation.collectAsStateWithLifecycle()
+    val inputFidelity by vm.inputFidelity.collectAsStateWithLifecycle()
+    val safetyTolerance by vm.safetyTolerance.collectAsStateWithLifecycle()
+    val sampler by vm.sampler.collectAsStateWithLifecycle()
+    val stylePreset by vm.stylePreset.collectAsStateWithLifecycle()
+    val sequentialImageGeneration by vm.sequentialImageGeneration.collectAsStateWithLifecycle()
+    val sequentialMaxImages by vm.sequentialMaxImages.collectAsStateWithLifecycle()
+    val promptOptimizationMode by vm.promptOptimizationMode.collectAsStateWithLifecycle()
     val geminiImageOptions by vm.geminiImageOptions.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val currentGeneratedImages by vm.currentGeneratedImages.collectAsStateWithLifecycle()
@@ -330,6 +347,40 @@ private fun ImageGenScreen(
         if (resolution !in selectedConstraints?.supportedResolutionValues.orEmpty()) vm.updateResolution(null)
         if (thinkingLevel !in selectedConstraints?.supportedThinkingValues.orEmpty()) {
             vm.updateThinkingLevel(null)
+        }
+        if (seed?.let { selectedConstraints?.seedRange?.contains(it) } != true) vm.updateSeed(null)
+        if (steps?.let { selectedConstraints?.stepsRange?.contains(it) } != true) vm.updateSteps(null)
+        if (guidanceScale?.let { selectedConstraints?.guidanceScaleRange?.contains(it) } != true) {
+            vm.updateGuidanceScale(null)
+        }
+        if (selectedConstraints?.supportsNegativePrompt != true) vm.updateNegativePrompt("")
+        if (selectedConstraints?.promptEnhancementRequestField == null) vm.updatePromptEnhancement(null)
+        if (promptEnhancementMode !in selectedConstraints?.supportedPromptEnhancementModes.orEmpty()) {
+            vm.updatePromptEnhancementMode(null)
+        }
+        if (selectedConstraints?.supportsImageThinking != true) vm.updateImageThinking(null)
+        if (selectedConstraints?.supportsWatermark != true) vm.updateWatermark(null)
+        if (moderation !in selectedConstraints?.supportedModerationValues.orEmpty()) {
+            vm.updateModeration(null)
+        }
+        if (inputFidelity !in selectedConstraints?.supportedInputFidelityValues.orEmpty()) {
+            vm.updateInputFidelity(null)
+        }
+        if (safetyTolerance?.let { selectedConstraints?.safetyToleranceRange?.contains(it) } != true) {
+            vm.updateSafetyTolerance(null)
+        }
+        if (sampler !in selectedConstraints?.supportedSamplerValues.orEmpty()) vm.updateSampler(null)
+        if (stylePreset !in selectedConstraints?.supportedStylePresetValues.orEmpty()) {
+            vm.updateStylePreset(null)
+        }
+        val sequentialImageMax = selectedConstraints?.sequentialImageMax
+        if (sequentialImageMax == null) {
+            vm.updateSequentialImageGeneration(null)
+        } else if (sequentialMaxImages > sequentialImageMax) {
+            vm.updateSequentialMaxImages(sequentialImageMax)
+        }
+        if (promptOptimizationMode !in selectedConstraints?.supportedPromptOptimizationModes.orEmpty()) {
+            vm.updatePromptOptimizationMode(null)
         }
     }
 
@@ -414,6 +465,7 @@ private fun ImageGenScreen(
                 numberOfImages = numberOfImages,
                 size = size,
                 maxOutputImages = maxOutputImages,
+                supportsOutputCount = selectedConstraints?.supportsOutputCount == true,
                 supportsSize = supportsSize,
                 supportedSizes = supportedSizes,
                 supportsCustomSize = selectedConstraints?.supportsCustomSize ?: true,
@@ -430,6 +482,22 @@ private fun ImageGenScreen(
                 outputCompression = outputCompression,
                 resolution = resolution,
                 thinkingLevel = thinkingLevel,
+                seed = seed,
+                steps = steps,
+                guidanceScale = guidanceScale,
+                negativePrompt = negativePrompt,
+                promptEnhancement = promptEnhancement,
+                promptEnhancementMode = promptEnhancementMode,
+                imageThinking = imageThinking,
+                watermark = watermark,
+                moderation = moderation,
+                inputFidelity = inputFidelity,
+                safetyTolerance = safetyTolerance,
+                sampler = sampler,
+                stylePreset = stylePreset,
+                sequentialImageGeneration = sequentialImageGeneration,
+                sequentialMaxImages = sequentialMaxImages,
+                promptOptimizationMode = promptOptimizationMode,
                 geminiImageOptions = geminiImageOptions,
                 supportedQualityValues = selectedConstraints?.supportedQualityValues.orEmpty(),
                 supportedOutputFormats = selectedConstraints?.supportedOutputFormats.orEmpty(),
@@ -437,6 +505,25 @@ private fun ImageGenScreen(
                 supportsOutputCompression = selectedConstraints?.supportsOutputCompression == true,
                 supportedResolutionValues = selectedConstraints?.supportedResolutionValues.orEmpty(),
                 supportedThinkingValues = selectedConstraints?.supportedThinkingValues.orEmpty(),
+                seedRange = selectedConstraints?.seedRange,
+                stepsRange = selectedConstraints?.stepsRange,
+                defaultSteps = selectedConstraints?.defaultSteps,
+                guidanceScaleRange = selectedConstraints?.guidanceScaleRange,
+                defaultGuidanceScale = selectedConstraints?.defaultGuidanceScale,
+                guidanceScaleRequestField = selectedConstraints?.guidanceScaleRequestField,
+                supportsNegativePrompt = selectedConstraints?.supportsNegativePrompt == true,
+                promptEnhancementRequestField = selectedConstraints?.promptEnhancementRequestField,
+                supportedPromptEnhancementModes = selectedConstraints?.supportedPromptEnhancementModes.orEmpty(),
+                supportsImageThinking = selectedConstraints?.supportsImageThinking == true,
+                supportsWatermark = selectedConstraints?.supportsWatermark == true,
+                supportedModerationValues = selectedConstraints?.supportedModerationValues.orEmpty(),
+                supportedInputFidelityValues = selectedConstraints?.supportedInputFidelityValues.orEmpty(),
+                safetyToleranceRange = selectedConstraints?.safetyToleranceRange,
+                defaultSafetyTolerance = selectedConstraints?.defaultSafetyTolerance,
+                supportedSamplerValues = selectedConstraints?.supportedSamplerValues.orEmpty(),
+                supportedStylePresetValues = selectedConstraints?.supportedStylePresetValues.orEmpty(),
+                sequentialImageMax = selectedConstraints?.sequentialImageMax,
+                supportedPromptOptimizationModes = selectedConstraints?.supportedPromptOptimizationModes.orEmpty(),
                 supportsGeminiTextResponse = selectedConstraints?.supportsTextResponse == true,
                 supportsGeminiSafetySettings = selectedConstraints?.supportsSafetySettings == true,
                 supportsGeminiWebSearch = selectedConstraints?.supportsWebSearchGrounding == true,
@@ -473,11 +560,11 @@ private fun InputBar(
     val editing = referenceImages.isNotEmpty()
     val selectableProviders = remember(settings.providers, editing) {
         settings.providers.mapNotNull { provider ->
-            val supportedModels = provider.models.mapNotNull { model ->
+            val supportedModels = provider.configuredImageModels().mapNotNull { model ->
                 val effectiveProvider = model.findProvider(settings.providers) ?: return@mapNotNull null
                 val constraints = vm.providerManager.imageGenerationConstraints(effectiveProvider, model)
                 val supported = if (editing) constraints.supportsEdit else constraints.supportsGeneration
-                model.copy(type = ModelType.IMAGE).takeIf { supported }
+                model.takeIf { supported }
             }
             provider.copyProvider(models = supportedModels).takeIf { supportedModels.isNotEmpty() }
         }
@@ -1440,6 +1527,7 @@ private fun SettingsBottomSheet(
     numberOfImages: Int,
     size: String,
     maxOutputImages: Int,
+    supportsOutputCount: Boolean,
     supportsSize: Boolean,
     supportedSizes: Set<String>?,
     supportsCustomSize: Boolean,
@@ -1456,6 +1544,22 @@ private fun SettingsBottomSheet(
     outputCompression: Int,
     resolution: String?,
     thinkingLevel: String?,
+    seed: Long?,
+    steps: Int?,
+    guidanceScale: Float?,
+    negativePrompt: String,
+    promptEnhancement: Boolean?,
+    promptEnhancementMode: String?,
+    imageThinking: Boolean?,
+    watermark: Boolean?,
+    moderation: String?,
+    inputFidelity: String?,
+    safetyTolerance: Int?,
+    sampler: String?,
+    stylePreset: String?,
+    sequentialImageGeneration: Boolean?,
+    sequentialMaxImages: Int,
+    promptOptimizationMode: String?,
     geminiImageOptions: GeminiImageGenerationOptions,
     supportedQualityValues: Set<String>,
     supportedOutputFormats: Set<String>,
@@ -1463,6 +1567,25 @@ private fun SettingsBottomSheet(
     supportsOutputCompression: Boolean,
     supportedResolutionValues: Set<String>,
     supportedThinkingValues: Set<String>,
+    seedRange: LongRange?,
+    stepsRange: IntRange?,
+    defaultSteps: Int?,
+    guidanceScaleRange: ClosedFloatingPointRange<Float>?,
+    defaultGuidanceScale: Float?,
+    guidanceScaleRequestField: String?,
+    supportsNegativePrompt: Boolean,
+    promptEnhancementRequestField: String?,
+    supportedPromptEnhancementModes: Set<String>,
+    supportsImageThinking: Boolean,
+    supportsWatermark: Boolean,
+    supportedModerationValues: Set<String>,
+    supportedInputFidelityValues: Set<String>,
+    safetyToleranceRange: IntRange?,
+    defaultSafetyTolerance: Int?,
+    supportedSamplerValues: Set<String>,
+    supportedStylePresetValues: Set<String>,
+    sequentialImageMax: Int?,
+    supportedPromptOptimizationModes: Set<String>,
     supportsGeminiTextResponse: Boolean,
     supportsGeminiSafetySettings: Boolean,
     supportsGeminiWebSearch: Boolean,
@@ -1475,6 +1598,11 @@ private fun SettingsBottomSheet(
 ) {
     var showGeminiParameterSummary by remember { mutableStateOf(false) }
     var showGeminiSafetySettings by remember { mutableStateOf(false) }
+    LaunchedEffect(referenceImageCount, promptEnhancementMode) {
+        if (referenceImageCount > 0 && promptEnhancementMode == "agent") {
+            vm.updatePromptEnhancementMode(null)
+        }
+    }
     if (showGeminiParameterSummary && geminiModelId != null && geminiRequestChannel != null) {
         GeminiImageParameterDialog(
             modelId = geminiModelId,
@@ -1498,68 +1626,72 @@ private fun SettingsBottomSheet(
             onDismiss = { showGeminiSafetySettings = false },
         )
     }
+    val settingsPagerState = rememberPagerState { 2 }
+    val settingsScope = rememberCoroutineScope()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
+        dragHandle = null,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
                 text = stringResource(R.string.imggen_page_settings_title),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
-
-            if (geminiModelId != null && geminiRequestChannel != null) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showGeminiParameterSummary = true },
-                ) {
-                    FormItem(
-                        modifier = Modifier.padding(12.dp),
-                        label = { Text(stringResource(R.string.imggen_page_gemini_parameters_title)) },
-                        description = {
-                            Text(stringResource(R.string.imggen_page_gemini_parameters_desc))
-                            Text(stringResource(R.string.imggen_page_gemini_parameters_experimental))
+            SecondaryTabRow(selectedTabIndex = settingsPagerState.currentPage) {
+                listOf(
+                    R.string.imggen_page_basic_options,
+                    R.string.imggen_page_advanced_options,
+                ).forEachIndexed { index, titleRes ->
+                    Tab(
+                        selected = settingsPagerState.currentPage == index,
+                        onClick = {
+                            settingsScope.launch { settingsPagerState.animateScrollToPage(index) }
                         },
-                        tail = {
-                            Icon(
-                                imageVector = HugeIcons.InformationCircle,
-                                contentDescription = stringResource(
-                                    R.string.imggen_page_gemini_parameters_details,
-                                ),
-                            )
-                        },
-                    ) {
-                        Text(
-                            text = geminiRequestChannel.displayName(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                        text = { Text(stringResource(titleRes)) },
+                    )
                 }
             }
+            HorizontalPager(
+                state = settingsPagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) { page ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    if (page == 0) {
+                        Text(
+                            text = stringResource(R.string.imggen_page_basic_options_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
 
-            FormItem(
-                label = { Text(stringResource(R.string.imggen_page_generation_count)) },
-                description = { Text(stringResource(R.string.imggen_page_generation_count_desc)) }
-            ) {
-                OutlinedNumberInput(
-                    value = numberOfImages,
-                    onValueChange = { vm.updateNumberOfImages(it.coerceAtMost(maxOutputImages)) },
-                    modifier = Modifier.width(120.dp)
-                )
+            if (supportsOutputCount) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_generation_count)) },
+                    description = { Text(stringResource(R.string.imggen_page_generation_count_desc)) }
+                ) {
+                    OutlinedNumberInput(
+                        value = numberOfImages,
+                        onValueChange = { vm.updateNumberOfImages(it.coerceAtMost(maxOutputImages)) },
+                        modifier = Modifier.width(120.dp)
+                    )
+                }
             }
 
             if (supportsSize) {
@@ -1740,28 +1872,6 @@ private fun SettingsBottomSheet(
                 )
             }
 
-            if (supportedBackgroundValues.isNotEmpty()) {
-                ImageOptionChips(
-                    title = stringResource(R.string.imggen_page_background),
-                    value = background,
-                    options = supportedBackgroundValues,
-                    onValueChange = vm::updateBackground,
-                )
-            }
-
-            if (supportsOutputCompression && outputFormat in setOf("jpeg", "webp")) {
-                FormItem(
-                    label = { Text(stringResource(R.string.imggen_page_output_compression)) },
-                    description = { Text(stringResource(R.string.imggen_page_output_compression_desc)) },
-                ) {
-                    OutlinedNumberInput(
-                        value = outputCompression,
-                        onValueChange = vm::updateOutputCompression,
-                        modifier = Modifier.width(120.dp),
-                    )
-                }
-            }
-
             if (supportedResolutionValues.isNotEmpty()) {
                 ImageOptionChips(
                     title = stringResource(R.string.imggen_page_resolution),
@@ -1783,6 +1893,357 @@ private fun SettingsBottomSheet(
                     value = thinkingLevel,
                     options = supportedThinkingValues,
                     onValueChange = vm::updateThinkingLevel,
+                )
+            }
+
+                    } else {
+                        Text(
+                            text = stringResource(R.string.imggen_page_advanced_options_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+            if (geminiModelId != null && geminiRequestChannel != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showGeminiParameterSummary = true },
+                ) {
+                    FormItem(
+                        modifier = Modifier.padding(12.dp),
+                        label = { Text(stringResource(R.string.imggen_page_gemini_parameters_title)) },
+                        description = {
+                            Text(stringResource(R.string.imggen_page_gemini_parameters_desc))
+                            Text(stringResource(R.string.imggen_page_gemini_parameters_experimental))
+                        },
+                        tail = {
+                            Icon(
+                                imageVector = HugeIcons.InformationCircle,
+                                contentDescription = stringResource(
+                                    R.string.imggen_page_gemini_parameters_details,
+                                ),
+                            )
+                        },
+                    ) {
+                        Text(
+                            text = geminiRequestChannel.displayName(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+
+            if (supportedModerationValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_moderation),
+                    description = stringResource(R.string.imggen_page_moderation_desc),
+                    value = moderation,
+                    options = supportedModerationValues,
+                    onValueChange = vm::updateModeration,
+                )
+            }
+
+            if (referenceImageCount > 0 && supportedInputFidelityValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_input_fidelity),
+                    description = stringResource(R.string.imggen_page_input_fidelity_desc),
+                    value = inputFidelity,
+                    options = supportedInputFidelityValues,
+                    onValueChange = vm::updateInputFidelity,
+                )
+            }
+
+            if (supportedBackgroundValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_background),
+                    description = stringResource(R.string.imggen_page_background_desc),
+                    value = background,
+                    options = supportedBackgroundValues,
+                    onValueChange = vm::updateBackground,
+                )
+            }
+
+            if (supportsOutputCompression && outputFormat in setOf("jpeg", "webp")) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_output_compression)) },
+                    description = { Text(stringResource(R.string.imggen_page_output_compression_desc)) },
+                ) {
+                    OutlinedNumberInput(
+                        value = outputCompression,
+                        onValueChange = vm::updateOutputCompression,
+                        modifier = Modifier.width(120.dp),
+                    )
+                }
+            }
+
+            val hasSamplingParameters = seedRange != null || stepsRange != null ||
+                guidanceScaleRange != null || supportsNegativePrompt ||
+                promptEnhancementRequestField != null || supportsWatermark ||
+                safetyToleranceRange != null || supportedSamplerValues.isNotEmpty() ||
+                supportedStylePresetValues.isNotEmpty() || sequentialImageMax != null ||
+                supportedPromptOptimizationModes.isNotEmpty()
+            if (hasSamplingParameters) {
+                Text(
+                    text = stringResource(R.string.imggen_page_sampling_parameters_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            seedRange?.let { range ->
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_seed)) },
+                    description = {
+                        Text(stringResource(R.string.imggen_page_seed_desc, range.first, range.last))
+                    },
+                    tail = {
+                        Switch(
+                            checked = seed != null,
+                            onCheckedChange = { enabled ->
+                                vm.updateSeed(if (enabled) range.first else null)
+                            },
+                        )
+                    },
+                ) {
+                    seed?.let { currentSeed ->
+                        OutlinedNumberInput(
+                            value = currentSeed,
+                            onValueChange = { vm.updateSeed(it.coerceIn(range)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = stringResource(R.string.imggen_page_seed),
+                        )
+                    }
+                }
+            }
+
+            stepsRange?.let { range ->
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_steps)) },
+                    description = {
+                        Text(stringResource(R.string.imggen_page_steps_desc, range.first, range.last))
+                    },
+                    tail = {
+                        Switch(
+                            checked = steps != null,
+                            onCheckedChange = { enabled ->
+                                vm.updateSteps(
+                                    if (enabled) (defaultSteps ?: range.first).coerceIn(range) else null
+                                )
+                            },
+                        )
+                    },
+                ) {
+                    steps?.let { currentSteps ->
+                        OutlinedNumberInput(
+                            value = currentSteps,
+                            onValueChange = { vm.updateSteps(it.coerceIn(range)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = stringResource(R.string.imggen_page_steps),
+                        )
+                    }
+                }
+            }
+
+            if (guidanceScaleRange != null && guidanceScaleRequestField != null) {
+                val range = guidanceScaleRange
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_guidance_scale)) },
+                    description = {
+                        Text(
+                            stringResource(
+                                R.string.imggen_page_guidance_scale_desc,
+                                range.start,
+                                range.endInclusive,
+                            )
+                        )
+                    },
+                    tail = {
+                        Switch(
+                            checked = guidanceScale != null,
+                            onCheckedChange = { enabled ->
+                                vm.updateGuidanceScale(
+                                    if (enabled) {
+                                        (defaultGuidanceScale ?: range.start).coerceIn(
+                                            range.start,
+                                            range.endInclusive,
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                )
+                            },
+                        )
+                    },
+                ) {
+                    guidanceScale?.let { currentGuidance ->
+                        OutlinedNumberInput(
+                            value = currentGuidance,
+                            onValueChange = {
+                                vm.updateGuidanceScale(it.coerceIn(range.start, range.endInclusive))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = stringResource(R.string.imggen_page_guidance_scale),
+                        )
+                    }
+                }
+            }
+
+            safetyToleranceRange?.let { range ->
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_safety_tolerance)) },
+                    description = {
+                        Text(
+                            stringResource(
+                                R.string.imggen_page_safety_tolerance_desc,
+                                range.first,
+                                range.last,
+                            )
+                        )
+                    },
+                    tail = {
+                        Switch(
+                            checked = safetyTolerance != null,
+                            onCheckedChange = { enabled ->
+                                vm.updateSafetyTolerance(
+                                    if (enabled) {
+                                        (defaultSafetyTolerance ?: range.first).coerceIn(range)
+                                    } else {
+                                        null
+                                    }
+                                )
+                            },
+                        )
+                    },
+                ) {
+                    safetyTolerance?.let { currentTolerance ->
+                        OutlinedNumberInput(
+                            value = currentTolerance,
+                            onValueChange = { vm.updateSafetyTolerance(it.coerceIn(range)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = stringResource(R.string.imggen_page_safety_tolerance),
+                        )
+                    }
+                }
+            }
+
+            if (supportedSamplerValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_sampler),
+                    description = stringResource(R.string.imggen_page_sampler_desc),
+                    value = sampler,
+                    options = supportedSamplerValues,
+                    onValueChange = vm::updateSampler,
+                )
+            }
+
+            if (supportedStylePresetValues.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_style_preset),
+                    description = stringResource(R.string.imggen_page_style_preset_desc),
+                    value = stylePreset,
+                    options = supportedStylePresetValues,
+                    onValueChange = vm::updateStylePreset,
+                )
+            }
+
+            if (supportsNegativePrompt) {
+                FormItem(
+                    label = { Text(stringResource(R.string.imggen_page_negative_prompt)) },
+                    description = { Text(stringResource(R.string.imggen_page_negative_prompt_desc)) },
+                ) {
+                    OutlinedTextField(
+                        value = negativePrompt,
+                        onValueChange = vm::updateNegativePrompt,
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 5,
+                        placeholder = { Text(stringResource(R.string.imggen_page_model_default)) },
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            promptEnhancementRequestField?.let {
+                ImageBooleanOptionChips(
+                    title = stringResource(R.string.imggen_page_prompt_enhancement),
+                    description = stringResource(R.string.imggen_page_prompt_enhancement_desc),
+                    value = promptEnhancement,
+                    onValueChange = vm::updatePromptEnhancement,
+                )
+            }
+
+            val availablePromptEnhancementModes = if (referenceImageCount > 0) {
+                supportedPromptEnhancementModes - "agent"
+            } else {
+                supportedPromptEnhancementModes
+            }
+            if (promptEnhancement != false && availablePromptEnhancementModes.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_prompt_enhancement_mode),
+                    description = stringResource(
+                        if (referenceImageCount > 0) {
+                            R.string.imggen_page_prompt_enhancement_mode_edit_desc
+                        } else {
+                            R.string.imggen_page_prompt_enhancement_mode_desc
+                        }
+                    ),
+                    value = promptEnhancementMode,
+                    options = availablePromptEnhancementModes,
+                    onValueChange = vm::updatePromptEnhancementMode,
+                )
+            }
+
+            if (supportsImageThinking && promptEnhancement != false) {
+                ImageBooleanOptionChips(
+                    title = stringResource(R.string.imggen_page_image_thinking),
+                    description = stringResource(R.string.imggen_page_image_thinking_desc),
+                    value = imageThinking,
+                    onValueChange = vm::updateImageThinking,
+                )
+            }
+
+            sequentialImageMax?.let { maxImages ->
+                ImageBooleanOptionChips(
+                    title = stringResource(R.string.imggen_page_sequential_generation),
+                    description = stringResource(R.string.imggen_page_sequential_generation_desc),
+                    value = sequentialImageGeneration,
+                    onValueChange = vm::updateSequentialImageGeneration,
+                )
+                if (sequentialImageGeneration == true) {
+                    FormItem(
+                        label = { Text(stringResource(R.string.imggen_page_sequential_max_images)) },
+                        description = {
+                            Text(stringResource(R.string.imggen_page_sequential_max_images_desc, maxImages))
+                        },
+                    ) {
+                        OutlinedNumberInput(
+                            value = sequentialMaxImages,
+                            onValueChange = {
+                                vm.updateSequentialMaxImages(it.coerceIn(1, maxImages))
+                            },
+                            modifier = Modifier.width(120.dp),
+                        )
+                    }
+                }
+            }
+
+            if (supportedPromptOptimizationModes.isNotEmpty()) {
+                ImageOptionChips(
+                    title = stringResource(R.string.imggen_page_prompt_optimization_mode),
+                    description = stringResource(R.string.imggen_page_prompt_optimization_mode_desc),
+                    value = promptOptimizationMode,
+                    options = supportedPromptOptimizationModes,
+                    onValueChange = vm::updatePromptOptimizationMode,
+                )
+            }
+
+            if (supportsWatermark) {
+                ImageBooleanOptionChips(
+                    title = stringResource(R.string.imggen_page_watermark),
+                    description = stringResource(R.string.imggen_page_watermark_desc),
+                    value = watermark,
+                    onValueChange = vm::updateWatermark,
                 )
             }
 
@@ -1857,7 +2318,10 @@ private fun SettingsBottomSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                }
+            }
         }
     }
 }
@@ -1886,12 +2350,50 @@ private fun ImageOptionChips(
             )
             options.forEach { option ->
                 val label = when (option) {
+                    "auto" -> stringResource(R.string.imggen_page_option_auto)
+                    "direct" -> stringResource(R.string.imggen_page_option_direct)
+                    "agent" -> stringResource(R.string.imggen_page_option_agent)
+                    "standard" -> stringResource(R.string.imggen_page_option_standard)
+                    "fast" -> stringResource(R.string.imggen_page_option_fast)
+                    "opaque" -> stringResource(R.string.imggen_page_option_opaque)
+                    "transparent" -> stringResource(R.string.imggen_page_option_transparent)
                     "off" -> stringResource(R.string.reasoning_off)
                     "low" -> stringResource(R.string.reasoning_light)
                     "medium" -> stringResource(R.string.reasoning_medium)
                     "high" -> stringResource(R.string.reasoning_heavy)
                     else -> option
                 }
+                FilterChip(
+                    selected = value == option,
+                    onClick = { onValueChange(option) },
+                    label = { Text(label) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ImageBooleanOptionChips(
+    title: String,
+    description: String,
+    value: Boolean?,
+    onValueChange: (Boolean?) -> Unit,
+) {
+    FormItem(
+        label = { Text(title) },
+        description = { Text(description) },
+    ) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            listOf(
+                null to stringResource(R.string.imggen_page_model_default),
+                true to stringResource(R.string.imggen_page_enabled),
+                false to stringResource(R.string.imggen_page_disabled),
+            ).forEach { (option, label) ->
                 FilterChip(
                     selected = value == option,
                     onClick = { onValueChange(option) },

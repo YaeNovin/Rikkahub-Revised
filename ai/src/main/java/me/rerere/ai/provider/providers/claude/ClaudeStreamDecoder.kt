@@ -31,7 +31,11 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
         val dataJson = json.parseToJsonElement(event.data).jsonObject
-        if (event.event == "error") {
+        // Compatibility relays sometimes omit the SSE event field and retain only the
+        // Anthropic event type inside the JSON payload.
+        val eventType = event.event?.takeUnless { it.isBlank() }
+            ?: dataJson["type"]?.jsonPrimitive?.contentOrNull
+        if (eventType == "error") {
             throw (dataJson["error"] ?: dataJson).parseErrorDetail()
         }
 
@@ -48,69 +52,97 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
             val index = dataJson["index"]?.jsonPrimitive?.intOrNull
             val contentBlock = dataJson["content_block"]?.jsonObject
 
-            if (event.event == "content_block_start" && index != null && contentBlock != null) {
+            if (eventType == "content_block_start" && index != null && contentBlock != null) {
                 val kind = contentBlock["type"]?.jsonPrimitive?.contentOrNull ?: ""
+                val previous = blocks[index]
                 val blockId = contentBlock["id"]?.jsonPrimitive?.contentOrNull
                     ?: contentBlock["tool_use_id"]?.jsonPrimitive?.contentOrNull
+                    ?: previous?.id
                     ?: "${responseId ?: event.id ?: "response"}:block-$index"
                 val metadata = when (kind) {
                     "thinking" -> contentBlock["signature"]?.jsonPrimitive?.contentOrNull?.let {
                         ClaudeReasoningMetadata(signature = it).toMetadata()
-                    }
+                    } ?: previous?.metadata
                     else -> null
                 }
                 blocks[index] = ClaudeStreamBlock(kind, blockId, metadata)
-                when (kind) {
-                    "text" -> add(StreamChunk.TextStart(blockId))
-                    "thinking", "redacted_thinking" -> add(StreamChunk.ReasoningStart(blockId, metadata))
-                    "tool_use" -> {
-                        add(StreamChunk.ToolCallStart(
+                if (previous == null) {
+                    when (kind) {
+                        "text" -> add(StreamChunk.TextStart(blockId))
+                        "thinking", "redacted_thinking" -> add(StreamChunk.ReasoningStart(blockId, metadata))
+                        "tool_use" -> add(StreamChunk.ToolCallStart(
                             id = blockId,
                             toolName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: "",
                         ))
-                        val input = contentBlock["input"]?.jsonObject
-                        if (input != null && input.isNotEmpty()) {
-                            add(StreamChunk.ToolCallDelta(
+                        else -> if (kind.isClaudeServerToolUseType()) {
+                            add(StreamChunk.ServerToolStart(
                                 id = blockId,
-                                inputDelta = json.encodeToString(input),
+                                toolName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                                input = contentBlock["input"],
+                                metadata = ServerToolMetadata(
+                                    protocol = ServerToolProtocol.ANTHROPIC_MESSAGES,
+                                    call = contentBlock,
+                                    callIndex = index,
+                                ).toMetadata(),
+                            ))
+                        } else if (kind.isClaudeServerToolResultType()) {
+                            val output = contentBlock["content"]
+                            add(StreamChunk.ServerToolEnd(
+                                id = blockId,
+                                output = output,
+                                status = if (output.isClaudeServerToolError()) {
+                                    ServerToolStatus.FAILED
+                                } else {
+                                    ServerToolStatus.COMPLETED
+                                },
+                                metadata = ServerToolMetadata(
+                                    protocol = ServerToolProtocol.ANTHROPIC_MESSAGES,
+                                    result = contentBlock,
+                                    resultIndex = index,
+                                ).toMetadata(),
                             ))
                         }
                     }
-                    else -> if (kind.isClaudeServerToolUseType()) {
-                        add(StreamChunk.ServerToolStart(
-                            id = blockId,
-                            toolName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                            input = contentBlock["input"],
-                            metadata = ServerToolMetadata(
-                                protocol = ServerToolProtocol.ANTHROPIC_MESSAGES,
-                                call = contentBlock,
-                                callIndex = index,
-                            ).toMetadata(),
-                        ))
-                    } else if (kind.isClaudeServerToolResultType()) {
-                        val output = contentBlock["content"]
-                        add(StreamChunk.ServerToolEnd(
-                            id = blockId,
-                            output = output,
-                            status = if (output.isClaudeServerToolError()) {
-                                ServerToolStatus.FAILED
-                            } else {
-                                ServerToolStatus.COMPLETED
-                            },
-                            metadata = ServerToolMetadata(
-                                protocol = ServerToolProtocol.ANTHROPIC_MESSAGES,
-                                result = contentBlock,
-                                resultIndex = index,
-                            ).toMetadata(),
-                        ))
-                    }
+                } else if (kind == "tool_use") {
+                    // If a delta arrived first, update the temporary tool with its real name.
+                    contentBlock["name"]?.jsonPrimitive?.contentOrNull
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { add(StreamChunk.ToolCallStart(blockId, it)) }
+                }
+                val input = contentBlock["input"]
+                if (kind == "tool_use" && input != null &&
+                    (input !is JsonObject || input.isNotEmpty())
+                ) {
+                    add(StreamChunk.ToolCallDelta(
+                        id = blockId,
+                        inputDelta = input.toString(),
+                    ))
                 }
             }
 
-            if (event.event == "content_block_delta" && index != null) {
-                val block = blocks[index] ?: error("Unknown content block index: $index")
+            if (eventType == "content_block_delta" && index != null) {
                 val delta = dataJson["delta"]?.jsonObject ?: JsonObject(emptyMap())
-                when (delta["type"]?.jsonPrimitive?.contentOrNull) {
+                val deltaType = delta["type"]?.jsonPrimitive?.contentOrNull
+                // Official streams send content_block_start first, but compatible gateways may
+                // drop it. Create a minimal block so short calls are not reported as interrupted.
+                val block = blocks[index] ?: run {
+                    val kind = when (deltaType) {
+                        "text_delta" -> "text"
+                        "thinking_delta", "signature_delta" -> "thinking"
+                        "input_json_delta" -> "tool_use"
+                        else -> ""
+                    }
+                    val id = "${responseId ?: event.id ?: "response"}:block-$index"
+                    val created = ClaudeStreamBlock(kind, id)
+                    blocks[index] = created
+                    when (kind) {
+                        "text" -> add(StreamChunk.TextStart(id))
+                        "thinking" -> add(StreamChunk.ReasoningStart(id))
+                        "tool_use" -> add(StreamChunk.ToolCallStart(id, ""))
+                    }
+                    created
+                }
+                when (deltaType) {
                     "text_delta" -> add(StreamChunk.TextDelta(
                         block.id,
                         delta["text"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -138,13 +170,13 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
                 }
             }
 
-            if (event.event == "content_block_stop" && index != null) {
-                val block = blocks.remove(index) ?: error("Unknown content block index: $index")
-                endBlock(block)?.let(::add)
+            if (eventType == "content_block_stop" && index != null) {
+                // Ignore duplicate/late stop events from relays.
+                blocks.remove(index)?.let { block -> endBlock(block)?.let(::add) }
             }
         }
 
-        return if (event.event == "message_stop") {
+        return if (eventType == "message_stop") {
             DecodeResult(chunks + finish(), completed = true)
         } else {
             DecodeResult(chunks)

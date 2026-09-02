@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -36,8 +37,11 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.workspace.WorkspaceFileRevision
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 
@@ -53,6 +57,7 @@ fun WorkspaceFileEditorPage(
     path: String,
 ) {
     val context = LocalContext.current
+    val navController = LocalNavController.current
     val repository = koinInject<WorkspaceRepository>()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
@@ -64,14 +69,29 @@ fun WorkspaceFileEditorPage(
     var loading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    var loadedText by remember(id, area, path) { mutableStateOf("") }
+    var loadedRevision by remember(id, area, path) { mutableStateOf<WorkspaceFileRevision?>(null) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val hasUnsavedChanges = editable && !loading && textState.text.toString() != loadedText
+
+    fun requestBack() {
+        if (hasUnsavedChanges) showDiscardDialog = true else navController.popBackStack()
+    }
+
+    BackHandler(enabled = hasUnsavedChanges) { showDiscardDialog = true }
 
     LaunchedEffect(id, area, path) {
         loading = true
         loadError = null
         runCatching {
-            repository.readTextForPreview(id, area, path)
+            if (editable) {
+                repository.readTextSnapshot(id, path).also { loadedRevision = it.revision }.text
+            } else {
+                repository.readTextForPreview(id, area, path)
+            }
         }.onSuccess { content ->
             textState.setTextAndPlaceCursorAtEnd(content)
+            loadedText = content
             loading = false
         }.onFailure {
             loadError = context.formatUserFacingError(it)
@@ -89,7 +109,7 @@ fun WorkspaceFileEditorPage(
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
-                navigationIcon = { BackButton() },
+                navigationIcon = { BackButton(onClick = ::requestBack) },
                 actions = {
                     if (editable && !loading && loadError == null) {
                         TextButton(
@@ -103,8 +123,12 @@ fun WorkspaceFileEditorPage(
                                             path = path,
                                             text = textState.text.toString(),
                                             overwrite = true,
+                                            expectedRevision = loadedRevision,
                                         )
+                                        repository.readTextSnapshot(id, path)
                                     }.onSuccess {
+                                        loadedRevision = it.revision
+                                        loadedText = it.text
                                         toaster.show(saveSuccessMessage, type = ToastType.Success)
                                     }.onFailure {
                                         toaster.show(context.formatUserFacingError(it), type = ToastType.Error)
@@ -160,5 +184,19 @@ fun WorkspaceFileEditorPage(
                 ),
             )
         }
+    }
+
+    RikkaConfirmDialog(
+        show = showDiscardDialog,
+        title = stringResource(R.string.workspace_file_editor_discard_title),
+        confirmText = stringResource(R.string.workspace_file_editor_discard),
+        dismissText = stringResource(R.string.common_cancel),
+        onConfirm = {
+            showDiscardDialog = false
+            navController.popBackStack()
+        },
+        onDismiss = { showDiscardDialog = false },
+    ) {
+        Text(stringResource(R.string.workspace_file_editor_discard_desc))
     }
 }

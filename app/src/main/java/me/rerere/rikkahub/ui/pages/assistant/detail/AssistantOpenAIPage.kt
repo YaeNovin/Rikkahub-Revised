@@ -34,10 +34,11 @@ import me.rerere.ai.provider.OpenAIReasoningSummary
 import me.rerere.ai.provider.OpenAIServiceTier
 import me.rerere.ai.provider.OpenAITextVerbosity
 import me.rerere.ai.provider.OpenAIToolChoice
-import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.providers.openai.requestChannel
 import me.rerere.ai.provider.providers.openai.resolveOpenAIModelParameterSupport
+import me.rerere.ai.provider.resolveParameterFamily
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -57,15 +58,17 @@ fun AssistantOpenAIPage(id: String) {
     val providers by vm.providers.collectAsStateWithLifecycle()
     val model = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val provider = model?.findProvider(providers) as? ProviderSetting.OpenAI
-    val support = resolveOpenAIModelParameterSupport(model?.modelId.orEmpty())
-    val enabled = provider != null && support.available
+    val support = resolveOpenAIModelParameterSupport(model?.parameterModelId().orEmpty())
+    val enabled = model != null && provider != null &&
+        model.resolveParameterFamily(provider) == ModelParameterFamily.OPENAI &&
+        !support.retired
     val isResponses = provider?.useResponseApi == true
-    val isOfficial = provider?.requestChannel() == ProviderRequestChannel.OPENAI_API
+    val route = provider?.parameterRequestRoute()
+    val isOfficial = route?.endpoint == ParameterEndpoint.OPENAI
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_openai_unavailable_no_model)
         provider == null -> stringResource(R.string.assistant_openai_unavailable_protocol)
         support.retired -> stringResource(R.string.assistant_openai_unavailable_retired)
-        !support.available -> stringResource(R.string.assistant_openai_unavailable_model)
         else -> null
     }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -73,7 +76,14 @@ fun AssistantOpenAIPage(id: String) {
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.assistant_page_tab_openai)) },
+                title = {
+                    Text(
+                        stringResource(
+                            if (support.available) R.string.assistant_page_tab_openai
+                            else R.string.assistant_page_tab_model_parameters
+                        )
+                    )
+                },
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
@@ -93,7 +103,7 @@ fun AssistantOpenAIPage(id: String) {
             supportsReasoningContext = support.supportsReasoningContext,
             supportsReasoningMode = support.supportsReasoningMode,
             supportsUltrafast = support.supportsUltrafast && isOfficial,
-            channel = provider?.requestChannel(),
+            route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
         )
@@ -112,7 +122,7 @@ private fun AssistantOpenAIContent(
     supportsReasoningContext: Boolean,
     supportsReasoningMode: Boolean,
     supportsUltrafast: Boolean,
-    channel: ProviderRequestChannel?,
+    route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
 ) {
@@ -138,18 +148,21 @@ private fun AssistantOpenAIContent(
                 modifier = Modifier.padding(12.dp),
                 label = { Text(stringResource(R.string.assistant_openai_experimental_title)) },
                 description = {
-                    Text(unavailableMessage ?: stringResource(R.string.assistant_openai_available_desc))
-                    channel?.let {
-                        Text(
-                            stringResource(
-                                R.string.assistant_openai_current_channel,
-                                it.openAIDisplayName(),
-                                if (isResponses) "Responses" else "Chat Completions",
-                            )
+                    Text(
+                        unavailableMessage ?: stringResource(
+                            if (supportsVerbosity || supportsReasoningOptions) {
+                                R.string.assistant_openai_available_desc
+                            } else {
+                                R.string.assistant_openai_compatible_model_desc
+                            }
                         )
-                    }
+                    )
+                    route?.DisplayText()
                     Text(stringResource(R.string.assistant_openai_apply_and_log_desc))
-                    Text(stringResource(R.string.assistant_openai_compatible_warning))
+                    ParameterWarningText(stringResource(R.string.assistant_parameter_experimental_warning))
+                    if (route?.endpoint == ParameterEndpoint.THIRD_PARTY) {
+                        ParameterWarningText(stringResource(R.string.assistant_openai_compatible_warning))
+                    }
                 },
             )
         }
@@ -284,7 +297,7 @@ private fun <T> OpenAISelectItem(
         label = { Text(title) },
         description = {
             Text(description)
-            Text(warning)
+            ParameterWarningText(warning)
         },
     ) {
         Select(
@@ -309,7 +322,7 @@ private fun OpenAIMaxToolCallsItem(
         label = { Text(stringResource(R.string.assistant_openai_max_tool_calls)) },
         description = {
             Text(stringResource(R.string.assistant_openai_max_tool_calls_desc))
-            Text(stringResource(R.string.assistant_openai_max_tool_calls_warning))
+            ParameterWarningText(stringResource(R.string.assistant_openai_max_tool_calls_warning))
         },
     ) {
         OutlinedTextField(
@@ -328,18 +341,6 @@ private fun OpenAIMaxToolCallsItem(
         )
     }
 }
-
-@Composable
-private fun ProviderRequestChannel.openAIDisplayName(): String = stringResource(
-    when (this) {
-        ProviderRequestChannel.ANTHROPIC_API -> R.string.log_page_channel_anthropic_api
-        ProviderRequestChannel.OPENAI_API -> R.string.log_page_channel_openai_api
-        ProviderRequestChannel.XAI_API -> R.string.log_page_channel_xai_api
-        ProviderRequestChannel.COMPATIBLE_ENDPOINT -> R.string.log_page_channel_compatible
-        ProviderRequestChannel.GOOGLE_AI_STUDIO -> R.string.log_page_channel_google_ai_studio
-        ProviderRequestChannel.VERTEX_AI -> R.string.log_page_channel_vertex_ai
-    }
-)
 
 @Composable
 private fun OpenAITextVerbosity.displayName(): String = stringResource(

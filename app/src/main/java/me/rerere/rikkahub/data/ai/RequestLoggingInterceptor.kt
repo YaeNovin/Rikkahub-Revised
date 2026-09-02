@@ -26,7 +26,9 @@ private const val MAX_LOGGED_ERROR_BODY_BYTES = 16L * 1024L
 private const val MAX_LOGGED_ERROR_REASON_CHARS = 2_048
 private const val REDACTED = "[REDACTED]"
 
-class RequestLoggingInterceptor : Interceptor {
+class RequestLoggingInterceptor(
+    private val requestStatisticsRecorder: RequestStatisticsRecorder? = null,
+) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val diagnostics = request.tag(ProviderRequestDiagnostics::class.java)
@@ -36,6 +38,7 @@ class RequestLoggingInterceptor : Interceptor {
         }
 
         val startTime = System.currentTimeMillis()
+        val startNanos = System.nanoTime()
         val requestHeaders = if (recordHttpRequest) request.headers.toSafeMap() else emptyMap()
         val requestBody = if (recordHttpRequest) request.body.readSanitizedBody() else null
 
@@ -46,7 +49,9 @@ class RequestLoggingInterceptor : Interceptor {
             response = chain.proceed(request)
         } catch (e: Exception) {
             error = sanitizeErrorMessage(e.message)
-            val durationMs = System.currentTimeMillis() - startTime
+            val completedAt = System.currentTimeMillis()
+            val durationNanos = (System.nanoTime() - startNanos).coerceAtLeast(0L)
+            val durationMs = durationNanos / 1_000_000L
             buildUnifiedRequestLog(
                 diagnostics = diagnostics,
                 recordHttpRequest = recordHttpRequest,
@@ -57,10 +62,20 @@ class RequestLoggingInterceptor : Interceptor {
                 durationMs = durationMs,
                 error = error,
             )?.record()
+            requestStatisticsRecorder?.record(
+                diagnostics = diagnostics,
+                timestamp = startTime,
+                responseCode = null,
+                durationMs = durationMs,
+                totalDurationNanos = durationNanos,
+                completedAt = completedAt,
+            )
             throw e
         }
 
-        val durationMs = System.currentTimeMillis() - startTime
+        val completedAt = System.currentTimeMillis()
+        val durationNanos = (System.nanoTime() - startNanos).coerceAtLeast(0L)
+        val durationMs = durationNanos / 1_000_000L
         if (!response.isSuccessful) {
             error = response.readSafeErrorReason()
         }
@@ -76,6 +91,14 @@ class RequestLoggingInterceptor : Interceptor {
             durationMs = durationMs,
             error = error,
         )?.record()
+        requestStatisticsRecorder?.record(
+            diagnostics = diagnostics,
+            timestamp = startTime,
+            responseCode = response.code,
+            durationMs = durationMs,
+            totalDurationNanos = durationNanos,
+            completedAt = completedAt,
+        )
 
         return response
     }

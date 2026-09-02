@@ -53,6 +53,8 @@ data class MessageTokenStats(
     val promptTokens: Long = 0,
     val completionTokens: Long = 0,
     val cachedTokens: Long = 0,
+    val requestCount: Int = 0,
+    val usedModels: Int = 0,
 )
 
 data class MessageDayCount(val day: String, val count: Int)
@@ -62,7 +64,10 @@ private val TOKEN_STATS_SQL = SimpleSQLiteQuery(
     "SELECT COUNT(*) AS totalMessages, " +
         "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.promptTokens') AS INTEGER)), 0) AS promptTokens, " +
         "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.completionTokens') AS INTEGER)), 0) AS completionTokens, " +
-        "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.cachedTokens') AS INTEGER)), 0) AS cachedTokens " +
+        "COALESCE(SUM(CAST(json_extract(j.value, '$.usage.cachedTokens') AS INTEGER)), 0) AS cachedTokens, " +
+        "COALESCE(SUM(CASE WHEN json_type(j.value, '$.modelId') = 'text' THEN 1 ELSE 0 END), 0) AS requestCount, " +
+        "COUNT(DISTINCT CASE WHEN json_type(j.value, '$.modelId') = 'text' " +
+        "THEN json_extract(j.value, '$.modelId') END) AS usedModels " +
         "FROM message_node mn, json_each(mn.messages) j"
 )
 
@@ -81,4 +86,3 @@ suspend fun MessageNodeDAO.getMessageCountPerDay(startDate: String): List<Messag
             arrayOf(startDate)
         )
     )
-

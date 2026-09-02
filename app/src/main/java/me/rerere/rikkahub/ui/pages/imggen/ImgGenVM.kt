@@ -144,6 +144,54 @@ class ImgGenVM(
     private val _thinkingLevel = MutableStateFlow<String?>(null)
     val thinkingLevel: StateFlow<String?> = _thinkingLevel
 
+    private val _seed = MutableStateFlow<Long?>(null)
+    val seed: StateFlow<Long?> = _seed
+
+    private val _steps = MutableStateFlow<Int?>(null)
+    val steps: StateFlow<Int?> = _steps
+
+    private val _guidanceScale = MutableStateFlow<Float?>(null)
+    val guidanceScale: StateFlow<Float?> = _guidanceScale
+
+    private val _negativePrompt = MutableStateFlow("")
+    val negativePrompt: StateFlow<String> = _negativePrompt
+
+    private val _promptEnhancement = MutableStateFlow<Boolean?>(null)
+    val promptEnhancement: StateFlow<Boolean?> = _promptEnhancement
+
+    private val _promptEnhancementMode = MutableStateFlow<String?>(null)
+    val promptEnhancementMode: StateFlow<String?> = _promptEnhancementMode
+
+    private val _imageThinking = MutableStateFlow<Boolean?>(null)
+    val imageThinking: StateFlow<Boolean?> = _imageThinking
+
+    private val _watermark = MutableStateFlow<Boolean?>(null)
+    val watermark: StateFlow<Boolean?> = _watermark
+
+    private val _moderation = MutableStateFlow<String?>(null)
+    val moderation: StateFlow<String?> = _moderation
+
+    private val _inputFidelity = MutableStateFlow<String?>(null)
+    val inputFidelity: StateFlow<String?> = _inputFidelity
+
+    private val _safetyTolerance = MutableStateFlow<Int?>(null)
+    val safetyTolerance: StateFlow<Int?> = _safetyTolerance
+
+    private val _sampler = MutableStateFlow<String?>(null)
+    val sampler: StateFlow<String?> = _sampler
+
+    private val _stylePreset = MutableStateFlow<String?>(null)
+    val stylePreset: StateFlow<String?> = _stylePreset
+
+    private val _sequentialImageGeneration = MutableStateFlow<Boolean?>(null)
+    val sequentialImageGeneration: StateFlow<Boolean?> = _sequentialImageGeneration
+
+    private val _sequentialMaxImages = MutableStateFlow(15)
+    val sequentialMaxImages: StateFlow<Int> = _sequentialMaxImages
+
+    private val _promptOptimizationMode = MutableStateFlow<String?>(null)
+    val promptOptimizationMode: StateFlow<String?> = _promptOptimizationMode
+
     private val _geminiImageOptions = MutableStateFlow(GeminiImageGenerationOptions())
     val geminiImageOptions: StateFlow<GeminiImageGenerationOptions> = _geminiImageOptions
 
@@ -396,6 +444,70 @@ class ImgGenVM(
         _thinkingLevel.value = value
     }
 
+    fun updateSeed(value: Long?) {
+        _seed.value = value
+    }
+
+    fun updateSteps(value: Int?) {
+        _steps.value = value
+    }
+
+    fun updateGuidanceScale(value: Float?) {
+        _guidanceScale.value = value
+    }
+
+    fun updateNegativePrompt(value: String) {
+        _negativePrompt.value = value
+    }
+
+    fun updatePromptEnhancement(value: Boolean?) {
+        _promptEnhancement.value = value
+    }
+
+    fun updatePromptEnhancementMode(value: String?) {
+        _promptEnhancementMode.value = value
+    }
+
+    fun updateImageThinking(value: Boolean?) {
+        _imageThinking.value = value
+    }
+
+    fun updateWatermark(value: Boolean?) {
+        _watermark.value = value
+    }
+
+    fun updateModeration(value: String?) {
+        _moderation.value = value
+    }
+
+    fun updateInputFidelity(value: String?) {
+        _inputFidelity.value = value
+    }
+
+    fun updateSafetyTolerance(value: Int?) {
+        _safetyTolerance.value = value
+    }
+
+    fun updateSampler(value: String?) {
+        _sampler.value = value
+    }
+
+    fun updateStylePreset(value: String?) {
+        _stylePreset.value = value
+    }
+
+    fun updateSequentialImageGeneration(value: Boolean?) {
+        _sequentialImageGeneration.value = value
+    }
+
+    fun updateSequentialMaxImages(value: Int) {
+        _sequentialMaxImages.value = value.coerceIn(1, 15)
+    }
+
+    fun updatePromptOptimizationMode(value: String?) {
+        _promptOptimizationMode.value = value
+    }
+
     fun updateGeminiTextResponse(enabled: Boolean) {
         _geminiImageOptions.value = _geminiImageOptions.value.copy(includeTextResponse = enabled)
     }
@@ -491,6 +603,21 @@ class ImgGenVM(
                     outputCompression = _outputCompression.value,
                     resolution = _resolution.value,
                     thinkingLevel = _thinkingLevel.value,
+                    seed = _seed.value,
+                    steps = _steps.value,
+                    guidanceScale = _guidanceScale.value,
+                    negativePrompt = _negativePrompt.value,
+                    promptEnhancement = _promptEnhancement.value,
+                    promptEnhancementMode = _promptEnhancementMode.value,
+                    imageThinking = _imageThinking.value,
+                    watermark = _watermark.value,
+                    moderation = _moderation.value,
+                    safetyTolerance = _safetyTolerance.value,
+                    sampler = _sampler.value,
+                    stylePreset = _stylePreset.value,
+                    sequentialImageGeneration = _sequentialImageGeneration.value,
+                    sequentialMaxImages = _sequentialMaxImages.value,
+                    promptOptimizationMode = _promptOptimizationMode.value,
                     geminiOptions = _geminiImageOptions.value,
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies
@@ -504,7 +631,7 @@ class ImgGenVM(
                     prompt = requestPrompt,
                     modelName = model.displayName,
                     providerName = provider.name,
-                    requestedSeed = model.customBodies.requestedSeed(),
+                    requestedSeed = params.seed ?: model.customBodies.requestedSeed(),
                 )
             } catch (e: Exception) {
                 if(e is CancellationException) return@launch
@@ -553,6 +680,22 @@ class ImgGenVM(
                     outputCompression = _outputCompression.value,
                     resolution = _resolution.value,
                     thinkingLevel = _thinkingLevel.value,
+                    seed = _seed.value,
+                    steps = _steps.value,
+                    guidanceScale = _guidanceScale.value,
+                    negativePrompt = _negativePrompt.value,
+                    promptEnhancement = _promptEnhancement.value,
+                    promptEnhancementMode = _promptEnhancementMode.value,
+                    imageThinking = _imageThinking.value,
+                    watermark = _watermark.value,
+                    moderation = _moderation.value,
+                    inputFidelity = _inputFidelity.value,
+                    safetyTolerance = _safetyTolerance.value,
+                    sampler = _sampler.value,
+                    stylePreset = _stylePreset.value,
+                    sequentialImageGeneration = _sequentialImageGeneration.value,
+                    sequentialMaxImages = _sequentialMaxImages.value,
+                    promptOptimizationMode = _promptOptimizationMode.value,
                     geminiOptions = _geminiImageOptions.value,
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies
@@ -566,7 +709,7 @@ class ImgGenVM(
                     prompt = requestPrompt,
                     modelName = model.displayName,
                     providerName = provider.name,
-                    requestedSeed = model.customBodies.requestedSeed(),
+                    requestedSeed = params.seed ?: model.customBodies.requestedSeed(),
                     type = GenMediaEntity.TYPE_IMAGE_EDIT,
                     sourcePaths = sourceImages.joinToString("\n"),
                 )

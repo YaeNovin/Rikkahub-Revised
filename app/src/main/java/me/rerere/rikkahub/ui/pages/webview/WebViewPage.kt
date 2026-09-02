@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
@@ -44,6 +45,49 @@ import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import org.jsoup.Jsoup
+
+private const val FULLSCREEN_PREVIEW_STYLE_ID = "rikkahub-fullscreen-preview-style"
+private const val FULLSCREEN_PREVIEW_BODY_CLASS = "rikkahub-fullscreen-preview"
+
+internal fun prepareFullscreenPreviewHtml(content: String): String {
+    if (content.isBlank()) return content
+    val document = Jsoup.parse(content)
+    document.outputSettings().prettyPrint(false)
+    document.body().addClass(FULLSCREEN_PREVIEW_BODY_CLASS)
+    document.head().select("#$FULLSCREEN_PREVIEW_STYLE_ID").remove()
+    document.head().appendElement("style")
+        .attr("id", FULLSCREEN_PREVIEW_STYLE_ID)
+        .appendText(
+            """
+                html {
+                    width: 100%;
+                    height: 100%;
+                    margin: 0;
+                    overflow: auto !important;
+                    touch-action: pan-x pan-y pinch-zoom;
+                }
+                body.$FULLSCREEN_PREVIEW_BODY_CLASS {
+                    box-sizing: border-box;
+                    width: 100%;
+                    min-width: 100%;
+                    min-height: 100%;
+                    height: 100%;
+                    margin: 0;
+                    overflow: auto !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    touch-action: pan-x pan-y pinch-zoom;
+                    -webkit-overflow-scrolling: touch;
+                }
+                body.$FULLSCREEN_PREVIEW_BODY_CLASS > :not(script):not(style):not(link):not([hidden]) {
+                    flex: 0 0 auto;
+                    margin: auto;
+                }
+            """.trimIndent(),
+        )
+    return document.outerHtml()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,7 +104,9 @@ fun WebViewPage(url: String, contentId: String) {
             })
     } else {
         val content = remember(contentId) {
-            WebViewContentCache.load(context.cacheDir, contentId).orEmpty()
+            prepareFullscreenPreviewHtml(
+                WebViewContentCache.load(context.cacheDir, contentId).orEmpty(),
+            )
         }
         rememberWebViewState(
             data = content,
@@ -84,6 +130,7 @@ fun WebViewPage(url: String, contentId: String) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
@@ -156,6 +203,7 @@ fun WebViewPage(url: String, contentId: String) {
     ) {
         WebView(
             state = state,
+            transparentBackground = url.isEmpty(),
             modifier = Modifier
                 .fillMaxSize()
                 .padding(it),

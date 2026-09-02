@@ -45,6 +45,16 @@ class ProviderRequestException(
     cause: Throwable? = null,
 ) : IOException(message, cause)
 
+fun Throwable.providerStatusCode(): Int? {
+    val statusCodes = generateSequence(this) { it.cause }
+        .take(16)
+        .filterIsInstance<ProviderRequestException>()
+        .mapNotNull(ProviderRequestException::statusCode)
+        .filter { it in 100..599 }
+        .toList()
+    return statusCodes.firstOrNull { it !in 200..299 } ?: statusCodes.firstOrNull()
+}
+
 fun providerRequestFailure(
     response: Response?,
     cause: Throwable?,

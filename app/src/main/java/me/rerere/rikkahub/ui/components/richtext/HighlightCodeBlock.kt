@@ -79,10 +79,67 @@ import me.rerere.rikkahub.ui.theme.AtomOneLightPalette
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.toDp
+import org.jsoup.Jsoup
 import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
 private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
+private val DIFF_LANGUAGES = setOf(
+    "diff",
+    "patch",
+    "udiff",
+    "unified-diff",
+    "git-diff",
+)
+
+internal fun normalizeCodeFenceLanguage(language: String): String = language
+    .trim()
+    .lowercase()
+    .removePrefix("language-")
+    .removePrefix("{")
+    .removeSuffix("}")
+    .removePrefix(".")
+    .substringBefore(' ')
+    .substringBefore(',')
+
+internal fun isDiffCodeFenceLanguage(language: String): Boolean =
+    normalizeCodeFenceLanguage(language) in DIFF_LANGUAGES
+
+internal fun looksLikeUnifiedDiff(code: String): Boolean {
+    var hasOldFile = false
+    var hasNewFile = false
+    var hasHunk = false
+    var hasChange = false
+    code.lineSequence().take(200).forEach { rawLine ->
+        // Models often indent a patch when it is embedded in an otherwise plain
+        // text response.  Ignore that presentation indentation while retaining
+        // the actual +/- marker used by unified diff syntax.
+        val line = rawLine.removeSuffix("\r").trimStart()
+        when {
+            line.startsWith("diff --git ") -> hasHunk = true
+            line.startsWith("--- ") -> hasOldFile = true
+            line.startsWith("+++ ") -> hasNewFile = true
+            line.startsWith("@@ ") || line.startsWith("@@-") -> hasHunk = true
+            line.startsWith('+') && !line.startsWith("+++") -> hasChange = true
+            line.startsWith('-') && !line.startsWith("---") -> hasChange = true
+        }
+    }
+    return hasChange && (hasHunk || (hasOldFile && hasNewFile))
+}
+
+internal fun looksLikeStandaloneUnifiedDiff(code: String): Boolean {
+    val firstLine = code.lineSequence().firstOrNull { it.isNotBlank() }?.trimStart() ?: return false
+    return (firstLine.startsWith("diff --git ") ||
+        firstLine.startsWith("--- ") ||
+        firstLine.startsWith("@@ ") ||
+        firstLine.startsWith("@@-")) &&
+        looksLikeUnifiedDiff(code)
+}
+
+internal fun shouldRenderDiffCodeBlock(language: String, code: String): Boolean =
+    isDiffCodeFenceLanguage(language) ||
+        (normalizeCodeFenceLanguage(language) in setOf("", "text", "plaintext") &&
+            looksLikeUnifiedDiff(code))
 
 @Composable
 fun HighlightCodeBlock(
@@ -105,9 +162,10 @@ fun HighlightCodeBlock(
     val settings = LocalSettings.current
     val richContent = richContentColors()
     val colorScheme = MaterialTheme.colorScheme
-    val normalizedLanguage = remember(language) { language.lowercase() }
+    val normalizedLanguage = remember(language) { normalizeCodeFenceLanguage(language) }
     val canInlinePreview = completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES
     val canRenderMermaid = completeCodeBlock && normalizedLanguage == "mermaid"
+    val canRenderDiff = shouldRenderDiffCodeBlock(normalizedLanguage, code)
     val interactiveRenderer = remember(normalizedLanguage) {
         InteractiveCodeRenderer.fromLanguage(normalizedLanguage)
     }
@@ -153,6 +211,8 @@ fun HighlightCodeBlock(
     }
     val autoWrap = settings.displaySetting.codeBlockAutoWrap
     val showLineNumbers = settings.displaySetting.showLineNumbers
+    val textStyle = LocalTextStyle.current.merge(style)
+    val codeLines = remember(code) { code.lines() }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*")
@@ -202,13 +262,36 @@ fun HighlightCodeBlock(
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {
             when {
+                canRenderDiff -> {
+                    DiffView(
+                        diff = code,
+                        maxLines = if (isExpanded) Int.MAX_VALUE else COLLAPSE_LINES,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    CodeBlockExpandControl(
+                        visible = settings.displaySetting.codeBlockAutoCollapse &&
+                            codeLines.size > COLLAPSE_LINES,
+                        expanded = isExpanded,
+                        textStyle = textStyle,
+                        onToggle = { isExpanded = !isExpanded },
+                    )
+                }
                 previewMode && canInlinePreview -> {
+                    val previewHeight = if (normalizedLanguage == "svg") {
+                        svgPreviewHeight(remember(code) { extractSvgAspectRatio(code) })
+                    } else {
+                        richPreviewHeight(
+                            minHeightDp = 220,
+                            maxHeightDp = 360,
+                            widthFraction = 0.72f,
+                        )
+                    }
                     CodeBlockPreview(
                         code = code,
                         language = normalizedLanguage,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(200.dp),
+                            .height(previewHeight),
                     )
                 }
                 previewMode && canRenderMermaid -> {
@@ -225,8 +308,6 @@ fun HighlightCodeBlock(
                     )
                 }
                 else -> {
-                    val textStyle = LocalTextStyle.current.merge(style)
-                    val codeLines = remember(code) { code.lines() }
                     val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
                     val displayCode = if (isExpanded) code else collapsedCode
                     val displayLines = remember(displayCode) { displayCode.lines() }
@@ -255,43 +336,55 @@ fun HighlightCodeBlock(
                         }
                     }
 
-                    Spacer(Modifier.height(4.dp))
-                    // 代码折叠按钮
-                    if (settings.displaySetting.codeBlockAutoCollapse && codeLines.size > COLLAPSE_LINES) {
-                        Box(
-                            modifier = Modifier
-                                .onClick {
-                                    isExpanded = !isExpanded
-                                }
-                                .fillMaxWidth(),
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (isExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(textStyle.fontSize.toDp())
-                                )
-                                Text(
-                                    text = if (isExpanded) {
-                                        stringResource(id = R.string.code_block_collapse)
-                                    } else {
-                                        stringResource(id = R.string.code_block_expand)
-                                    },
-                                    fontSize = textStyle.fontSize,
-                                    lineHeight = textStyle.lineHeight,
-                                )
-                            }
-                        }
-                    }
+                    CodeBlockExpandControl(
+                        visible = settings.displaySetting.codeBlockAutoCollapse &&
+                            codeLines.size > COLLAPSE_LINES,
+                        expanded = isExpanded,
+                        textStyle = textStyle,
+                        onToggle = { isExpanded = !isExpanded },
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CodeBlockExpandControl(
+    visible: Boolean,
+    expanded: Boolean,
+    textStyle: TextStyle,
+    onToggle: () -> Unit,
+) {
+    if (!visible) return
+    Spacer(Modifier.height(4.dp))
+    Box(
+        modifier = Modifier
+            .onClick(onClick = onToggle)
+            .fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(textStyle.fontSize.toDp()),
+            )
+            Text(
+                text = if (expanded) {
+                    stringResource(id = R.string.code_block_collapse)
+                } else {
+                    stringResource(id = R.string.code_block_expand)
+                },
+                fontSize = textStyle.fontSize,
+                lineHeight = textStyle.lineHeight,
+            )
         }
     }
 }
@@ -455,6 +548,7 @@ private fun HighlightCodeActions(
                             "sql" -> "sql"
                             "sh", "bash" -> "sh"
                             "svg" -> "svg"
+                            "diff", "patch", "udiff" -> "diff"
                             else -> "txt"
                         }
                         createDocumentLauncher.launch(
@@ -543,16 +637,125 @@ private fun CodeBlockPreview(
 
     WebView(
         state = state,
+        deferUntilVisible = !me.rerere.rikkahub.ui.components.ui.LocalExportContext.current,
+        preferParentVerticalScroll = true,
+        transparentBackground = true,
         modifier = modifier.clip(RoundedCornerShape(4.dp)),
     )
 }
 
-private fun buildCodePreviewHtml(code: String, language: String): String {
-    return if (language == "svg") {
-        """<!DOCTYPE html><html><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;">$code</body></html>"""
-    } else {
-        code
+internal fun extractSvgAspectRatio(code: String): Float? {
+    val viewBox = Regex(
+        pattern = """\bviewBox\s*=\s*["']([^"']+)["']""",
+        option = RegexOption.IGNORE_CASE,
+    ).find(code)?.groupValues?.getOrNull(1)
+        ?.trim()
+        ?.split(Regex("[,\\s]+"))
+        ?.mapNotNull(String::toFloatOrNull)
+    if (viewBox != null && viewBox.size == 4 && viewBox[2] > 0f && viewBox[3] > 0f) {
+        return viewBox[2] / viewBox[3]
     }
+
+    fun dimension(name: String): Float? = Regex(
+        pattern = """\b$name\s*=\s*["']\s*([0-9]+(?:\.[0-9]+)?)(?:px)?\s*["']""",
+        option = RegexOption.IGNORE_CASE,
+    ).find(code)?.groupValues?.getOrNull(1)?.toFloatOrNull()
+
+    val width = dimension("width") ?: return null
+    val height = dimension("height") ?: return null
+    return if (width > 0f && height > 0f) width / height else null
+}
+
+internal fun buildCodePreviewHtml(code: String, language: String): String {
+    return if (language == "svg") {
+        """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes">
+                <style>
+                    html, body {
+                        width: 100%;
+                        min-height: 100%;
+                        margin: 0;
+                        overflow: auto;
+                        background: transparent;
+                    }
+                    body {
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                    }
+                    svg {
+                        display: block;
+                        max-width: 100%;
+                        height: auto;
+                        overflow: visible;
+                    }
+                </style>
+            </head>
+            <body>
+                $code
+                <script>
+                    (function() {
+                        const svg = document.querySelector('svg');
+                        if (!svg) return;
+                        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                        requestAnimationFrame(function() {
+                            try {
+                                const bounds = svg.getBBox();
+                                if (!(bounds.width > 0 && bounds.height > 0)) return;
+                                const current = svg.viewBox && svg.viewBox.baseVal;
+                                const hasViewBox = current && current.width > 0 && current.height > 0;
+                                const minX = hasViewBox ? Math.min(current.x, bounds.x) : bounds.x;
+                                const minY = hasViewBox ? Math.min(current.y, bounds.y) : bounds.y;
+                                const maxX = hasViewBox
+                                    ? Math.max(current.x + current.width, bounds.x + bounds.width)
+                                    : bounds.x + bounds.width;
+                                const maxY = hasViewBox
+                                    ? Math.max(current.y + current.height, bounds.y + bounds.height)
+                                    : bounds.y + bounds.height;
+                                const padding = Math.max(2, Math.min(maxX - minX, maxY - minY) * 0.01);
+                                svg.setAttribute(
+                                    'viewBox',
+                                    [minX - padding, minY - padding, maxX - minX + padding * 2, maxY - minY + padding * 2].join(' ')
+                                );
+                                svg.removeAttribute('width');
+                                svg.removeAttribute('height');
+                                svg.style.width = '100%';
+                                svg.style.height = 'auto';
+                            } catch (error) {
+                                console.warn('Unable to normalize SVG viewport', error);
+                            }
+                        });
+                    })();
+                </script>
+            </body>
+            </html>
+        """.trimIndent()
+    } else buildResponsiveHtmlPreview(code)
+}
+
+private fun buildResponsiveHtmlPreview(code: String): String {
+    val document = Jsoup.parse(code)
+    if (document.head().selectFirst("meta[name=viewport]") == null) {
+        document.head().appendElement("meta")
+            .attr("name", "viewport")
+            .attr("content", "width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes")
+    }
+    document.head().appendElement("style")
+        .attr("id", "rikkahub-responsive-preview")
+        .appendText(
+            """
+                html, body { max-width: 100%; min-height: 100%; margin: 0; overflow: auto; background: transparent; }
+                img, svg, video, canvas, iframe { max-width: 100%; box-sizing: border-box; }
+                img, svg, video, canvas { display: block; margin-left: auto; margin-right: auto; }
+                img, svg, video { height: auto; }
+                svg { overflow: visible; }
+            """.trimIndent(),
+        )
+    return document.outerHtml()
 }
 
 class HighlightCodeVisualTransformation(

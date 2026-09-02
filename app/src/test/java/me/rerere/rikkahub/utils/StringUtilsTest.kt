@@ -104,4 +104,65 @@ class StringUtilsTest {
     fun `no brackets returns original text`() {
         assertEquals("没有括号", "没有括号".removeBracketedContent())
     }
+
+    @Test
+    fun `apply placeholders accepts both brace styles and editor whitespace`() {
+        assertEquals(
+            "Hello Ada / Ada / Ada",
+            "Hello {user} / {{ user }} / {{USER}}".applyPlaceholders("user" to "Ada"),
+        )
+    }
+
+    @Test
+    fun `apply placeholders accepts single brace time variables`() {
+        assertEquals(
+            "At 14:10 on 2026-09-02",
+            "At {time} on {date}".applyPlaceholders(
+                "time" to "14:10",
+                "date" to "2026-09-02",
+            ),
+        )
+    }
+
+    @Test
+    fun `apply placeholders leaves ordinary messages unchanged`() {
+        val message = "这是一条不包含任何模板变量的普通消息。"
+
+        assertEquals(
+            message,
+            message.applyPlaceholders(
+                "cur_date" to "2026-09-02",
+                "time" to "14:10",
+            ),
+        )
+    }
+
+    @Test
+    fun `apply placeholders preserves unrelated brace content`() {
+        val message = "JSON: {\"enabled\": true}"
+
+        assertEquals(
+            message,
+            message.applyPlaceholders("time" to "14:10"),
+        )
+    }
+
+    @Test
+    fun `apply placeholders keeps unknown variables unchanged`() {
+        assertEquals(
+            "{known} {{ unknown }}",
+            "{known} {{ unknown }}".applyPlaceholders("known" to "{known}"),
+        )
+    }
+
+    @Test
+    fun `apply placeholders does not re-expand replacement content`() {
+        assertEquals(
+            "Conversation: {locale}",
+            "Conversation: {content}".applyPlaceholders(
+                "content" to "{locale}",
+                "locale" to "zh-CN",
+            ),
+        )
+    }
 }

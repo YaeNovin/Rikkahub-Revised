@@ -21,6 +21,7 @@ object BackupPolicy {
     const val SETTINGS_ENTRY = "settings.json"
     const val GENERATED_IMAGES_DIRECTORY = "images"
     const val WORKSPACES_DIRECTORY = "workspaces"
+    const val WORKSPACE_POLICY_RELATIVE_PATH = ".rikkahub/policy.properties"
 
     private val workspaceRootName = Regex("[A-Za-z0-9._-]+")
 
@@ -51,14 +52,18 @@ object BackupPolicy {
     }
 
     /**
-     * Accepts only `workspaces/<root>/files/<path>`. Rootfs (`linux`) and PRoot temporary files
-     * are rejected even if they are present in a malicious or legacy archive.
+     * Accepts `workspaces/<root>/files/<path>` and the single access-policy metadata file.
+     * Rootfs (`linux`), audit history, trash, and PRoot temporary files are always rejected.
      */
     fun workspaceRestoreRelativePath(entryName: String): String? {
         if (entryName.contains('\\')) return null
         val parts = entryName.split('/')
-        if (parts.size < 4 || parts[0] != WORKSPACES_DIRECTORY || parts[2] != "files") return null
+        if (parts.size < 4 || parts[0] != WORKSPACES_DIRECTORY) return null
         if (!workspaceRootName.matches(parts[1]) || parts[1] == "." || parts[1] == "..") return null
+        if (parts.drop(2).joinToString("/") == WORKSPACE_POLICY_RELATIVE_PATH) {
+            return "${parts[1]}/$WORKSPACE_POLICY_RELATIVE_PATH"
+        }
+        if (parts[2] != "files") return null
         val relativeFilePath = parts.drop(3).joinToString("/")
         if (relativeFilePath.isBlank() || relativeFilePath.split('/').any { it.isBlank() || it == "." || it == ".." }) {
             return null

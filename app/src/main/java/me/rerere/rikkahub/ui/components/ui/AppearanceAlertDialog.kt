@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
@@ -18,6 +19,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 
@@ -33,13 +35,16 @@ fun AppearanceAlertDialog(
     shape: Shape = AlertDialogDefaults.shape,
     properties: DialogProperties = DialogProperties(),
 ) {
+    val maxDialogHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(240).dp
     BasicAlertDialog(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         properties = properties,
     ) {
         IsolatedOverlaySurface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxDialogHeight),
             shape = shape,
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
@@ -73,7 +78,11 @@ fun AppearanceAlertDialog(
                         LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant,
                     ) {
                         ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
-                            text()
+                            Box(
+                                modifier = Modifier.weight(weight = 1f, fill = false),
+                            ) {
+                                text()
+                            }
                         }
                     }
                     Spacer(Modifier.height(24.dp))

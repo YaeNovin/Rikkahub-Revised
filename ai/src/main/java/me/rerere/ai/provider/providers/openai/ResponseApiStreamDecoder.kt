@@ -94,7 +94,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                         state.startTool(
                             id = callId,
                             name = item["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                            initialInput = item["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                            initialInput = item["arguments"]?.toToolArgumentString() ?: "",
                         )
                     }
                     "image_generation_call" -> state.startImage(id)
@@ -148,7 +148,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 val requiredItemId = itemId ?: error("item_id not found")
                 state.toolDelta(
                     state.toolCallIdsByItemId[requiredItemId] ?: requiredItemId,
-                    payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
+                    payload["delta"]?.toToolArgumentString() ?: "",
                 )
             }
             "response.function_call_arguments.done" -> {
@@ -158,7 +158,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                     if (toolCallId !in state.toolIdsWithInput) {
                         addAll(state.toolDelta(
                             toolCallId,
-                            payload["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                            payload["arguments"]?.toToolArgumentString() ?: "",
                         ))
                     }
                     addAll(state.endTool(toolCallId))

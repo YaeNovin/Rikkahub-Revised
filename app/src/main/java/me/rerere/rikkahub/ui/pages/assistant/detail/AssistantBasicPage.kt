@@ -344,6 +344,14 @@ internal fun AssistantBasicContent(
                 description = {
                     Text(stringResource(R.string.assistant_page_rolling_context_compression_desc))
                 },
+                tail = {
+                    Switch(
+                        checked = assistant.enableRollingContextCompression,
+                        onCheckedChange = { enabled ->
+                            onUpdate(assistant.copy(enableRollingContextCompression = enabled))
+                        },
+                    )
+                },
             ) {
                 val rollingThreshold = effectiveRollingContextThreshold(
                     assistant.rollingContextCompressionThresholdTokens,
@@ -367,6 +375,7 @@ internal fun AssistantBasicContent(
                             }
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = assistant.enableRollingContextCompression,
                     label = {
                         Text(stringResource(R.string.assistant_page_rolling_context_threshold))
                     },
@@ -378,7 +387,8 @@ internal fun AssistantBasicContent(
                         )
                     },
                     singleLine = true,
-                    isError = threshold == null || threshold < MIN_ROLLING_CONTEXT_THRESHOLD_TOKENS,
+                    isError = assistant.enableRollingContextCompression &&
+                        (threshold == null || threshold < MIN_ROLLING_CONTEXT_THRESHOLD_TOKENS),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                 )
             }

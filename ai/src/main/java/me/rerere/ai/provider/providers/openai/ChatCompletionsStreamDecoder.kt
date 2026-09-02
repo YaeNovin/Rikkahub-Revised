@@ -69,7 +69,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                                     parts = listOf(UIMessagePart.Tool(
                                         toolCallId = toolId,
                                         toolName = function?.get("name")?.jsonPrimitive?.contentOrNull ?: "",
-                                        input = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: "",
+                                        input = function?.get("arguments")?.toToolArgumentString() ?: "",
                                         output = emptyList(),
                                     )),
                                 ),

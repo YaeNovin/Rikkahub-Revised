@@ -45,6 +45,20 @@ class ClaudeReasoningRequestTest {
     }
 
     @Test
+    fun `legacy Claude reasoning models keep adjustable token budgets`() {
+        val body = buildRequest(
+            baseUrl = "https://api.anthropic.com/v1",
+            modelId = "claude-3-7-sonnet-20250219",
+            reasoningLevel = ReasoningLevel.MEDIUM,
+        )
+        val thinking = body["thinking"]?.jsonObject
+
+        assertEquals("enabled", thinking?.get("type")?.jsonPrimitive?.content)
+        assertEquals(2_000, thinking?.get("budget_tokens")?.jsonPrimitive?.int)
+        assertFalse(body["output_config"]?.jsonObject?.containsKey("effort") == true)
+    }
+
+    @Test
     fun `MiniMax Anthropic endpoint uses budget thinking`() {
         val body = buildRequest("https://api.minimaxi.com/anthropic/v1", "MiniMax-M2.5")
         val thinking = body["thinking"]?.jsonObject

@@ -8,7 +8,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
 
@@ -24,11 +27,20 @@ class ConversationSession(
     // 会话状态
     val state = MutableStateFlow(initial)
 
+    private val initializationMutex = Mutex()
+    private val persistenceMutex = Mutex()
+
+    @Volatile
+    private var initialized = false
+    val isInitialized: Boolean get() = initialized
+
     // 原子引用计数
     private val refCount = AtomicInteger(0)
 
     // 处理状态（如 OCR 识别中）
     val processingStatus = MutableStateFlow<String?>(null)
+
+    val promptInjectionDiagnostics = MutableStateFlow<PromptInjectionDiagnostics?>(null)
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
@@ -70,10 +82,15 @@ class ConversationSession(
     }
 
     fun setJob(job: Job?) {
-        _generationJob.value?.cancel()
+        val previousJob = _generationJob.value
+        previousJob?.cancel()
         _generationJob.value = job
         job?.invokeOnCompletion {
-            _generationJob.value = null
+            // A replaced job may finish after the new one has already started. Do not let the
+            // stale completion callback clear the current generation state.
+            if (_generationJob.value === job) {
+                _generationJob.value = null
+            }
             if (refCount.get() <= 0) {
                 scheduleIdleCheck()
             }
@@ -81,6 +98,26 @@ class ConversationSession(
     }
 
     fun getJob(): Job? = _generationJob.value
+
+    suspend fun initializeOnce(initializer: suspend () -> Conversation): Conversation =
+        initializationMutex.withLock {
+            if (!initialized) {
+                val loaded = initializer()
+                // A send may publish newer in-memory state while the database load suspends.
+                if (!initialized) {
+                    state.value = loaded
+                    initialized = true
+                }
+            }
+            state.value
+        }
+
+    fun markInitialized() {
+        initialized = true
+    }
+
+    suspend fun <T> withPersistenceLock(block: suspend () -> T): T =
+        persistenceMutex.withLock { block() }
 
     private fun scheduleIdleCheck() {
         idleCheckJob?.cancel()
@@ -102,5 +139,6 @@ class ConversationSession(
         _generationJob.value = null
         idleCheckJob?.cancel()
         idleCheckJob = null
+        promptInjectionDiagnostics.value = null
     }
 }

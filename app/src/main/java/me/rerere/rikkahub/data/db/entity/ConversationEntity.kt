@@ -28,10 +28,24 @@ data class ConversationEntity(
     val modeInjectionIds: String = "[]",
     @ColumnInfo("lorebook_ids", defaultValue = "[]")
     val lorebookIds: String = "[]",
+    @ColumnInfo("temporary_mode_injections", defaultValue = "{}")
+    val temporaryModeInjections: String = "{}",
+    @ColumnInfo("lorebook_runtime_states", defaultValue = "{}")
+    val lorebookRuntimeStates: String = "{}",
     @ColumnInfo("workspace_cwd", defaultValue = "")
     val workspaceCwd: String = "",
+    @ColumnInfo("workspace_file_operation_mode", defaultValue = "TOOLS")
+    val workspaceFileOperationMode: String = "TOOLS",
     @ColumnInfo("folder_id", defaultValue = "")
     val folderId: String = "",
     @ColumnInfo("rolling_context_summary", defaultValue = "")
     val rollingContextSummary: String = "",
+    @ColumnInfo("source_conversation_id", defaultValue = "")
+    val sourceConversationId: String = "",
+    @ColumnInfo("source_message_id", defaultValue = "")
+    val sourceMessageId: String = "",
+    @ColumnInfo("branched_at", defaultValue = "0")
+    val branchedAt: Long = 0,
+    @ColumnInfo("source_conversation_title", defaultValue = "")
+    val sourceConversationTitle: String = "",
 )

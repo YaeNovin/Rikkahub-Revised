@@ -16,6 +16,7 @@ import me.rerere.common.http.AcceptLanguageBuilder
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
+import me.rerere.rikkahub.data.ai.RequestStatisticsRecorder
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
@@ -116,7 +117,7 @@ val dataSourceModule = module {
             .build()
     }
 
-    single { TemplateTransformer(engine = get(), settingsStore = get()) }
+    single { TemplateTransformer(engine = get()) }
 
     single { KnowledgeRetrievalTransformer(repository = get(), providerManager = get()) }
 
@@ -166,6 +167,14 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().requestStatDao()
+    }
+
+    single {
+        RequestStatisticsRecorder(get())
+    }
+
+    single {
         get<AppDatabase>().knowledgeBaseDao()
     }
 
@@ -183,6 +192,7 @@ val dataSourceModule = module {
             memoryRepo = get(),
             memoryEmbeddingService = get(),
             knowledgeBaseRepository = get(),
+            requestStatisticsRecorder = get(),
         )
     }
 
@@ -232,7 +242,7 @@ val dataSourceModule = module {
                     chain.proceed(request)
                 }
             }
-            .addNetworkInterceptor(RequestLoggingInterceptor())
+            .addNetworkInterceptor(RequestLoggingInterceptor(get()))
             .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS

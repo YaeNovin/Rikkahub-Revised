@@ -24,6 +24,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
+import me.rerere.rikkahub.data.model.withQuickMessageIds
+import me.rerere.rikkahub.data.model.selectExclusiveMode
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
 import me.rerere.rikkahub.ui.components.ai.LorebooksContent
 import me.rerere.rikkahub.ui.components.ai.ModeInjectionsContent
@@ -112,9 +115,16 @@ fun AssistantExtensionsPage(id: String) {
                                     onToggle = { quickMessageId, checked ->
                                         val newIds = if (checked) assistant.quickMessageIds + quickMessageId
                                         else assistant.quickMessageIds - quickMessageId
-                                        vm.update(assistant.copy(quickMessageIds = newIds))
+                                        vm.update(assistant.withQuickMessageIds(newIds))
                                     },
                                 )
+                                if (settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT) {
+                                    QuickMessageGroupsButton(
+                                        assistant = assistant,
+                                        quickMessages = settings.quickMessages,
+                                        onUpdate = vm::update,
+                                    )
+                                }
                                 TextButton(
                                     onClick = { navController.navigate(Screen.QuickMessages) },
                                     modifier = Modifier.fillMaxWidth(),
@@ -139,7 +149,15 @@ fun AssistantExtensionsPage(id: String) {
                                     modeInjections = settings.modeInjections,
                                     selectedIds = assistant.modeInjectionIds,
                                     onToggle = { injId, checked ->
-                                        val newIds = if (checked) assistant.modeInjectionIds + injId
+                                        val newIds = if (checked &&
+                                            settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT
+                                        ) {
+                                            selectExclusiveMode(
+                                                assistant.modeInjectionIds,
+                                                injId,
+                                                settings.modeInjections,
+                                            )
+                                        } else if (checked) assistant.modeInjectionIds + injId
                                         else assistant.modeInjectionIds - injId
                                         vm.update(assistant.copy(modeInjectionIds = newIds))
                                     },

@@ -358,7 +358,7 @@ class ResponseApiRequestMessageTest {
     }
 
     @Test
-    fun `volc response api should keep reasoning effort when non auto`() {
+    fun `volc response api omits effort for models without documented levels`() {
         val providerSetting = ProviderSetting.OpenAI(
             baseUrl = "https://ark.cn-beijing.volces.com/api/v3"
         )
@@ -369,7 +369,7 @@ class ResponseApiRequestMessageTest {
 
         val reasoning = requestBody["reasoning"]?.jsonObject
         assertTrue("reasoning should exist", reasoning != null)
-        assertEquals("low", reasoning!!["effort"]?.jsonPrimitive?.content)
+        assertFalse(reasoning!!.containsKey("effort"))
     }
 
     @Test
@@ -406,10 +406,7 @@ class ResponseApiRequestMessageTest {
             "xhigh",
             openAi["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
         )
-        assertEquals(
-            "high",
-            volc["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,
-        )
+        assertFalse(volc["reasoning"]?.jsonObject?.containsKey("effort") == true)
         assertEquals(
             "high",
             olderOpenAi["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.content,

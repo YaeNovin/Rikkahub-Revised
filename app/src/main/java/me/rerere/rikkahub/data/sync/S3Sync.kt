@@ -211,6 +211,14 @@ class S3Sync(
                                 entryPrefix = "${BackupPolicy.WORKSPACES_DIRECTORY}/${workspaceFolder.name}/files/",
                             )
                         }
+                        val policyFile = File(workspaceFolder, BackupPolicy.WORKSPACE_POLICY_RELATIVE_PATH)
+                        if (policyFile.isSafeBackupChild(workspaceFolder) && policyFile.isFile) {
+                            addFileToZip(
+                                zipOut,
+                                policyFile,
+                                "${BackupPolicy.WORKSPACES_DIRECTORY}/${workspaceFolder.name}/${BackupPolicy.WORKSPACE_POLICY_RELATIVE_PATH}",
+                            )
+                        }
                     }
             }
         }
@@ -225,16 +233,20 @@ class S3Sync(
     private suspend fun restoreFromBackupFile(backupFile: File, config: S3Config) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
 
-        ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
+        val restoreBudget = BackupRestoreBudget()
+        val originalSettings = settingsStore.settingsFlow.value
+        try {
+            ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
             var entry: ZipEntry?
             while (zipIn.nextEntry.also { entry = it } != null) {
                 entry?.let { zipEntry ->
+                    restoreBudget.beginEntry(zipEntry)
                     Log.i(TAG, "restoreFromBackupFile: Processing entry ${zipEntry.name}")
 
                     when (zipEntry.name) {
                         BackupPolicy.SETTINGS_ENTRY -> {
                             if (BackupPolicy.hasScope(config.items, BackupScope.TOKENS)) {
-                                val settingsJson = zipIn.readBytes().toString(Charsets.UTF_8)
+                                val settingsJson = restoreBudget.readCurrentEntry(zipIn).toString(Charsets.UTF_8)
                                 Log.i(TAG, "restoreFromBackupFile: Restoring settings")
                                 try {
                                     val migratedJson = SettingsJsonMigrator.migrate(settingsJson)
@@ -273,9 +285,7 @@ class S3Sync(
                                         "restoreFromBackupFile: Restoring ${zipEntry.name} to ${targetFile.absolutePath}"
                                     )
                                     targetFile.parentFile?.mkdirs()
-                                    FileOutputStream(targetFile).use { outputStream ->
-                                        zipIn.copyTo(outputStream)
-                                    }
+                                    restoreBudget.restoreCurrentEntry(zipIn, targetFile)
                                     Log.i(
                                         TAG,
                                         "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
@@ -304,9 +314,7 @@ class S3Sync(
                                     )
 
                                     try {
-                                        FileOutputStream(targetFile).use { outputStream ->
-                                            zipIn.copyTo(outputStream)
-                                        }
+                                        restoreBudget.restoreCurrentEntry(zipIn, targetFile)
                                         Log.i(
                                             TAG,
                                             "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
@@ -319,11 +327,11 @@ class S3Sync(
                             } else if (BackupPolicy.hasScope(config.items, BackupScope.ATTACHMENTS) &&
                                 zipEntry.name.startsWith("${BackupPolicy.GENERATED_IMAGES_DIRECTORY}/")
                             ) {
-                                restoreGeneratedImageEntry(zipIn, zipEntry.name)
+                                restoreGeneratedImageEntry(zipIn, zipEntry.name, restoreBudget)
                             } else if (BackupPolicy.hasScope(config.items, BackupScope.ATTACHMENTS) &&
                                 zipEntry.name.startsWith("${FileFolders.SKILLS}/")
                             ) {
-                                restoreSkillEntry(zipIn, zipEntry.name)
+                                restoreSkillEntry(zipIn, zipEntry.name, restoreBudget)
                             } else if (BackupPolicy.hasScope(config.items, BackupScope.ATTACHMENTS) &&
                                 zipEntry.name.startsWith("${FileFolders.FONTS}/")
                             ) {
@@ -332,9 +340,7 @@ class S3Sync(
                                 if (fileName.isNotEmpty() && !fileName.contains('/')) {
                                     val fontsFolder = File(context.filesDir, FileFolders.FONTS).apply { mkdirs() }
                                     val targetFile = File(fontsFolder, fileName)
-                                    FileOutputStream(targetFile).use { outputStream ->
-                                        zipIn.copyTo(outputStream)
-                                    }
+                                    restoreBudget.restoreCurrentEntry(zipIn, targetFile)
                                     Log.i(
                                         TAG,
                                         "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
@@ -348,9 +354,7 @@ class S3Sync(
                                 val workspacesFolder = File(context.filesDir, BackupPolicy.WORKSPACES_DIRECTORY)
                                 val targetFile = File(workspacesFolder, relativePath)
                                 targetFile.parentFile?.mkdirs()
-                                FileOutputStream(targetFile).use { outputStream ->
-                                    zipIn.copyTo(outputStream)
-                                }
+                                restoreBudget.restoreCurrentEntry(zipIn, targetFile)
                             } else {
                                 Log.i(TAG, "restoreFromBackupFile: Skipping entry ${zipEntry.name}")
                             }
@@ -360,6 +364,14 @@ class S3Sync(
                     zipIn.closeEntry()
                 }
             }
+            }
+            restoreBudget.commit()
+        } catch (error: Throwable) {
+            runCatching { restoreBudget.rollback() }
+                .onFailure(error::addSuppressed)
+            runCatching { settingsStore.update(originalSettings) }
+                .onFailure(error::addSuppressed)
+            throw error
         }
 
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
@@ -382,6 +394,10 @@ class S3Sync(
         entryPrefix: String,
     ) {
         currentDir.listFiles()?.forEach { file ->
+            if (!file.isSafeBackupChild(rootDir)) {
+                Log.w(TAG, "addDirectoryToZip: Skipping unsafe or symbolic path ${file.path}")
+                return@forEach
+            }
             if (file.isDirectory) {
                 addDirectoryToZip(
                     zipOut = zipOut,
@@ -396,7 +412,11 @@ class S3Sync(
         }
     }
 
-    private fun restoreSkillEntry(zipIn: ZipInputStream, entryName: String) {
+    private fun restoreSkillEntry(
+        zipIn: ZipInputStream,
+        entryName: String,
+        restoreBudget: BackupRestoreBudget,
+    ) {
         val relativePath = BackupPolicy.safeRelativePath(entryName, FileFolders.SKILLS)
             ?: throw Exception("Invalid skill path in backup: $entryName")
         val skillName = relativePath.substringBefore('/', missingDelimiterValue = "")
@@ -417,9 +437,7 @@ class S3Sync(
         targetFile.parentFile?.mkdirs()
 
         try {
-            FileOutputStream(targetFile).use { outputStream ->
-                zipIn.copyTo(outputStream)
-            }
+            restoreBudget.restoreCurrentEntry(zipIn, targetFile)
             Log.i(TAG, "restoreFromBackupFile: Restored skill file $entryName (${targetFile.length()} bytes)")
         } catch (e: Exception) {
             Log.e(TAG, "restoreFromBackupFile: Failed to restore skill file $entryName", e)
@@ -427,7 +445,11 @@ class S3Sync(
         }
     }
 
-    private fun restoreGeneratedImageEntry(zipIn: ZipInputStream, entryName: String) {
+    private fun restoreGeneratedImageEntry(
+        zipIn: ZipInputStream,
+        entryName: String,
+        restoreBudget: BackupRestoreBudget,
+    ) {
         val relativePath = BackupPolicy.safeRelativePath(
             entryName = entryName,
             prefix = BackupPolicy.GENERATED_IMAGES_DIRECTORY,
@@ -435,9 +457,7 @@ class S3Sync(
         val imagesRoot = File(context.filesDir, BackupPolicy.GENERATED_IMAGES_DIRECTORY).apply { mkdirs() }
         val targetFile = File(imagesRoot, relativePath)
         targetFile.parentFile?.mkdirs()
-        FileOutputStream(targetFile).use { outputStream ->
-            zipIn.copyTo(outputStream)
-        }
+        restoreBudget.restoreCurrentEntry(zipIn, targetFile)
         Log.i(TAG, "restoreFromBackupFile: Restored generated image $entryName (${targetFile.length()} bytes)")
     }
 

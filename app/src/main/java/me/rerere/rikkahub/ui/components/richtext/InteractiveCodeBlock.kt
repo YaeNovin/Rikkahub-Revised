@@ -16,6 +16,7 @@ import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_ASSET_URL
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
+import me.rerere.rikkahub.ui.components.ui.LocalExportContext
 import me.rerere.rikkahub.utils.escapeHtml
 import me.rerere.rikkahub.utils.toCssHex
 
@@ -26,13 +27,14 @@ internal enum class InteractiveCodeRenderer(
 ) {
     ECHARTS(setOf("echarts", "chart")),
     ABC(setOf("abc", "abcjs")),
+    JIANPU(setOf("jianpu", "numbered", "numbered-notation", "numberednotation", "numbered_notation", "简谱")),
     LEAFLET(setOf("leaflet", "map", "geojson")),
     RAILROAD(setOf("railroad", "railroad-diagram", "grammar")),
     ;
 
     companion object {
         fun fromLanguage(language: String): InteractiveCodeRenderer? =
-            entries.firstOrNull { language.lowercase() in it.aliases }
+            entries.firstOrNull { normalizeCodeFenceLanguage(language) in it.aliases }
     }
 }
 
@@ -68,12 +70,32 @@ internal fun InteractiveCodeBlock(
             setSupportMultipleWindows(false)
         },
     )
+    val previewHeight = richPreviewHeight(
+        minHeightDp = when (renderer) {
+            InteractiveCodeRenderer.ABC -> 200
+            InteractiveCodeRenderer.JIANPU -> 180
+            else -> 240
+        },
+        maxHeightDp = when (renderer) {
+            InteractiveCodeRenderer.RAILROAD -> 420
+            InteractiveCodeRenderer.JIANPU -> 360
+            else -> 380
+        },
+        widthFraction = when (renderer) {
+            InteractiveCodeRenderer.ABC -> 0.66f
+            InteractiveCodeRenderer.JIANPU -> 0.9f
+            else -> 0.78f
+        },
+    )
     WebView(
         state = webViewState,
+        deferUntilVisible = !LocalExportContext.current,
+        preferParentVerticalScroll = true,
+        transparentBackground = true,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .height(240.dp),
+            .height(previewHeight),
     )
 }
 
@@ -86,6 +108,7 @@ internal fun buildInteractiveRendererHtml(
     val scriptPath = when (renderer) {
         InteractiveCodeRenderer.ECHARTS -> "renderers/echarts.min.js"
         InteractiveCodeRenderer.ABC -> "renderers/abcjs-basic-min.js"
+        InteractiveCodeRenderer.JIANPU -> null
         InteractiveCodeRenderer.LEAFLET -> "renderers/leaflet.js"
         InteractiveCodeRenderer.RAILROAD -> "renderers/railroad-diagrams.js"
     }
@@ -97,6 +120,7 @@ internal fun buildInteractiveRendererHtml(
     val rendererScript = when (renderer) {
         InteractiveCodeRenderer.ECHARTS -> echartsRendererScript()
         InteractiveCodeRenderer.ABC -> abcRendererScript()
+        InteractiveCodeRenderer.JIANPU -> jianpuRendererScript()
         InteractiveCodeRenderer.LEAFLET -> leafletRendererScript()
         InteractiveCodeRenderer.RAILROAD -> railroadRendererScript()
     }
@@ -106,18 +130,29 @@ internal fun buildInteractiveRendererHtml(
         code
     }
     val source = sourceCode.toJavaScriptStringLiteral()
-    val background = colorScheme.surface.toCssHex()
     val foreground = colorScheme.onSurface.toCssHex()
     val error = colorScheme.error.toCssHex()
     val rendererLayoutCss = when (renderer) {
-        InteractiveCodeRenderer.ABC,
+        InteractiveCodeRenderer.ABC -> """
+            html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
+            #renderer { width: 100%; min-height: 100%; height: auto; overflow: visible; display: flex; align-items: center; justify-content: center; }
+            #renderer svg { display: block; max-width: 100%; height: auto; }
+        """.trimIndent()
+        InteractiveCodeRenderer.JIANPU -> """
+            html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
+            body { display: flex; align-items: center; justify-content: center; }
+            #renderer { width: 100%; min-height: 100%; height: auto; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+            #renderer svg { display: block; flex: 0 0 auto; max-width: none; height: auto; margin: 0 auto; }
+        """.trimIndent()
         InteractiveCodeRenderer.RAILROAD -> """
             html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
-            #renderer { width: 100%; min-height: 100%; height: auto; overflow: visible; }
+            #renderer { width: 100%; min-height: 100%; height: auto; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            #renderer svg { display: block; flex: 0 0 auto; max-width: none; height: auto; margin: 0 auto; }
         """.trimIndent()
         InteractiveCodeRenderer.ECHARTS,
         InteractiveCodeRenderer.LEAFLET -> """
             html, body, #renderer { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+            #renderer { display: flex; align-items: center; justify-content: center; }
         """.trimIndent()
     }
 
@@ -126,15 +161,15 @@ internal fun buildInteractiveRendererHtml(
         <html>
         <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes">
             $stylesheet
-            <script src="$WEB_VIEW_ASSET_URL/html/$scriptPath"></script>
+            ${scriptPath?.let { "<script src=\"$WEB_VIEW_ASSET_URL/html/$it\"></script>" }.orEmpty()}
             <style>
                 $rendererLayoutCss
-                body { background: $background; color: $foreground; font-family: sans-serif; }
+                body { background: transparent; color: $foreground; font-family: sans-serif; }
                 #renderer { box-sizing: border-box; padding: 8px; }
                 #render-error { display: none; white-space: pre-wrap; margin: 0; padding: 12px; color: $error; overflow: auto; }
-                .leaflet-container { background: $background; color: $foreground; }
+                .leaflet-container { background: transparent; color: $foreground; }
             </style>
         </head>
         <body>
@@ -155,6 +190,21 @@ internal fun buildInteractiveRendererHtml(
                     }
                     try {
                         $rendererScript
+                        requestAnimationFrame(function() {
+                            root.querySelectorAll('svg').forEach(function(svg) {
+                                svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                                const fitToViewport = ${renderer != InteractiveCodeRenderer.JIANPU && renderer != InteractiveCodeRenderer.RAILROAD};
+                                if (fitToViewport && svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
+                                    svg.removeAttribute('width');
+                                    svg.removeAttribute('height');
+                                    svg.style.width = '100%';
+                                    svg.style.height = 'auto';
+                                    svg.style.maxWidth = '100%';
+                                }
+                            });
+                            root.scrollLeft = Math.max(0, (root.scrollWidth - root.clientWidth) / 2);
+                            root.scrollTop = Math.max(0, (root.scrollHeight - root.clientHeight) / 2);
+                        });
                     } catch (error) {
                         fail(error);
                     }
@@ -167,7 +217,51 @@ internal fun buildInteractiveRendererHtml(
 
 private fun echartsRendererScript(): String = """
     const option = JSON.parse(source);
-    const chart = echarts.init(root, null, { renderer: 'canvas', useDirtyRect: true });
+    const compactViewport = document.documentElement.clientWidth <= 600;
+    if (compactViewport) {
+        const viewportWidth = Math.max(document.documentElement.clientWidth, root.clientWidth, 160);
+        const grids = Array.isArray(option.grid) ? option.grid : [option.grid || {}];
+        option.grid = grids.map(function(grid) {
+            return Object.assign({ left: 12, right: 12, top: 72, bottom: 32, containLabel: true }, grid);
+        });
+        if (option.title) {
+            const titles = Array.isArray(option.title) ? option.title : [option.title];
+            option.title = titles.map(function(title) {
+                const textStyle = Object.assign({}, title.textStyle || {}, {
+                    width: Math.max(viewportWidth - 32, 128),
+                    overflow: 'break',
+                    fontSize: Math.min(Number((title.textStyle || {}).fontSize) || 16, 16),
+                    lineHeight: 20
+                });
+                return Object.assign({ left: 'center' }, title, { textStyle: textStyle });
+            });
+        }
+        if (option.tooltip && !Array.isArray(option.tooltip)) {
+            option.tooltip = Object.assign({}, option.tooltip, { confine: true });
+        }
+        if (option.legend && !Array.isArray(option.legend)) {
+            option.legend = Object.assign({ type: 'scroll', left: 'center', width: '92%' }, option.legend);
+        }
+        const radars = option.radar ? (Array.isArray(option.radar) ? option.radar : [option.radar]) : [];
+        if (radars.length > 0) {
+            option.radar = radars.map(function(radar) {
+                return Object.assign({ center: ['50%', '56%'], radius: '58%' }, radar);
+            });
+        }
+        ['xAxis', 'yAxis'].forEach(function(axisName) {
+            if (!option[axisName]) return;
+            const axes = Array.isArray(option[axisName]) ? option[axisName] : [option[axisName]];
+            option[axisName] = axes.map(function(axis) {
+                const axisLabel = Object.assign({ hideOverlap: true }, axis.axisLabel || {});
+                return Object.assign({}, axis, { axisLabel: axisLabel });
+            });
+        });
+    }
+    const chart = echarts.init(root, null, {
+        renderer: 'canvas',
+        useDirtyRect: true,
+        devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2)
+    });
     chart.setOption(option, { notMerge: true, lazyUpdate: true });
     let resizePending = false;
     new ResizeObserver(function() {
@@ -184,8 +278,114 @@ private fun abcRendererScript(): String = """
     ABCJS.renderAbc('renderer', source, {
         responsive: 'resize',
         add_classes: false,
-        staffwidth: Math.max(document.documentElement.clientWidth - 24, 280)
+        staffwidth: Math.max(root.clientWidth - 16, 220)
     });
+""".trimIndent()
+
+/** Renders common numbered-notation (简谱) syntax as an offline SVG. */
+private fun jianpuRendererScript(): String = """
+    const lines = String(source).replace(/\r/g, '').split('\n');
+    const notes = [];
+    const lyrics = [];
+    const metadata = [];
+    const tokenPattern = /(\|\||\|\]|\|)|([#b♭n♯]?[0-7](?:['`,]*)(?:[_=.\-]*))/g;
+    lines.forEach(function(line) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.charAt(0) === '%') return;
+        if (/^(?:L|w):/i.test(trimmed)) {
+            lyrics.push(trimmed.replace(/^(?:L|w):\s*/i, ''));
+            return;
+        }
+        if (/^\/key\(/i.test(trimmed) || /^(?:title|t|bpm|tempo)\s*:/i.test(trimmed) || /^ｂｐｍ\s+/i.test(trimmed)) {
+            metadata.push(trimmed);
+            return;
+        }
+        let match;
+        while ((match = tokenPattern.exec(line)) !== null) {
+            notes.push({ token: match[1] || match[2], bar: Boolean(match[1]) });
+        }
+        tokenPattern.lastIndex = 0;
+    });
+    const noteWidth = 48;
+    const left = 16;
+    const width = Math.max(root.clientWidth - 16, left * 2 + Math.max(notes.length, 1) * noteWidth);
+    const height = Math.max(132, 76 + metadata.length * 18 + (lyrics.length ? 28 : 0));
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Jianpu numbered musical notation');
+    svg.style.color = getComputedStyle(document.body).color;
+    function text(value, x, y, size, anchor) {
+        const node = document.createElementNS(svgNs, 'text');
+        node.textContent = value;
+        node.setAttribute('x', x);
+        node.setAttribute('y', y);
+        node.setAttribute('font-size', size);
+        node.setAttribute('font-family', 'sans-serif');
+        node.setAttribute('text-anchor', anchor || 'middle');
+        node.setAttribute('fill', 'currentColor');
+        svg.appendChild(node);
+        return node;
+    }
+    metadata.slice(0, 5).forEach(function(value, index) {
+        text(value, left, 20 + index * 18, 13, 'start');
+    });
+    const baseY = 50 + Math.min(metadata.length, 5) * 18;
+    let noteIndex = 0;
+    notes.forEach(function(item) {
+        const x = left + noteIndex * noteWidth;
+        if (item.bar) {
+            const line = document.createElementNS(svgNs, 'line');
+            line.setAttribute('x1', x - 14);
+            line.setAttribute('x2', x - 14);
+            line.setAttribute('y1', baseY - 30);
+            line.setAttribute('y2', baseY + 12);
+            line.setAttribute('stroke', 'currentColor');
+            line.setAttribute('stroke-width', item.token === '||' || item.token === '|]' ? '2' : '1');
+            svg.appendChild(line);
+            return;
+        }
+        const raw = item.token;
+        const digit = raw.replace(/^[#b♭n♯]/, '').charAt(0);
+        const accidentalMatch = raw.match(/^[#b♭n♯]/);
+        const octaveMatch = raw.match(/[',]+/);
+        const accidental = accidentalMatch ? accidentalMatch[0] : '';
+        const octave = octaveMatch ? octaveMatch[0] : '';
+        const duration = raw.replace(/^[#b♭n♯]?[0-7][',]*/, '');
+        if (accidental) text(accidental === '♯' ? '#' : accidental === '♭' ? 'b' : accidental, x, baseY - 18, 12);
+        text(digit === '0' ? '0' : digit, x, baseY, 28);
+        for (let i = 0; i < octave.length; i++) {
+            const dot = document.createElementNS(svgNs, 'circle');
+            dot.setAttribute('cx', x);
+            dot.setAttribute('cy', octave.charAt(i) === ',' ? baseY + 8 + i * 5 : baseY - 31 - i * 5);
+            dot.setAttribute('r', '2');
+            dot.setAttribute('fill', 'currentColor');
+            svg.appendChild(dot);
+        }
+        if (duration.indexOf('_') >= 0 || duration.indexOf('=') >= 0) {
+            const beam = document.createElementNS(svgNs, 'line');
+            beam.setAttribute('x1', x - 11);
+            beam.setAttribute('x2', x + 11);
+            beam.setAttribute('y1', baseY + 7);
+            beam.setAttribute('y2', baseY + 7);
+            beam.setAttribute('stroke', 'currentColor');
+            beam.setAttribute('stroke-width', duration.indexOf('=') >= 0 ? '2' : '1');
+            svg.appendChild(beam);
+        }
+        if (duration.indexOf('.') >= 0) {
+            const dot = document.createElementNS(svgNs, 'circle');
+            dot.setAttribute('cx', x + 15);
+            dot.setAttribute('cy', baseY - 5);
+            dot.setAttribute('r', '2');
+            dot.setAttribute('fill', 'currentColor');
+            svg.appendChild(dot);
+        }
+        noteIndex++;
+    });
+    if (lyrics.length) text(lyrics.join('  '), width / 2, height - 12, 13);
+    while (root.firstChild) root.removeChild(root.firstChild);
+    root.appendChild(svg);
 """.trimIndent()
 
 private fun leafletRendererScript(): String = """

@@ -29,6 +29,7 @@ import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBo
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,6 +53,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
@@ -59,6 +63,7 @@ import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.Package01
@@ -73,7 +78,10 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
+import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.workspace.WorkspaceAccessPolicy
 import me.rerere.rikkahub.ui.components.ui.ExtensionSelector
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
@@ -82,6 +90,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.workspace.WorkspaceShellStatus
+import me.rerere.workspace.WorkspaceLocalDirectoryGrant
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
@@ -91,6 +100,8 @@ internal fun FilesPicker(
     assistant: Assistant,
     state: ChatInputState,
     mcpManager: McpManager,
+    promptInjectionDiagnostics: PromptInjectionDiagnostics?,
+    onShowPromptDiagnostics: (() -> Unit)?,
     onRefreshRollingContext: (additionalPrompt: String, targetTokens: Int) -> Job,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
@@ -110,6 +121,25 @@ internal fun FilesPicker(
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
+    val boundWorkspace = remember(workspaces, assistant.workspaceId) {
+        workspaces.find { it.id == assistant.workspaceId?.toString() }
+    }
+    val localDirectoryGrants by produceState<List<WorkspaceLocalDirectoryGrant>>(
+        initialValue = emptyList(),
+        key1 = boundWorkspace?.id,
+    ) {
+        value = boundWorkspace?.id?.let { id ->
+            withContext(Dispatchers.IO) { workspaceRepository.getLocalDirectoryGrants(id) }
+        }.orEmpty()
+    }
+    val workspaceAccessPolicy by produceState<WorkspaceAccessPolicy?>(
+        initialValue = null,
+        key1 = boundWorkspace?.id,
+    ) {
+        value = boundWorkspace?.id?.let { id ->
+            withContext(Dispatchers.IO) { workspaceRepository.getAccessPolicy(id) }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -170,12 +200,11 @@ internal fun FilesPicker(
         }
 
         // Extensions (Quick Messages + Prompt Injections + Skills)
-        val modeAndLorebookCount =
-            if (assistant.allowConversationPromptInjection) {
-                conversation.modeInjectionIds.size + conversation.lorebookIds.size
-            } else {
-                assistant.modeInjectionIds.size + assistant.lorebookIds.size
-            }
+        val effectiveModeIds = assistant.modeInjectionIds +
+            if (assistant.allowConversationPromptInjection) conversation.modeInjectionIds else emptySet()
+        val effectiveLorebookIds = assistant.lorebookIds +
+            if (assistant.allowConversationPromptInjection) conversation.lorebookIds else emptySet()
+        val modeAndLorebookCount = effectiveModeIds.size + effectiveLorebookIds.size
         val activeCount =
             assistant.quickMessageIds.size +
                 modeAndLorebookCount +
@@ -206,6 +235,42 @@ internal fun FilesPicker(
                     onShowInjectionSheetChange(true)
                 },
         )
+
+        if (onShowPromptDiagnostics != null) {
+            ListItem(
+                leadingContent = {
+                    Icon(
+                        imageVector = HugeIcons.InformationCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                headlineContent = {
+                    Text(stringResource(R.string.prompt_diagnostics_title))
+                },
+                supportingContent = {
+                    val diagnostics = promptInjectionDiagnostics
+                    Text(
+                        text = if (diagnostics == null) {
+                            stringResource(R.string.prompt_diagnostics_empty)
+                        } else {
+                            stringResource(
+                                R.string.prompt_diagnostics_summary,
+                                diagnostics.userTurn,
+                                diagnostics.totalEstimatedTokens,
+                            )
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                colors = ListItemDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f),
+                ),
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.large)
+                    .clickable(onClick = onShowPromptDiagnostics),
+            )
+        }
 
         // Compress History Button
         ListItem(
@@ -241,10 +306,7 @@ internal fun FilesPicker(
         )
 
         // Workspace CWD
-        val boundWorkspace = remember(workspaces, assistant.workspaceId) {
-            workspaces.find { it.id == assistant.workspaceId?.toString() }
-        }
-        if (boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name) {
+        if (boundWorkspace != null) {
             var showCwdSheet by remember { mutableStateOf(false) }
             TextButton(
                 onClick = { showCwdSheet = true },
@@ -258,7 +320,7 @@ internal fun FilesPicker(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = conversation.workspaceCwd ?: "/workspace",
+                    text = formatWorkspaceCwd(conversation.workspaceCwd, localDirectoryGrants),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -273,6 +335,63 @@ internal fun FilesPicker(
                     onDismiss = { showCwdSheet = false },
                 )
             }
+
+            val localCwd = remember(conversation.workspaceCwd) {
+                parseLocalWorkspaceCwd(conversation.workspaceCwd)
+            }
+            val localGrant = remember(localCwd, localDirectoryGrants) {
+                localCwd?.let { cwd -> localDirectoryGrants.firstOrNull { it.id == cwd.grantId } }
+            }
+            val isSafRoot = localCwd?.path?.isBlank() == true && localGrant != null
+            val policyAllowsCommands = workspaceAccessPolicy?.let { policy ->
+                policy.shellEnabled && !policy.readOnly
+            } == true
+            val commandModeAvailable = isSafRoot && localGrant?.canWrite == true && policyAllowsCommands
+            ListItem(
+                leadingContent = {
+                    Icon(
+                        imageVector = HugeIcons.ComputerTerminal01,
+                        contentDescription = stringResource(R.string.workspace_file_operation_mode_title),
+                        tint = if (isSafRoot) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                },
+                headlineContent = {
+                    Text(stringResource(R.string.workspace_file_operation_mode_title))
+                },
+                supportingContent = {
+                    val description = when {
+                        !isSafRoot -> stringResource(R.string.workspace_file_operation_mode_root_only)
+                        localGrant?.canWrite != true -> stringResource(R.string.workspace_file_operation_mode_read_only)
+                        !policyAllowsCommands -> stringResource(R.string.workspace_file_operation_mode_disabled)
+                        conversation.workspaceFileOperationMode == WorkspaceFileOperationMode.COMMANDS ->
+                            stringResource(R.string.workspace_file_operation_mode_commands_desc)
+                        else -> stringResource(R.string.workspace_file_operation_mode_tools_desc)
+                    }
+                    Text(description)
+                },
+                trailingContent = {
+                    Switch(
+                        checked = conversation.workspaceFileOperationMode == WorkspaceFileOperationMode.COMMANDS,
+                        enabled = commandModeAvailable,
+                        onCheckedChange = { checked ->
+                            onUpdateConversation(
+                                conversation.copy(
+                                    workspaceFileOperationMode = if (checked) {
+                                        WorkspaceFileOperationMode.COMMANDS
+                                    } else {
+                                        WorkspaceFileOperationMode.TOOLS
+                                    }
+                                )
+                            )
+                        },
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
         }
     }
 

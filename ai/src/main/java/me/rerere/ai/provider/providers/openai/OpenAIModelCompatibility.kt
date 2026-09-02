@@ -3,6 +3,7 @@ package me.rerere.ai.provider.providers.openai
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.normalizeCompactVendorModelId
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class OpenAIModelParameterSupport(
@@ -44,23 +45,78 @@ fun ProviderSetting.OpenAI.requestChannel(): ProviderRequestChannel {
 
 internal fun String.normalizedOpenAIModelId(): String =
     substringAfterLast('/').trim().lowercase()
+        .replace(Regex("[\\s_]+"), "-")
+        .replace(Regex("^(gpt|chatgpt|o)(?=\\d)"), "$1-")
+        .replace(Regex("^chatgpt-(?=5(?:[.-]|$))"), "gpt-")
+        .normalizeCompactVendorModelId()
 
 internal fun isOpenAIGpt5Model(modelId: String): Boolean =
     GPT_5_SERIES.containsMatchIn(modelId.normalizedOpenAIModelId())
 
 internal fun resolveOpenAIMaximumReasoningEffort(modelId: String): ReasoningLevel {
-    val normalized = modelId.normalizedOpenAIModelId()
+    return resolveOpenAIReasoningLevels(modelId)
+        .lastOrNull { it != ReasoningLevel.AUTO && it != ReasoningLevel.OFF }
+        ?: ReasoningLevel.HIGH
+}
+
+internal fun resolveOpenAIReasoningLevels(modelId: String): List<ReasoningLevel> {
+    val normalized = modelId.normalizedOpenAIModelId().replace('_', '-')
     return when {
-        GPT_5_6_SERIES.containsMatchIn(normalized) -> ReasoningLevel.MAX
-        GPT_5_2_OR_LATER.containsMatchIn(normalized) -> ReasoningLevel.XHIGH
-        else -> ReasoningLevel.HIGH
+        GPT_5_6_SERIES.containsMatchIn(normalized) -> listOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+            ReasoningLevel.MAX,
+        )
+
+        GPT_5_2_OR_LATER.containsMatchIn(normalized) -> listOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+        )
+
+        GPT_5_1_SERIES.containsMatchIn(normalized) -> listOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+        )
+
+        GPT_5_SERIES.containsMatchIn(normalized) -> listOf(
+            ReasoningLevel.AUTO,
+            ReasoningLevel.MINIMAL,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+        )
+
+        OPENAI_REASONING_MODEL.containsMatchIn(normalized) || normalized.startsWith("gpt-oss") -> listOf(
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+        )
+
+        else -> listOf(
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+        )
     }
 }
 
 private fun String.isOpenAITextModel(): Boolean {
-    if (!startsWith("gpt-")) return false
     if (OPENAI_NON_TEXT_MODEL_MARKERS.any(::contains)) return false
-    return startsWith("gpt-3.5-turbo") ||
+    return OPENAI_REASONING_MODEL.containsMatchIn(this) ||
+        startsWith("gpt-3.5-turbo") ||
         startsWith("gpt-4") ||
         startsWith("gpt-5")
 }
@@ -76,8 +132,10 @@ private fun String.isRetiredOpenAITextModel(): Boolean {
 internal const val OPENAI_API_HOST = "api.openai.com"
 
 private val GPT_5_SERIES = Regex("^gpt-5(?:[.-]|$)")
+private val GPT_5_1_SERIES = Regex("^gpt-5[.-]1(?:[.-]|$)")
 private val GPT_5_6_SERIES = Regex("^gpt-5[.-]6(?:[.-]|$)")
 private val GPT_5_2_OR_LATER = Regex("^gpt-5[.-](?:[2-9]|\\d{2,})(?:[.-]|$)")
+private val OPENAI_REASONING_MODEL = Regex("^o(?:1|3|4)(?:[-.]|$)")
 
 private val OPENAI_NON_TEXT_MODEL_MARKERS = setOf(
     "audio",

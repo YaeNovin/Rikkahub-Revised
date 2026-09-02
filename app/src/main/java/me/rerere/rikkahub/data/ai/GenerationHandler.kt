@@ -38,6 +38,7 @@ import me.rerere.ai.provider.ProviderRetryController
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.crossesRequestReplayBoundary
+import me.rerere.ai.provider.providerStatusCode
 import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunk
@@ -50,12 +51,14 @@ import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
+import me.rerere.rikkahub.data.ai.transformers.PromptVariableResolutionContext
 import me.rerere.rikkahub.data.ai.transforms.currentRequestKnowledgeCitations
 import me.rerere.rikkahub.data.files.FileFolders
 import java.io.File
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
+import me.rerere.rikkahub.data.ai.transformers.resolvePromptVariables
 import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.ai.tools.createKnowledgeBaseTools
 import me.rerere.rikkahub.data.ai.tools.KnowledgeBaseCapabilities
@@ -64,8 +67,13 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryType
+import me.rerere.rikkahub.data.model.LorebookEntryRuntimeState
+import me.rerere.rikkahub.data.model.PromptInjectionEvaluation
 import me.rerere.rikkahub.data.memory.MemoryEmbeddingService
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
@@ -96,6 +104,7 @@ class GenerationHandler(
     private val memoryRepo: MemoryRepository,
     private val memoryEmbeddingService: MemoryEmbeddingService,
     private val knowledgeBaseRepository: KnowledgeBaseRepository,
+    private val requestStatisticsRecorder: RequestStatisticsRecorder,
 ) {
     fun generateText(
         settings: Settings,
@@ -112,7 +121,12 @@ class GenerationHandler(
         conversationSystemPrompt: String? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
+        temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
+        lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
+        conversationUserTurn: Int? = null,
+        onPromptInjectionEvaluation: ((PromptInjectionEvaluation) -> Unit)? = null,
         workspaceCwd: String? = null,
+        workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
         rollingContextSummary: String? = null,
         requestMessageStartIndex: Int = 0,
         resumeInterruptedResponse: Boolean = false,
@@ -160,12 +174,13 @@ class GenerationHandler(
                                 sourceConversationId = conversationId?.toString(),
                             )
                         },
-                        onUpdate = { id, content ->
+                        onUpdate = { id, content, type ->
                             memoryEmbeddingService.updateMemory(
                                 assistantId = memoryAssistantId,
                                 id = id,
                                 content = content,
                                 settings = settings,
+                                type = type,
                             )
                         },
                         onDelete = { id ->
@@ -173,6 +188,9 @@ class GenerationHandler(
                         },
                         onList = {
                             memoryRepo.getMemoriesOfAssistant(memoryAssistantId)
+                                .filter { memory ->
+                                    assistant.enableEpisodicMemory || memory.type == MemoryType.FACT
+                                }
                         },
                     ).let(this::addAll)
                 }
@@ -256,7 +274,12 @@ class GenerationHandler(
                     conversationSystemPrompt = conversationSystemPrompt,
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
+                    temporaryModeInjections = temporaryModeInjections,
+                    lorebookRuntimeStates = lorebookRuntimeStates,
+                    conversationUserTurn = conversationUserTurn,
+                    onPromptInjectionEvaluation = onPromptInjectionEvaluation,
                     workspaceCwd = workspaceCwd,
+                    workspaceFileOperationMode = workspaceFileOperationMode,
                     nonToolCapabilityPrompt = nonToolCapabilityPrompt,
                     rollingContextSummary = rollingContextSummary,
                     resumeInterruptedResponse = needsInterruptedResponseContinuation,
@@ -264,13 +287,6 @@ class GenerationHandler(
                 needsInterruptedResponseContinuation = false
                 messages = messages.withKnowledgeCitations(requestCitations)
                 val generatedTools = messages.last().getTools().filter { !it.isExecuted }
-                messages = messages.visualTransforms(
-                    transformers = outputTransformers,
-                    context = context,
-                    model = model,
-                    assistant = assistant,
-                    settings = settings
-                )
                 messages = messages.onGenerationFinish(
                     transformers = outputTransformers,
                     context = context,
@@ -303,9 +319,28 @@ class GenerationHandler(
                 var hasPendingApproval = false
                 val updatedTools = generatedTools.map { tool ->
                     val toolDef = toolsInternal.find { it.name == tool.toolName }
+                    val parsedToolInput = runCatching {
+                        json.parseToolArguments(tool.input, tool.toolName)
+                    }.getOrNull()
+                    if (toolDef != null && parsedToolInput == null) {
+                        // Invalid parameters cannot execute. Let the normal tool-error path return
+                        // the parse failure to the model so it can issue one corrected call without
+                        // presenting a meaningless approval prompt to the user.
+                        Log.w(TAG, "generateText: invalid arguments for ${tool.toolName}")
+                    }
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
-                        toolDef?.needsApproval(tool.inputAsJson()) == true &&
+                        toolDef != null &&
+                            parsedToolInput != null &&
+                            runCatching { toolDef.needsApproval(parsedToolInput) }
+                                .getOrElse { approvalError ->
+                                    Log.w(
+                                        TAG,
+                                        "generateText: approval check failed for ${tool.toolName}; requiring approval",
+                                        approvalError,
+                                    )
+                                    true
+                                } &&
                             tool.approvalState is ToolApprovalState.Auto -> {
                             hasPendingApproval = true
                             tool.copy(approvalState = ToolApprovalState.Pending)
@@ -389,11 +424,7 @@ class GenerationHandler(
                         runCatching {
                             val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
                                 ?: error("Tool ${tool.toolName} not found")
-                            val args = runCatching {
-                                json.parseToJsonElement(tool.input.ifBlank { "{}" })
-                            }.getOrElse {
-                                error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
-                            }
+                            val args = json.parseToolArguments(tool.input, tool.toolName)
                             Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
                             val result = toolDef.execute(args)
                             val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
@@ -471,7 +502,12 @@ class GenerationHandler(
         conversationSystemPrompt: String? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
+        temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
+        lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
+        conversationUserTurn: Int? = null,
+        onPromptInjectionEvaluation: ((PromptInjectionEvaluation) -> Unit)? = null,
         workspaceCwd: String? = null,
+        workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
         nonToolCapabilityPrompt: String = "",
         rollingContextSummary: String? = null,
         resumeInterruptedResponse: Boolean = false,
@@ -503,7 +539,12 @@ class GenerationHandler(
                 // 记忆
                 if (assistant.enableMemory && !assistant.enableMemoryRag) {
                     appendLine()
-                    append(buildMemoryPrompt(memories = memories))
+                    append(
+                        buildMemoryPrompt(
+                            memories = memories,
+                            includeEpisodic = assistant.enableEpisodicMemory,
+                        )
+                    )
                 }
                 // 工具prompt
                 tools.forEach { tool ->
@@ -521,8 +562,13 @@ class GenerationHandler(
             settings = settings,
             conversationModeInjectionIds = conversationModeInjectionIds,
             conversationLorebookIds = conversationLorebookIds,
+            temporaryModeInjections = temporaryModeInjections,
+            lorebookRuntimeStates = lorebookRuntimeStates,
+            conversationUserTurn = conversationUserTurn,
+            onPromptInjectionEvaluation = onPromptInjectionEvaluation,
             processingStatus = processingStatus,
             workspaceCwd = workspaceCwd,
+            workspaceFileOperationMode = workspaceFileOperationMode,
         ).compactHistoricalMediaForRequest(
             mediaSizeBytes = ::resolveContentMediaSize,
         )
@@ -530,8 +576,6 @@ class GenerationHandler(
             buildInterruptedStreamContinuation(
                 requestMessages = internalMessages,
                 currentMessages = messages,
-                hasClientTools = tools.isNotEmpty(),
-                hasServerTools = model.tools.any { it != BuiltInTools.ImageGeneration },
             ) ?: internalMessages
         } else {
             internalMessages
@@ -546,6 +590,9 @@ class GenerationHandler(
             .distinctBy { it.chunkId }
 
         var messages: List<UIMessage> = messages
+        val statisticsRequestId = Uuid.random().toString()
+        var statisticsAttemptStartedNanos = System.nanoTime()
+        var firstTokenElapsedNanos: Long? = null
         val params = TextGenerationParams(
             model = model,
             temperature = assistant.temperature,
@@ -566,7 +613,8 @@ class GenerationHandler(
             customBody = buildList {
                 addAll(assistant.customBodies)
                 addAll(model.customBodies)
-            }
+            },
+            requestId = statisticsRequestId,
         )
         val previousProcessingStatus = processingStatus.value
         var receivedEffectiveOutput = false
@@ -574,7 +622,6 @@ class GenerationHandler(
         var streamRecoveryCount = 0
         val nativeImageOutputEnabled = BuiltInTools.ImageGeneration in model.tools ||
             Modality.IMAGE in model.outputModalities
-        val hasReplayUnsafeBuiltInTools = model.tools.any { it != BuiltInTools.ImageGeneration }
         val retryController = ProviderRetryController(
             maxRetries = settings.generationRetryMaxRetries.coerceIn(
                 MIN_GENERATION_RETRY_COUNT,
@@ -620,7 +667,10 @@ class GenerationHandler(
                     ) {
                         attemptNetworkVersion = networkRecovery.snapshot()
                         receivedEffectiveOutput = false
-                        if (stream) {
+                        statisticsAttemptStartedNanos = System.nanoTime()
+                        firstTokenElapsedNanos = null
+                        try {
+                            if (stream) {
                             val streamChunkHandler = StreamChunkHandler(model)
                             val preBoundaryChunks = mutableListOf<StreamChunk>()
                             var lastUiUpdateNanos = 0L
@@ -650,6 +700,11 @@ class GenerationHandler(
                                 messages = providerMessages,
                                 params = params
                             ).collect { chunk ->
+                                if (firstTokenElapsedNanos == null && chunk.isFirstModelContentToken()) {
+                                    firstTokenElapsedNanos = (
+                                        System.nanoTime() - statisticsAttemptStartedNanos
+                                        ).coerceAtLeast(0L)
+                                }
                                 if (!receivedEffectiveOutput) {
                                     preBoundaryChunks += chunk
                                     if (chunk.crossesRequestReplayBoundary(
@@ -677,17 +732,41 @@ class GenerationHandler(
                             } else if (hasPendingUiUpdate) {
                                 flushStreamUpdate()
                             }
-                        } else {
-                            val result = providerImpl.generateText(
-                                providerSetting = provider,
-                                messages = providerMessages,
-                                params = params,
+                            } else {
+                                val result = providerImpl.generateText(
+                                    providerSetting = provider,
+                                    messages = providerMessages,
+                                    params = params,
+                                )
+                                receivedEffectiveOutput = true
+                                messages = messages.handleTextGenerationResult(result = result, model = model)
+                                    .withKnowledgeCitations(requestCitations)
+                                onUpdateMessages(messages)
+                            }
+                        } catch (error: Throwable) {
+                            requestStatisticsRecorder.completeAttempt(
+                                requestId = statisticsRequestId,
+                                statusCode = error.providerStatusCode(),
+                                firstTokenNanos = firstTokenElapsedNanos,
+                                totalDurationNanos = (
+                                    System.nanoTime() - statisticsAttemptStartedNanos
+                                    ).coerceAtLeast(0L),
+                                completedAt = System.currentTimeMillis(),
                             )
-                            receivedEffectiveOutput = true
-                            messages = messages.handleTextGenerationResult(result = result, model = model)
-                                .withKnowledgeCitations(requestCitations)
-                            onUpdateMessages(messages)
+                            throw error
                         }
+                    }
+                    messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.let { message ->
+                        requestStatisticsRecorder.attachUsage(
+                            requestId = statisticsRequestId,
+                            messageId = message.id.toString(),
+                            usage = message.usage,
+                            firstTokenNanos = firstTokenElapsedNanos,
+                            totalDurationNanos = (
+                                System.nanoTime() - statisticsAttemptStartedNanos
+                                ).coerceAtLeast(0L),
+                            completedAt = System.currentTimeMillis(),
+                        )
                     }
                     if (streamRecoveryCount > 0 || resumeInterruptedResponse) {
                         val mergedMessages = messages.mergeLastAssistantTextParts()
@@ -715,8 +794,6 @@ class GenerationHandler(
                         buildInterruptedStreamContinuation(
                             requestMessages = internalMessages,
                             currentMessages = messages,
-                            hasClientTools = tools.isNotEmpty(),
-                            hasServerTools = hasReplayUnsafeBuiltInTools,
                         )
                     } else {
                         null
@@ -950,6 +1027,12 @@ class GenerationHandler(
         if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
             // Use regular translation with prompt
             val prompt = settings.translatePrompt.applyPlaceholders(
+                *PromptVariableResolutionContext(
+                    settings = settings,
+                    model = model,
+                    assistant = settings.getCurrentAssistant(),
+                    context = context,
+                ).resolvePromptVariables().toList().toTypedArray(),
                 "source_text" to sourceText,
                 "target_lang" to targetLanguage.toString(),
             )

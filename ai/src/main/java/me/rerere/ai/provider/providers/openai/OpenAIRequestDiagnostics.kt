@@ -12,6 +12,7 @@ internal fun JsonObject.openAIRequestDiagnostics(
     providerSetting: ProviderSetting.OpenAI,
     operation: ProviderRequestOperation,
     api: String,
+    requestId: String? = null,
 ): ProviderRequestDiagnostics {
     val reasoning = this["reasoning"] as? JsonObject
     val text = this["text"] as? JsonObject
@@ -72,6 +73,7 @@ internal fun JsonObject.openAIRequestDiagnostics(
         channel = providerSetting.requestChannel(),
         operation = operation,
         parameters = parameters,
+        requestId = requestId,
     )
 }
 

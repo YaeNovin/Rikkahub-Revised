@@ -30,8 +30,7 @@ data class Assistant(
     val systemPrompt: String = "",
     val temperature: Float? = null,
     val topP: Float? = null,
-    // 上下文消息条数上限, 超出后阶梯式截断; 0 表示不限制
-    // 0 表示保留完整上下文；大于 0 时按 Token 阈值启用滚动摘要上下文。
+    val enableRollingContextCompression: Boolean = true,
     val rollingContextCompressionThresholdTokens: Int = DEFAULT_ROLLING_CONTEXT_THRESHOLD_TOKENS,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
@@ -42,6 +41,7 @@ data class Assistant(
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),
     val quickMessageIds: Set<Uuid> = emptySet(),
+    val quickMessageGroups: List<QuickMessageGroup> = emptyList(),
     val regexes: List<AssistantRegex> = emptyList(),
     val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
     val maxTokens: Int? = null,
@@ -75,6 +75,25 @@ data class QuickMessage(
     val id: Uuid = Uuid.random(),
     val title: String = "",
     val content: String = "",
+    val category: String = "",
+    val tags: List<String> = emptyList(),
+    val favorite: Boolean = false,
+    val useCount: Long = 0,
+    val lastUsedAt: Long = 0,
+)
+
+@Serializable
+data class QuickMessageGroup(
+    val id: Uuid = Uuid.random(),
+    val name: String = "",
+    val quickMessageIds: Set<Uuid> = emptySet(),
+)
+
+fun Assistant.withQuickMessageIds(ids: Set<Uuid>): Assistant = copy(
+    quickMessageIds = ids,
+    quickMessageGroups = quickMessageGroups.map { group ->
+        group.copy(quickMessageIds = group.quickMessageIds.intersect(ids))
+    },
 )
 
 @Serializable
@@ -116,7 +135,7 @@ data class AssistantRegex(
     val enabled: Boolean = true,
     val findRegex: String = "", // 正则表达式
     val replaceString: String = "", // 替换字符串
-    val affectingScope: Set<AssistantAffectScope> = setOf(),
+    val affectingScope: Set<AssistantAffectScope> = setOf(AssistantAffectScope.ASSISTANT),
     val visualOnly: Boolean = false, // 是否仅在视觉上影响
 )
 
@@ -128,7 +147,9 @@ private val regexCache = SimpleCache.builder<String, Result<Regex>>()
 
 private fun compileRegexCached(pattern: String): Regex? {
     regexCache.getIfPresent(pattern)?.let { return it.getOrNull() }
-    val result = runCatching { Regex(pattern) }.onFailure { it.printStackTrace() }
+    // Invalid user-authored expressions are expected input. Cache the failure
+    // without printing a stack trace on every streamed response chunk.
+    val result = runCatching { Regex(pattern) }
     regexCache.put(pattern, result)
     return result.getOrNull()
 }
@@ -148,8 +169,7 @@ fun String.replaceRegexes(
                     regex = compiled,
                     replacement = regex.replaceString,
                 )
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: RuntimeException) {
                 // 替换字符串可能引用不存在的分组，失败时返回原字符串
                 acc
             }
@@ -211,6 +231,7 @@ sealed class PromptInjection {
         override val content: String = "",
         override val injectDepth: Int = 4,
         override val role: MessageRole = MessageRole.USER,
+        val exclusiveGroup: String = "",
     ) : PromptInjection()
 
     /**
@@ -232,7 +253,19 @@ sealed class PromptInjection {
         val caseSensitive: Boolean = false,        // 大小写敏感
         val scanDepth: Int = 4,                    // 扫描最近N条消息
         val constantActive: Boolean = false,       // 常驻激活（无需匹配）
+        val keywordExpression: String = "",
+        val triggerProbability: Int = 100,
+        val stickyTurns: Int = 1,
+        val cooldownTurns: Int = 0,
+        val settingKeys: List<String> = emptyList(),
     ) : PromptInjection()
+}
+
+@Serializable
+enum class LorebookOverflowStrategy {
+    DROP_LOW_PRIORITY,
+    TRUNCATE_LAST,
+    SKIP_BOOK,
 }
 
 /**
@@ -245,6 +278,8 @@ data class Lorebook(
     val description: String = "",
     val enabled: Boolean = true,
     val entries: List<PromptInjection.RegexInjection> = emptyList(),
+    val tokenBudget: Int = 0,
+    val overflowStrategy: LorebookOverflowStrategy = LorebookOverflowStrategy.DROP_LOW_PRIORITY,
 )
 
 /**

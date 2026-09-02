@@ -42,22 +42,25 @@ class DeepSeekOptionsRequestTest {
     }
 
     @Test
-    fun `recognizes only currently served DeepSeek V4 models`() {
+    fun `recognizes DeepSeek chat families and rejects specialized models`() {
         listOf(
             "deepseek-v4-flash",
             "deepseek-v4-pro",
             "deepseek-v4-flash-vision-exp",
             "deepseek-ai/DeepSeek-V4-Pro",
             "provider:deepseek_v4_flash",
-        ).forEach { assertTrue("model=$it", resolveDeepSeekModelParameterSupport(it).available) }
-
-        listOf(
             "deepseek-chat",
             "deepseek-reasoner",
             "deepseek-v3.2",
             "deepseek-r1-0528",
             "deepseek-v4-flash-preview",
             "deepseek-v4-pro-preview",
+        ).forEach { assertTrue("model=$it", resolveDeepSeekModelParameterSupport(it).available) }
+
+        listOf(
+            "deepseek-embedding",
+            "deepseek-rerank",
+            "deepseek-ocr",
             "gpt-5.6",
         ).forEach { assertFalse("model=$it", resolveDeepSeekModelParameterSupport(it).available) }
 
@@ -135,8 +138,8 @@ class DeepSeekOptionsRequestTest {
     }
 
     @Test
-    fun `stored DeepSeek options never leak to retired or unrelated models`() {
-        listOf("deepseek-chat", "deepseek-reasoner", "gpt-5.6").forEach { modelId ->
+    fun `stored DeepSeek options never leak to specialized or unrelated models`() {
+        listOf("deepseek-embedding", "deepseek-rerank", "gpt-5.6").forEach { modelId ->
             val body = buildChatRequest(modelId = modelId, reasoningLevel = ReasoningLevel.OFF)
             listOf(
                 "tool_choice",

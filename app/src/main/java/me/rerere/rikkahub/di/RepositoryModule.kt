@@ -4,6 +4,7 @@ import android.content.Context
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.files.WorkspaceSafFileSystem
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -15,6 +16,7 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.ProotShellRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceBindMount
+import me.rerere.workspace.WorkspaceBindMountAccess
 import me.rerere.workspace.WorkspaceManager
 import org.koin.dsl.module
 import java.io.File
@@ -60,14 +62,17 @@ val repositoryModule = module {
                 WorkspaceBindMount(
                     source = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() },
                     target = "/skills",
+                    access = WorkspaceBindMountAccess.SHELL_READ_ONLY_COPY,
                 ),
                 WorkspaceBindMount(
                     source = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() },
                     target = "/tool_outputs",
+                    access = WorkspaceBindMountAccess.FILE_TOOLS_ONLY,
                 ),
                 WorkspaceBindMount(
                     source = File(context.filesDir, FileFolders.UPLOAD).apply { mkdirs() },
                     target = "/upload",
+                    access = WorkspaceBindMountAccess.FILE_TOOLS_ONLY,
                 ),
             ),
         )
@@ -78,7 +83,11 @@ val repositoryModule = module {
     }
 
     single {
-        WorkspaceRepository(get(), get(), get(), get())
+        WorkspaceSafFileSystem(get())
+    }
+
+    single {
+        WorkspaceRepository(get(), get(), get(), get(), get())
     }
 
     single {

@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.claude
 
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.provider.normalizeCompactVendorModelId
 
 data class ClaudeModelParameterSupport(
     val available: Boolean,
@@ -23,13 +24,30 @@ fun resolveClaudeModelParameterSupport(modelId: String): ClaudeModelParameterSup
     val version = model?.version
     val available = CLAUDE_MODEL_MARKER.containsMatchIn(normalized) && when (family) {
         "fable" -> version == ClaudeVersion(5)
-        "sonnet" -> version == ClaudeVersion(4, 6) || version == ClaudeVersion(5)
-        "opus" -> version in CURRENT_OPUS_VERSIONS
+        "mythos" -> version?.major == 5 || "preview" in normalized
+        "sonnet" -> version == ClaudeVersion(3, 7) ||
+            version == ClaudeVersion(4) ||
+            version == ClaudeVersion(4, 5) ||
+            version?.atLeast(4, 6) == true
+        "opus" -> version == ClaudeVersion(4) ||
+            version == ClaudeVersion(4, 1) ||
+            version == ClaudeVersion(4, 5) ||
+            version?.atLeast(4, 6) == true
+        "haiku" -> version == ClaudeVersion(4, 5)
         else -> false
     }
+    val supportsAdaptiveThinking = available && (
+        version?.atLeast(4, 6) == true ||
+            (family == "mythos" && "preview" in normalized) ||
+            version?.major?.let { it >= 5 } == true
+        )
+    val supportsManualThinking = available && !supportsAdaptiveThinking
     val is47OrLater = version?.atLeast(4, 7) == true
     val isVersion5OrLater = version?.major?.let { it >= 5 } == true
-    val supportsEffort = available
+    val supportsEffort = available && (
+        supportsAdaptiveThinking ||
+            (family == "opus" && version == ClaudeVersion(4, 5))
+        )
     val supportsXHighEffort = available && when (family) {
         "fable" -> isVersion5OrLater
         "opus" -> isVersion5OrLater || is47OrLater
@@ -39,16 +57,17 @@ fun resolveClaudeModelParameterSupport(modelId: String): ClaudeModelParameterSup
 
     return ClaudeModelParameterSupport(
         available = available,
-        supportsAdaptiveThinking = available,
-        requiresAdaptiveThinking = available && family == "fable" && version == ClaudeVersion(5),
-        supportsManualThinking = false,
+        supportsAdaptiveThinking = supportsAdaptiveThinking,
+        requiresAdaptiveThinking = supportsAdaptiveThinking &&
+            family == "fable" && version == ClaudeVersion(5),
+        supportsManualThinking = supportsManualThinking,
         supportsEffort = supportsEffort,
         supportsXHighEffort = supportsXHighEffort,
-        supportsMaxEffort = available,
-        supportsServiceTier = available && !(
+        supportsMaxEffort = supportsAdaptiveThinking,
+        supportsServiceTier = supportsAdaptiveThinking && !(
             (family == "opus" || family == "sonnet") && isVersion5OrLater
             ),
-        supportsInferenceGeo = available,
+        supportsInferenceGeo = supportsAdaptiveThinking,
         supportsSamplingParameters = available && version == ClaudeVersion(4, 6),
         supportsStructuredOutput = available,
     )
@@ -63,6 +82,7 @@ internal fun resolveAnthropicReasoningEffort(
         return null
     }
     return when (level) {
+        ReasoningLevel.MINIMAL,
         ReasoningLevel.LOW -> "low"
         ReasoningLevel.MEDIUM -> "medium"
         ReasoningLevel.HIGH -> "high"
@@ -84,6 +104,9 @@ private data class ClaudeVersion(val major: Int, val minor: Int = 0) {
 }
 
 private fun parseClaudeModel(normalized: String): ClaudeModel? {
+    if ("claude-mythos-preview" in normalized) {
+        return ClaudeModel(family = "mythos", version = ClaudeVersion(5))
+    }
     FAMILY_FIRST.find(normalized)?.let { match ->
         val minorText = match.groupValues[3]
         return ClaudeModel(
@@ -110,13 +133,10 @@ private fun String.normalizedClaudeModelId(): String = lowercase()
     .replace('.', '-')
     .replace('_', '-')
     .replace('@', '-')
+    .replace(Regex("\\s+"), "-")
+    .replace(Regex("claude(?=\\d)"), "claude-")
+    .normalizeCompactVendorModelId()
 
 private val CLAUDE_MODEL_MARKER = Regex("(?:^|[-./:])claude(?:[-./:]|$)")
-private val CURRENT_OPUS_VERSIONS = setOf(
-    ClaudeVersion(4, 6),
-    ClaudeVersion(4, 7),
-    ClaudeVersion(4, 8),
-    ClaudeVersion(5),
-)
 private val FAMILY_FIRST = Regex("claude-(opus|sonnet|haiku|fable|mythos)-(\\d+)(?:-(\\d+))?")
 private val VERSION_FIRST = Regex("claude-(\\d+)(?:-(\\d+))?-(opus|sonnet|haiku|fable|mythos)")

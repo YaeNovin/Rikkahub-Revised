@@ -20,6 +20,7 @@ import me.rerere.ai.ui.UIMessagePart
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -139,7 +140,7 @@ class GoogleGeminiOptionsRequestTest {
     }
 
     @Test
-    fun `maps disabled reasoning to low for Gemini 3 7 Flash`() {
+    fun `maps unsupported disabled reasoning to auto for Gemini 3 7 Flash`() {
         val body = buildRequest(
             modelId = "gemini-3.7-flash",
             options = GeminiGenerationOptions(),
@@ -147,11 +148,11 @@ class GoogleGeminiOptionsRequestTest {
         )
 
         val thinking = body["generationConfig"]!!.jsonObject["thinkingConfig"]!!.jsonObject
-        assertEquals("low", thinking["thinkingLevel"]!!.jsonPrimitive.content)
+        assertNull(thinking["thinkingLevel"])
     }
 
     @Test
-    fun `keeps minimal reasoning for earlier Gemini 3 models`() {
+    fun `maps unsupported disabled reasoning to auto for Gemini 3 Pro`() {
         val body = buildRequest(
             modelId = "gemini-3.1-pro-preview",
             options = GeminiGenerationOptions(),
@@ -159,7 +160,7 @@ class GoogleGeminiOptionsRequestTest {
         )
 
         val thinking = body["generationConfig"]!!.jsonObject["thinkingConfig"]!!.jsonObject
-        assertEquals("minimal", thinking["thinkingLevel"]!!.jsonPrimitive.content)
+        assertNull(thinking["thinkingLevel"])
     }
 
     private fun buildRequest(

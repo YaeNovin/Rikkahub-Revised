@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -373,11 +374,13 @@ class OpenAIProvider(
                     )
                 }
                 val explicitOptions = params.explicitImageOptions(constraints)
+                val advancedOptions = params.advancedImageOptions(constraints)
                 params.customBody
                     .filter { customBody ->
                         val field = customBody.key.lowercase()
                         field !in RESERVED_IMAGE_EDIT_FIELDS &&
                             field !in explicitOptions &&
+                            field !in advancedOptions &&
                             constraints.acceptsImageOption(customBody)
                     }
                     .forEach { customBody ->
@@ -388,6 +391,12 @@ class OpenAIProvider(
                         bodyBuilder.addFormDataPart(customBody.key, value)
                     }
                 explicitOptions.forEach { (field, value) -> bodyBuilder.addFormDataPart(field, value) }
+                advancedOptions.forEach { (field, value) ->
+                    bodyBuilder.addFormDataPart(
+                        field,
+                        (value as? JsonPrimitive)?.contentOrNull ?: value.toString(),
+                    )
+                }
                 bodyBuilder.build()
             }
         }
@@ -555,10 +564,23 @@ class OpenAIProvider(
         val isDallE3 = normalizedModel.contains("dall-e-3")
         val isDallE2 = normalizedModel.contains("dall-e-2")
         val isSeedream = normalizedModel.contains("seedream")
+        val isQwenImage = normalizedModel.contains("qwen-image")
+        val isQwenImage3 = QWEN_IMAGE_3_PATTERN.containsMatchIn(normalizedModel)
+        val isFlux = normalizedModel.contains("flux")
+        val isFluxDev = isFlux && (
+            normalizedModel.contains("flux-dev") ||
+                normalizedModel.contains("flux.1-dev") ||
+                normalizedModel.contains("flux1-dev")
+            )
+        val isStableDiffusion = STABLE_DIFFUSION_MODEL_MARKERS.any(normalizedModel::contains)
         val seedreamMajorVersion = SEEDREAM_VERSION.find(normalizedModel)
             ?.groupValues
             ?.getOrNull(1)
             ?.toIntOrNull()
+        val isSeedream5Lite = isSeedream && seedreamMajorVersion == 5 && normalizedModel.contains("lite")
+        val supportsSequentialSeedream = isSeedream && (
+            seedreamMajorVersion == 4 || isSeedream5Lite
+            )
         val isEditableSeedream = isSeedream && (seedreamMajorVersion ?: 0) >= 4
         val isSingleOutputModel = SINGLE_OUTPUT_IMAGE_MODEL_MARKERS.any(normalizedModel::contains)
         val supportsEdit = when {
@@ -580,6 +602,7 @@ class OpenAIProvider(
             supportsPartialImages = false,
             maxOutputImages = when {
                 isDallE3 || isSingleOutputModel -> 1
+                isQwenImage3 -> 6
                 isGptImage || isDallE2 -> 10
                 isXaiImagineImage -> 10
                 else -> 4
@@ -590,6 +613,7 @@ class OpenAIProvider(
                 isGptImage -> 16
                 isEditableSeedream -> 10
                 isXaiImagineImage -> 3
+                isQwenImage3 -> 3
                 else -> 1
             },
             supportsSize = true,
@@ -619,6 +643,7 @@ class OpenAIProvider(
             },
             supportedOutputFormats = when {
                 isGptImage -> GPT_IMAGE_OUTPUT_FORMATS
+                isFlux || isStableDiffusion -> STABLE_IMAGE_OUTPUT_FORMATS
                 isXaiImage || isSeedream || isDallE2 || isDallE3 -> URL_OR_BASE64_FORMATS
                 else -> emptySet()
             },
@@ -629,6 +654,66 @@ class OpenAIProvider(
             },
             supportsOutputCompression = isGptImage,
             supportedResolutionValues = if (isXaiImagineImage) XAI_IMAGE_RESOLUTIONS else emptySet(),
+            seedRange = when {
+                isStableDiffusion || isQwenImage || isFlux -> 0L..Int.MAX_VALUE.toLong()
+                else -> null
+            },
+            stepsRange = when {
+                isFluxDev -> 1..50
+                isStableDiffusion -> 10..150
+                else -> null
+            },
+            defaultSteps = when {
+                isFluxDev -> 28
+                isStableDiffusion -> 30
+                else -> null
+            },
+            guidanceScaleRange = when {
+                isFluxDev -> 1.5f..5f
+                isStableDiffusion -> 1f..35f
+                else -> null
+            },
+            defaultGuidanceScale = when {
+                isFluxDev -> 3f
+                isStableDiffusion -> 7f
+                else -> null
+            },
+            guidanceScaleRequestField = when {
+                isFluxDev -> "guidance"
+                isStableDiffusion -> "cfg_scale"
+                else -> null
+            },
+            supportsNegativePrompt = isQwenImage || isStableDiffusion,
+            promptEnhancementRequestField = when {
+                isQwenImage -> "prompt_extend"
+                isFlux -> "prompt_upsampling"
+                else -> null
+            },
+            supportedPromptEnhancementModes = if (isQwenImage3) {
+                QWEN_PROMPT_ENHANCEMENT_MODES
+            } else {
+                emptySet()
+            },
+            supportsImageThinking = isQwenImage3,
+            supportsWatermark = isQwenImage || isSeedream,
+            supportedModerationValues = if (isGptImage) OPENAI_IMAGE_MODERATION else emptySet(),
+            supportedInputFidelityValues = if (
+                isGptImage && !isGptImage2 && !normalizedModel.contains("mini")
+            ) {
+                OPENAI_IMAGE_INPUT_FIDELITY
+            } else {
+                emptySet()
+            },
+            safetyToleranceRange = if (isFluxDev) 0..6 else null,
+            defaultSafetyTolerance = if (isFluxDev) 2 else null,
+            supportedSamplerValues = if (isStableDiffusion) STABILITY_SAMPLERS else emptySet(),
+            supportedStylePresetValues = if (isStableDiffusion) STABILITY_STYLE_PRESETS else emptySet(),
+            sequentialImageMax = if (supportsSequentialSeedream) 15 else null,
+            supportedPromptOptimizationModes = if (isSeedream5Lite) {
+                SEEDREAM_PROMPT_OPTIMIZATION_MODES
+            } else {
+                emptySet()
+            },
             blockedImageOptionKeys = when {
                 isSeedream -> setOf(
                     "quality", "output_format", "output_compression", "background", "input_fidelity",
@@ -700,6 +785,9 @@ class OpenAIProvider(
         private const val GPT_IMAGE_2_MAX_PIXELS = 8_294_400L
         private val GPT_IMAGE_QUALITY = setOf("auto", "low", "medium", "high")
         private val GPT_IMAGE_OUTPUT_FORMATS = setOf("png", "jpeg", "webp")
+        private val STABLE_IMAGE_OUTPUT_FORMATS = setOf("png", "jpeg", "webp")
+        private val OPENAI_IMAGE_MODERATION = setOf("auto", "low")
+        private val OPENAI_IMAGE_INPUT_FIDELITY = setOf("low", "high")
         private val GPT_IMAGE_2_BACKGROUNDS = setOf("auto", "opaque")
         private val GPT_IMAGE_BACKGROUNDS = setOf("auto", "opaque", "transparent")
         private val GPT_IMAGE_SIZES = linkedSetOf("auto", "1024x1024", "1536x1024", "1024x1536")
@@ -718,6 +806,46 @@ class OpenAIProvider(
         private val XAI_IMAGE_RESOLUTIONS = setOf("1k", "2k")
         private val XAI_IMAGE_2_QUALITY = setOf("low", "medium")
         private val XAI_IMAGE_MODEL_MARKERS = listOf("grok-imagine-image", "grok-2-image")
+        private val QWEN_IMAGE_3_PATTERN = Regex("(?:^|[^a-z0-9])qwen[^a-z0-9]*image[^a-z0-9]*3(?:[^0-9]|$)")
+        private val QWEN_PROMPT_ENHANCEMENT_MODES = setOf("direct", "agent")
+        private val SEEDREAM_PROMPT_OPTIMIZATION_MODES = setOf("standard", "fast")
+        private val STABILITY_SAMPLERS = linkedSetOf(
+            "DDIM",
+            "DDPM",
+            "K_DPMPP_2M",
+            "K_DPMPP_2S_ANCESTRAL",
+            "K_DPM_2",
+            "K_DPM_2_ANCESTRAL",
+            "K_EULER",
+            "K_EULER_ANCESTRAL",
+            "K_HEUN",
+            "K_LMS",
+        )
+        private val STABILITY_STYLE_PRESETS = linkedSetOf(
+            "3d-model",
+            "analog-film",
+            "anime",
+            "cinematic",
+            "comic-book",
+            "digital-art",
+            "enhance",
+            "fantasy-art",
+            "isometric",
+            "line-art",
+            "low-poly",
+            "modeling-compound",
+            "neon-punk",
+            "origami",
+            "photographic",
+            "pixel-art",
+            "tile-texture",
+        )
+        private val STABLE_DIFFUSION_MODEL_MARKERS = listOf(
+            "stable-diffusion",
+            "stable_image",
+            "stable-image",
+            "sdxl",
+        )
         private val SEEDREAM_VERSION = Regex("seedream[-_.]?v?[-_.]?(\\d+)")
         private val SEEDREAM_IMAGE_SIZES = linkedSetOf(
             "2048x2048", "2560x1440", "1440x2560",
@@ -754,12 +882,14 @@ internal fun buildOpenAIImageGenerationRequestBody(
 ): JsonObject {
     val outputCount = params.numOfImages.coerceIn(1, constraints.maxOutputImages)
     val explicitOptions = params.explicitImageOptions(constraints)
+    val advancedOptions = params.advancedImageOptions(constraints)
     val reservedFields = setOf("model", "prompt", "n", constraints.sizeRequestField)
     val customFields = buildJsonObject {}
         .mergeCustomBody(params.customBody)
         .filter { (key, value) ->
             key.lowercase() !in reservedFields &&
                 key.lowercase() !in explicitOptions &&
+                key.lowercase() !in advancedOptions &&
                 constraints.acceptsImageOption(CustomBody(key, value))
         }
 
@@ -772,6 +902,7 @@ internal fun buildOpenAIImageGenerationRequestBody(
         explicitOptions.forEach { (key, value) ->
             if (key == "output_compression") put(key, value.toInt()) else put(key, value)
         }
+        advancedOptions.forEach { (key, value) -> put(key, value) }
     }
 }
 
@@ -786,12 +917,14 @@ internal fun buildXaiImageEditRequestBody(
     }
     val outputCount = params.numOfImages.coerceIn(1, constraints.maxOutputImages)
     val explicitOptions = params.explicitImageOptions(constraints)
+    val advancedOptions = params.advancedImageOptions(constraints)
     val reservedFields = RESERVED_XAI_EDIT_FIELDS + constraints.sizeRequestField
     val customFields = buildJsonObject {}
         .mergeCustomBody(params.customBody)
         .filter { (key, value) ->
             key.lowercase() !in reservedFields &&
                 key.lowercase() !in explicitOptions &&
+                key.lowercase() !in advancedOptions &&
                 constraints.acceptsImageOption(CustomBody(key, value))
         }
     val metadata = buildJsonObject {
@@ -803,6 +936,7 @@ internal fun buildXaiImageEditRequestBody(
         explicitOptions.forEach { (key, value) ->
             if (key == "output_compression") put(key, value.toInt()) else put(key, value)
         }
+        advancedOptions.forEach { (key, value) -> put(key, value) }
     }
     return XaiImageEditRequestBody(metadata, images)
 }
@@ -817,12 +951,14 @@ internal fun buildSeedreamImageEditRequestBody(
         "Seedream image editing accepts at most ${constraints.maxReferenceImages} reference images"
     }
     val explicitOptions = params.explicitImageOptions(constraints)
+    val advancedOptions = params.advancedImageOptions(constraints)
     val reservedFields = RESERVED_SEEDREAM_EDIT_FIELDS + constraints.sizeRequestField
     val customFields = buildJsonObject {}
         .mergeCustomBody(params.customBody)
         .filter { (key, value) ->
             key.lowercase() !in reservedFields &&
                 key.lowercase() !in explicitOptions &&
+                key.lowercase() !in advancedOptions &&
                 constraints.acceptsImageOption(CustomBody(key, value))
         }
     val metadata = buildJsonObject {
@@ -831,6 +967,7 @@ internal fun buildSeedreamImageEditRequestBody(
         put("prompt", params.prompt)
         constraints.normalizedSize(params.size)?.let { put(constraints.sizeRequestField, it) }
         explicitOptions.forEach { (key, value) -> put(key, value) }
+        advancedOptions.forEach { (key, value) -> put(key, value) }
     }
     return SeedreamImageEditRequestBody(metadata, images)
 }
@@ -919,6 +1056,135 @@ private fun ImageEditParams.explicitImageOptions(
         put("output_compression", outputCompression.coerceIn(0, 100).toString())
     }
     resolution?.takeIf { it in constraints.supportedResolutionValues }?.let { put("resolution", it) }
+}
+
+private fun ImageGenerationParams.advancedImageOptions(
+    constraints: ImageGenerationConstraints,
+): Map<String, JsonElement> = buildAdvancedImageOptions(
+    constraints = constraints,
+    editing = false,
+    seed = seed,
+    steps = steps,
+    guidanceScale = guidanceScale,
+    negativePrompt = negativePrompt,
+    promptEnhancement = promptEnhancement,
+    promptEnhancementMode = promptEnhancementMode,
+    imageThinking = imageThinking,
+    watermark = watermark,
+    moderation = moderation,
+    inputFidelity = null,
+    safetyTolerance = safetyTolerance,
+    sampler = sampler,
+    stylePreset = stylePreset,
+    sequentialImageGeneration = sequentialImageGeneration,
+    sequentialMaxImages = sequentialMaxImages,
+    promptOptimizationMode = promptOptimizationMode,
+)
+
+private fun ImageEditParams.advancedImageOptions(
+    constraints: ImageGenerationConstraints,
+): Map<String, JsonElement> = buildAdvancedImageOptions(
+    constraints = constraints,
+    editing = true,
+    seed = seed,
+    steps = steps,
+    guidanceScale = guidanceScale,
+    negativePrompt = negativePrompt,
+    promptEnhancement = promptEnhancement,
+    promptEnhancementMode = promptEnhancementMode,
+    imageThinking = imageThinking,
+    watermark = watermark,
+    moderation = moderation,
+    inputFidelity = inputFidelity,
+    safetyTolerance = safetyTolerance,
+    sampler = sampler,
+    stylePreset = stylePreset,
+    sequentialImageGeneration = sequentialImageGeneration,
+    sequentialMaxImages = sequentialMaxImages,
+    promptOptimizationMode = promptOptimizationMode,
+)
+
+private fun buildAdvancedImageOptions(
+    constraints: ImageGenerationConstraints,
+    editing: Boolean,
+    seed: Long?,
+    steps: Int?,
+    guidanceScale: Float?,
+    negativePrompt: String?,
+    promptEnhancement: Boolean?,
+    promptEnhancementMode: String?,
+    imageThinking: Boolean?,
+    watermark: Boolean?,
+    moderation: String?,
+    inputFidelity: String?,
+    safetyTolerance: Int?,
+    sampler: String?,
+    stylePreset: String?,
+    sequentialImageGeneration: Boolean?,
+    sequentialMaxImages: Int,
+    promptOptimizationMode: String?,
+): Map<String, JsonElement> = buildMap {
+    val seedRange = constraints.seedRange
+    seed?.takeIf { seedRange != null && it in seedRange }?.let { put("seed", JsonPrimitive(it)) }
+
+    val stepsRange = constraints.stepsRange
+    steps?.takeIf { stepsRange != null && it in stepsRange }?.let { put("steps", JsonPrimitive(it)) }
+
+    val guidanceRange = constraints.guidanceScaleRange
+    val guidanceField = constraints.guidanceScaleRequestField
+    guidanceScale
+        ?.takeIf { guidanceRange != null && it in guidanceRange && guidanceField != null }
+        ?.let { put(requireNotNull(guidanceField), JsonPrimitive(it)) }
+
+    negativePrompt
+        ?.trim()
+        ?.takeIf { constraints.supportsNegativePrompt && it.isNotEmpty() }
+        ?.let { put("negative_prompt", JsonPrimitive(it)) }
+    promptEnhancement?.let { enabled ->
+        constraints.promptEnhancementRequestField?.let { field -> put(field, JsonPrimitive(enabled)) }
+    }
+    val effectiveEnhancementMode = promptEnhancementMode?.takeIf {
+        it in constraints.supportedPromptEnhancementModes && !(editing && it == "agent")
+    }
+    if (promptEnhancement != false) {
+        effectiveEnhancementMode?.let { put("prompt_extend_mode", JsonPrimitive(it)) }
+        imageThinking
+            ?.takeIf { constraints.supportsImageThinking && !(editing && effectiveEnhancementMode == "agent") }
+            ?.let { put("enable_thinking", JsonPrimitive(it)) }
+    }
+    watermark?.takeIf { constraints.supportsWatermark }?.let { put("watermark", JsonPrimitive(it)) }
+    moderation
+        ?.takeIf { it in constraints.supportedModerationValues }
+        ?.let { put("moderation", JsonPrimitive(it)) }
+    inputFidelity
+        ?.takeIf { editing && it in constraints.supportedInputFidelityValues }
+        ?.let { put("input_fidelity", JsonPrimitive(it)) }
+
+    val safetyRange = constraints.safetyToleranceRange
+    safetyTolerance
+        ?.takeIf { safetyRange != null && it in safetyRange }
+        ?.let { put("safety_tolerance", JsonPrimitive(it)) }
+    sampler
+        ?.takeIf { it in constraints.supportedSamplerValues }
+        ?.let { put("sampler", JsonPrimitive(it)) }
+    stylePreset
+        ?.takeIf { it in constraints.supportedStylePresetValues }
+        ?.let { put("style_preset", JsonPrimitive(it)) }
+
+    val sequentialMax = constraints.sequentialImageMax
+    sequentialImageGeneration?.takeIf { sequentialMax != null }?.let { enabled ->
+        put("sequential_image_generation", JsonPrimitive(if (enabled) "auto" else "disabled"))
+        if (enabled) {
+            put("sequential_image_generation_options", buildJsonObject {
+                put("max_images", sequentialMaxImages.coerceIn(1, requireNotNull(sequentialMax)))
+            })
+        }
+    }
+    promptOptimizationMode
+        ?.takeIf { it in constraints.supportedPromptOptimizationModes }
+        ?.let { mode ->
+            put("optimize_prompt_options", buildJsonObject { put("mode", mode) })
+        }
 }
 
 private fun ImageGenerationConstraints.outputFormatRequestField(): String =

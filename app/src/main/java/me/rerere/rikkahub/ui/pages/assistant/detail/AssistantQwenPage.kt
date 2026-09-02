@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.QwenGenerationOptions
 import me.rerere.ai.provider.QwenOptionalToggle
 import me.rerere.ai.provider.QwenResponseFormat
@@ -57,13 +58,16 @@ fun AssistantQwenPage(id: String) {
     val providers by vm.providers.collectAsStateWithLifecycle()
     val model = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val provider = model?.findProvider(providers) as? ProviderSetting.OpenAI
-    val support = resolveQwenModelParameterSupport(model?.modelId.orEmpty())
+    val support = resolveQwenModelParameterSupport(model?.parameterModelId().orEmpty())
     val enabled = provider != null && support.available
     val isResponses = provider?.useResponseApi == true
     val officialEndpoint = provider?.baseUrl
         ?.toHttpUrlOrNull()
         ?.host
         ?.let(::isAlibabaModelStudioHost) == true
+    val route = provider?.parameterRequestRoute(
+        endpointOverride = ParameterEndpoint.ALIBABA_MODEL_STUDIO.takeIf { officialEndpoint },
+    )
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_qwen_unavailable_no_model)
         provider == null -> stringResource(R.string.assistant_qwen_unavailable_protocol)
@@ -89,7 +93,7 @@ fun AssistantQwenPage(id: String) {
             assistant = assistant,
             enabled = enabled,
             isResponses = isResponses,
-            officialEndpoint = officialEndpoint,
+            route = route,
             supportsJsonSchema = support.supportsJsonSchema,
             supportsToolStream = support.supportsToolStream,
             supportsPreserveThinking = support.supportsPreserveThinking,
@@ -106,7 +110,7 @@ private fun AssistantQwenContent(
     assistant: Assistant,
     enabled: Boolean,
     isResponses: Boolean,
-    officialEndpoint: Boolean,
+    route: ParameterRequestRoute?,
     supportsJsonSchema: Boolean,
     supportsToolStream: Boolean,
     supportsPreserveThinking: Boolean,
@@ -135,22 +139,12 @@ private fun AssistantQwenContent(
                 label = { Text(stringResource(R.string.assistant_qwen_experimental_title)) },
                 description = {
                     Text(unavailableMessage ?: stringResource(R.string.assistant_qwen_available_desc))
-                    if (enabled) {
-                        Text(
-                            stringResource(
-                                R.string.assistant_qwen_current_channel,
-                                stringResource(
-                                    if (officialEndpoint) R.string.assistant_qwen_channel_official
-                                    else R.string.assistant_qwen_channel_compatible
-                                ),
-                                if (isResponses) "Responses" else "Chat Completions",
-                            )
-                        )
-                    }
+                    if (enabled) route?.DisplayText()
                     Text(stringResource(R.string.assistant_qwen_common_parameters_desc))
                     Text(stringResource(R.string.assistant_qwen_logging_desc))
-                    if (enabled && !officialEndpoint) {
-                        Text(stringResource(R.string.assistant_qwen_compatible_warning))
+                    ParameterWarningText(stringResource(R.string.assistant_parameter_experimental_warning))
+                    if (enabled && route?.endpoint == ParameterEndpoint.THIRD_PARTY) {
+                        ParameterWarningText(stringResource(R.string.assistant_qwen_compatible_warning))
                     }
                 },
             )
@@ -276,11 +270,11 @@ private fun AssistantQwenContent(
                     label = { Text(stringResource(R.string.assistant_qwen_sampling_parameters)) },
                     description = {
                         Text(
-                            stringResource(
-                                if (isResponses) R.string.assistant_qwen_chat_only
-                                else R.string.assistant_qwen_sampling_parameters_desc
-                            )
+                            stringResource(R.string.assistant_qwen_sampling_parameters_desc)
                         )
+                        if (isResponses) {
+                            ParameterWarningText(stringResource(R.string.assistant_qwen_chat_only))
+                        }
                     },
                 )
                 HorizontalDivider()
@@ -368,7 +362,9 @@ private fun QwenSchemaItem(
         label = { Text(stringResource(R.string.assistant_qwen_json_schema)) },
         description = {
             Text(stringResource(R.string.assistant_qwen_json_schema_desc))
-            if (!validSchema) Text(stringResource(R.string.assistant_qwen_json_schema_invalid))
+            if (!validSchema) {
+                ParameterWarningText(stringResource(R.string.assistant_qwen_json_schema_invalid))
+            }
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -522,7 +518,7 @@ private fun QwenTextItem(
     FormItem(
         modifier = Modifier.padding(12.dp),
         label = { Text(title) },
-        description = { Text(description); Text(warning) },
+        description = { Text(description); ParameterWarningText(warning) },
     ) {
         content()
     }

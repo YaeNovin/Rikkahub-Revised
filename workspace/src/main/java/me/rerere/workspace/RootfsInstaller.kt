@@ -8,6 +8,9 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.zip.GZIPInputStream
 import org.tukaani.xz.XZInputStream
@@ -19,30 +22,54 @@ class RootfsInstaller(
     fun install(
         root: String,
         url: String,
+        expectedSha256: String? = null,
         onProgress: (RootfsInstallProgress) -> Unit = {},
     ) {
         require(url.isNotBlank()) { "Rootfs download url is required" }
+        val normalizedSha256 = expectedSha256?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        require(normalizedSha256 == null || SHA256_REGEX.matches(normalizedSha256)) {
+            "Rootfs SHA-256 must contain 64 hexadecimal characters"
+        }
         manager.ensureWorkspace(root)
         val format = ArchiveFormat.fromUrl(url)
         val tempDir = manager.tempDir(root)
         val archive = File(tempDir, "rootfs.${format.extension}")
         val stagingDir = File(tempDir, "rootfs-staging")
+        val backupDir = File(tempDir, "rootfs-backup")
         val linuxDir = manager.linuxDir(root)
 
         try {
             stagingDir.deleteRecursively()
+            backupDir.deleteRecursively()
             stagingDir.mkdirs()
-            download(url, archive, onProgress)
-            extractTar(archive, stagingDir, format, onProgress)
-            linuxDir.deleteRecursively()
-            require(stagingDir.renameTo(linuxDir)) {
-                "Failed to move rootfs into workspace"
+            val downloadedSha256 = download(url, archive, onProgress)
+            require(normalizedSha256 == null || downloadedSha256 == normalizedSha256) {
+                "Rootfs SHA-256 mismatch: expected $normalizedSha256, got $downloadedSha256"
             }
-            patcher.patch(linuxDir)
+            extractTar(archive, stagingDir, format, onProgress)
+            require(File(stagingDir, "bin/sh").isFile) {
+                "Rootfs archive does not contain bin/sh"
+            }
+            patcher.patch(stagingDir)
+
+            if (linuxDir.exists()) moveDirectory(linuxDir, backupDir)
+            try {
+                moveDirectory(stagingDir, linuxDir)
+            } catch (error: Throwable) {
+                if (!linuxDir.exists() && backupDir.exists()) {
+                    runCatching { moveDirectory(backupDir, linuxDir) }
+                }
+                throw error
+            }
+            backupDir.deleteRecursively()
             onProgress(RootfsInstallProgress(stage = RootfsInstallStage.INSTALLED))
         } finally {
             archive.delete()
             stagingDir.deleteRecursively()
+            if (!linuxDir.exists() && backupDir.exists()) {
+                runCatching { moveDirectory(backupDir, linuxDir) }
+            }
+            if (linuxDir.exists()) backupDir.deleteRecursively()
         }
     }
 
@@ -50,8 +77,12 @@ class RootfsInstaller(
         url: String,
         target: File,
         onProgress: (RootfsInstallProgress) -> Unit,
-    ) {
-        val connection = URL(url).openConnection() as HttpURLConnection
+    ): String {
+        val parsedUrl = URL(url)
+        require(parsedUrl.protocol == "https" || parsedUrl.protocol == "http") {
+            "Rootfs download URL must use HTTP or HTTPS"
+        }
+        val connection = parsedUrl.openConnection() as HttpURLConnection
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
         connection.instanceFollowRedirects = true
@@ -59,9 +90,14 @@ class RootfsInstaller(
             val code = connection.responseCode
             require(code in 200..299) { "Rootfs download failed: HTTP $code" }
             val totalBytes = connection.contentLengthLong.takeIf { it > 0 }
+            require(totalBytes == null || totalBytes <= MAX_DOWNLOAD_BYTES) {
+                "Rootfs download is too large: $totalBytes bytes"
+            }
             target.parentFile?.mkdirs()
+            val digest = MessageDigest.getInstance("SHA-256")
             connection.inputStream.use { input ->
-                target.outputStream().use { output ->
+                target.outputStream().use { rawOutput ->
+                    val output = java.security.DigestOutputStream(rawOutput, digest)
                     val buffer = ByteArray(BUFFER_SIZE)
                     var bytesRead = 0L
                     var lastReportBytes = 0L
@@ -71,6 +107,9 @@ class RootfsInstaller(
                         if (read < 0) break
                         output.write(buffer, 0, read)
                         bytesRead += read
+                        require(bytesRead <= MAX_DOWNLOAD_BYTES) {
+                            "Rootfs download exceeded $MAX_DOWNLOAD_BYTES bytes"
+                        }
                         if (bytesRead - lastReportBytes >= PROGRESS_STEP_BYTES || bytesRead == totalBytes) {
                             lastReportBytes = bytesRead
                             onProgress(
@@ -91,8 +130,10 @@ class RootfsInstaller(
                             )
                         )
                     }
+                    output.flush()
                 }
             }
+            return digest.digest().joinToString("") { "%02x".format(it) }
         } finally {
             connection.disconnect()
         }
@@ -106,6 +147,8 @@ class RootfsInstaller(
     ) {
         format.wrapStream(BufferedInputStream(archive.inputStream())).use { input ->
             var entries = 0
+            var archiveRecords = 0
+            var extractedBytes = 0L
             var pendingName: String? = null
             var pendingLinkName: String? = null
             while (true) {
@@ -117,21 +160,35 @@ class RootfsInstaller(
                 )
                 pendingName = null
                 pendingLinkName = null
+                archiveRecords++
+                require(archiveRecords <= MAX_ARCHIVE_ENTRIES) {
+                    "Rootfs archive contains more than $MAX_ARCHIVE_ENTRIES records"
+                }
+                require(header.size <= MAX_SINGLE_ENTRY_BYTES) {
+                    "Rootfs entry is too large: ${header.name} (${header.size} bytes)"
+                }
+                require(extractedBytes <= MAX_EXTRACTED_BYTES - header.size) {
+                    "Rootfs extracted size exceeds $MAX_EXTRACTED_BYTES bytes"
+                }
+                extractedBytes += header.size
                 if (header.name.isBlank()) {
                     input.skipFully(header.size.paddedTarSize())
                     continue
                 }
                 if (header.type == TarEntryType.LONG_NAME) {
+                    require(header.size <= MAX_METADATA_ENTRY_BYTES) { "Rootfs long-name entry is too large" }
                     pendingName = input.readExactly(header.size).toString(Charsets.UTF_8).trimEnd('\u0000', '\n')
                     input.skipFully(header.size.paddingSize())
                     continue
                 }
                 if (header.type == TarEntryType.LONG_LINK) {
+                    require(header.size <= MAX_METADATA_ENTRY_BYTES) { "Rootfs long-link entry is too large" }
                     pendingLinkName = input.readExactly(header.size).toString(Charsets.UTF_8).trimEnd('\u0000', '\n')
                     input.skipFully(header.size.paddingSize())
                     continue
                 }
                 if (header.type == TarEntryType.PAX) {
+                    require(header.size <= MAX_METADATA_ENTRY_BYTES) { "Rootfs PAX entry is too large" }
                     val pax = parsePax(input.readExactly(header.size).toString(Charsets.UTF_8))
                     pendingName = pax["path"]
                     pendingLinkName = pax["linkpath"]
@@ -220,6 +277,11 @@ class RootfsInstaller(
         if (read == 0) return null
         if (read < TAR_BLOCK_SIZE) throw EOFException("Unexpected EOF while reading tar header")
         if (header.all { it == 0.toByte() }) return null
+
+        val storedChecksum = header.octal(148, 8)
+        val checksumHeader = header.copyOf().apply { fill(' '.code.toByte(), 148, 156) }
+        val calculatedChecksum = checksumHeader.sumOf { it.toUByte().toInt() }.toLong()
+        require(storedChecksum == calculatedChecksum) { "Invalid tar header checksum" }
 
         val name = header.string(0, 100)
         val prefix = header.string(345, 155)
@@ -344,6 +406,15 @@ class RootfsInstaller(
         return normalized
     }
 
+    private fun moveDirectory(source: File, target: File) {
+        target.parentFile?.mkdirs()
+        try {
+            Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(source.toPath(), target.toPath())
+        }
+    }
+
     private fun ByteArray.string(offset: Int, length: Int): String {
         val end = (offset until offset + length)
             .firstOrNull { this[it] == 0.toByte() }
@@ -414,5 +485,11 @@ class RootfsInstaller(
         private const val PROGRESS_STEP_BYTES = 512 * 1024
         private const val CONNECT_TIMEOUT_MS = 30_000
         private const val READ_TIMEOUT_MS = 60_000
+        private const val MAX_DOWNLOAD_BYTES = 1024L * 1024 * 1024
+        private const val MAX_EXTRACTED_BYTES = 4L * 1024 * 1024 * 1024
+        private const val MAX_SINGLE_ENTRY_BYTES = 1024L * 1024 * 1024
+        private const val MAX_METADATA_ENTRY_BYTES = 1024L * 1024
+        private const val MAX_ARCHIVE_ENTRIES = 250_000
+        private val SHA256_REGEX = Regex("[0-9a-f]{64}")
     }
 }

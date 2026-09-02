@@ -166,7 +166,7 @@ fun Route.conversationRoutes(
             val conversation = conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
-            chatService.saveConversation(uuid, conversation.copy(isPinned = !conversation.isPinned))
+            chatService.toggleConversationPinned(uuid, conversation)
             call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
         }
 
@@ -193,7 +193,7 @@ fun Route.conversationRoutes(
             val conversation = conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
-            chatService.saveConversation(uuid, conversation.copy(title = title))
+            chatService.updateConversationTitle(uuid, conversation, title)
             call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
         }
 
@@ -242,7 +242,9 @@ fun Route.conversationRoutes(
             val conversation = conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
-            chatService.saveConversation(uuid, conversation.copy(assistantId = targetAssistantId))
+            chatService.saveConversationUpdate(uuid, conversation) {
+                it.copy(assistantId = targetAssistantId)
+            }
             call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
         }
 
@@ -338,6 +340,7 @@ fun Route.conversationRoutes(
             val request = call.receive<RegenerateRequest>()
             val messageId = request.messageId.toUuid("message id")
 
+            chatService.initializeConversation(uuid)
             val conversation = chatService.getConversationFlow(uuid).first()
             val node = conversation.getMessageNodeByMessageId(messageId)
             val message = node?.messages?.find { it.id == messageId }
@@ -358,6 +361,7 @@ fun Route.conversationRoutes(
         post("/{id}/tool-approval") {
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<ToolApprovalRequest>()
+            chatService.initializeConversation(uuid)
             chatService.handleToolApproval(uuid, request.toolCallId, request.approved, request.reason, request.answer)
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }

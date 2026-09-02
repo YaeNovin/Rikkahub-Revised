@@ -21,6 +21,7 @@ internal fun ConversationDto.singleNodeDiffOrNull(current: ConversationDto): Nod
         modeInjectionIds != current.modeInjectionIds ||
         lorebookIds != current.lorebookIds ||
         workspaceCwd != current.workspaceCwd ||
+        workspaceFileOperationMode != current.workspaceFileOperationMode ||
         folderId != current.folderId
     ) {
         return null

@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.google
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -33,6 +34,7 @@ internal class GoogleStreamDecoder(
     private var finishReason: String? = null
     private var finished = false
     private var toolSequence = 0
+    private val providerToolIds = mutableMapOf<String, String>()
 
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
@@ -56,7 +58,12 @@ internal class GoogleStreamDecoder(
 
     override fun onClosed(): List<StreamChunk> {
         if (finished) return emptyList()
-        if (finishReason == null) prematureStreamTermination("Google generateContent")
+        // A few relays close the SSE stream immediately after a complete client-tool call and
+        // omit the final candidate.finishReason. Keep that actionable call instead of turning it
+        // into the generic interrupted-generation error. Empty image responses remain guarded.
+        if (finishReason == null && (!expectsImageOutput || !streamState.hasFinalOutput)) {
+            prematureStreamTermination("Google generateContent")
+        }
         return finish()
     }
 
@@ -89,14 +96,26 @@ internal class GoogleStreamDecoder(
             }
         }
         part.containsKey("functionCall") -> {
-            val functionCall = part["functionCall"]!!.jsonObject
+            val functionCall = part["functionCall"] as? JsonObject
+                ?: error("Gemini functionCall must be a JSON object")
+            val toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+                ?: error("Gemini functionCall.name is required")
+            val functionCallId = functionCall["id"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
             UIMessagePart.Tool(
-                toolCallId = "$responseId:tool-${++toolSequence}",
-                toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                input = functionCall["args"]?.let(json::encodeToString) ?: "",
+                // Gemini 3 supplies a stable ID that must be echoed in functionResponse.
+                // For older models, keep a local ID but leave functionCallId null.
+                toolCallId = functionCallId?.let { providerToolIds.getOrPut(it) {
+                    "$responseId:tool-${++toolSequence}"
+                } } ?: "$responseId:tool-${++toolSequence}",
+                toolName = toolName,
+                input = functionCall["args"]?.let { if (it is JsonNull) "null" else it.toString() }
+                    .orEmpty(),
                 output = emptyList(),
                 metadata = GoogleThoughtMetadata(
                     thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull,
+                    functionCallId = functionCallId,
                 ).toMetadata(),
             )
         }
@@ -171,6 +190,10 @@ internal class GoogleStreamDecoder(
                         add(StreamChunk.ReasoningDelta(id, part.reasoning, part.metadata))
                     }
                     is UIMessagePart.Tool -> {
+                        // A tool-only turn is a complete, actionable Gemini response. Image-capable
+                        // models may call client tools before producing text or an image, so the
+                        // image-output guard must not turn this into a premature stream failure.
+                        hasFinalOutput = true
                         addAll(closeText()); addAll(closeReasoning()); addAll(closeImage())
                         val id = part.toolCallId.ifBlank { nextId(responseId, "tool") }
                         if (openToolIds.add(id)) add(StreamChunk.ToolCallStart(id, part.toolName, part.metadata))

@@ -12,10 +12,13 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.analytics.FirebaseAnalytics
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -50,6 +53,12 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatVM"
 
+sealed interface ConversationLoadState {
+    data object Loading : ConversationLoadState
+    data object Ready : ConversationLoadState
+    data class Failed(val error: Throwable) : ConversationLoadState
+}
+
 class ChatVM(
     id: String,
     private val context: Application,
@@ -63,6 +72,17 @@ class ChatVM(
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val branchSourceAvailable: StateFlow<Boolean?> = conversation
+        .map { it.sourceConversationId }
+        .distinctUntilChanged()
+        .flatMapLatest { sourceConversationId ->
+            if (sourceConversationId == null) {
+                flowOf<Boolean?>(null)
+            } else {
+                conversationRepo.observeConversationExists(sourceConversationId)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
@@ -78,6 +98,15 @@ class ChatVM(
         chatService
             .getProcessingStatusFlow(_conversationId)
 
+    val promptInjectionDiagnostics =
+        chatService.getPromptInjectionDiagnosticsFlow(_conversationId)
+
+    private val _conversationLoadState =
+        MutableStateFlow<ConversationLoadState>(ConversationLoadState.Loading)
+    val conversationLoadState: StateFlow<ConversationLoadState> =
+        _conversationLoadState.asStateFlow()
+    private var conversationInitializationJob: Job? = null
+
     val conversationJobs = chatService
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
@@ -86,19 +115,39 @@ class ChatVM(
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
 
-        // 初始化对话
-        viewModelScope.launch {
-            chatService.initializeConversation(_conversationId)
-        }
+        initializeConversation()
 
         // 记住对话ID, 方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
     }
 
     override fun onCleared() {
-        super.onCleared()
+        conversationInitializationJob?.cancel()
         // 移除对话引用
         chatService.removeConversationReference(_conversationId)
+        super.onCleared()
+    }
+
+    fun retryConversationLoad() = initializeConversation()
+
+    private fun initializeConversation() {
+        if (conversationInitializationJob?.isActive == true) return
+        _conversationLoadState.value = ConversationLoadState.Loading
+        conversationInitializationJob = viewModelScope.launch {
+            try {
+                chatService.initializeConversation(_conversationId)
+                _conversationLoadState.value = ConversationLoadState.Ready
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                _conversationLoadState.value = ConversationLoadState.Failed(error)
+                chatService.addError(
+                    error = error,
+                    conversationId = _conversationId,
+                    title = context.getString(R.string.error_title_load_conversation),
+                )
+            }
+        }
     }
 
     // 用户设置
@@ -217,7 +266,17 @@ class ChatVM(
     }
 
     suspend fun forkMessage(message: UIMessage): Conversation {
-        return chatService.forkConversationAtMessage(_conversationId, message.id)
+        analytics?.logEvent("ai_fork_conversation", null)
+        return try {
+            chatService.forkConversationAtMessage(_conversationId, message.id)
+        } catch (error: Exception) {
+            chatService.addError(
+                error = error,
+                conversationId = _conversationId,
+                title = context.getString(R.string.create_fork),
+            )
+            throw error
+        }
     }
 
     fun deleteMessage(message: UIMessage) {
@@ -240,6 +299,11 @@ class ChatVM(
     ) {
         analytics?.logEvent("ai_regenerate_at_message", null)
         chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg)
+    }
+
+    fun continueAtMessage(message: UIMessage) {
+        analytics?.logEvent("ai_continue_at_message", null)
+        chatService.continueAtMessage(_conversationId, message)
     }
 
     fun handleToolApproval(
@@ -273,8 +337,11 @@ class ChatVM(
 
     fun updateTitle(title: String) {
         viewModelScope.launch {
-            val updatedConversation = conversation.value.copy(title = title)
-            chatService.saveConversation(_conversationId, updatedConversation)
+            chatService.updateConversationTitle(
+                conversationId = _conversationId,
+                loadedConversation = conversation.value,
+                title = title,
+            )
         }
     }
 
@@ -285,7 +352,8 @@ class ChatVM(
 
     fun updatePinnedStatus(conversation: Conversation) {
         viewModelScope.launch {
-            conversationRepo.togglePinStatus(conversation.id)
+            val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
+            chatService.toggleConversationPinned(conversation.id, conversationFull)
         }
     }
 
@@ -293,15 +361,14 @@ class ChatVM(
         viewModelScope.launch {
             val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
             // 文件夹是助手内分组，切换助手后原文件夹在新助手下不可见，需清空归属避免会话丢失
-            val updatedConversation = conversationFull.copy(
-                assistantId = targetAssistantId,
-                folderId = null,
-            )
+            chatService.saveConversationUpdate(conversation.id, conversationFull) {
+                it.copy(
+                    assistantId = targetAssistantId,
+                    folderId = null,
+                )
+            }
             if (conversation.id == _conversationId) {
-                chatService.saveConversation(_conversationId, updatedConversation)
                 settingsStore.updateAssistant(targetAssistantId)
-            } else {
-                conversationRepo.updateConversation(updatedConversation)
             }
         }
     }
@@ -313,13 +380,13 @@ class ChatVM(
     fun generateTitle(conversation: Conversation, force: Boolean = false) {
         viewModelScope.launch {
             val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
-            chatService.generateTitle(_conversationId, conversationFull, force)
+            chatService.generateTitle(conversation.id, conversationFull, force)
         }
     }
 
     fun generateSuggestion(conversation: Conversation) {
         viewModelScope.launch {
-            chatService.generateSuggestion(_conversationId, conversation)
+            chatService.generateSuggestion(conversation.id, conversation)
         }
     }
 

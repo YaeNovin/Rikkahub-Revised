@@ -54,6 +54,21 @@ fun effectiveRollingContextThreshold(
     return minOf(configuredThreshold, safeThreshold)
 }
 
+fun automaticRollingContextThreshold(
+    enabled: Boolean,
+    configuredThresholdTokens: Int,
+    modelContextWindowTokens: Int? = null,
+    maxOutputTokens: Int? = null,
+): Int? = if (enabled) {
+    effectiveRollingContextThreshold(
+        configuredThresholdTokens = configuredThresholdTokens,
+        modelContextWindowTokens = modelContextWindowTokens,
+        maxOutputTokens = maxOutputTokens,
+    )
+} else {
+    null
+}
+
 /**
  * The persisted summary is valid only when it still covers the exact current branch prefix.
  * This makes edits, deletions, and branch changes rebuild the summary from the new branch.

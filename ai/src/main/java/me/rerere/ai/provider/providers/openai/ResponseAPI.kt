@@ -24,17 +24,21 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.core.cappedEffort
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.inferParameterFamily
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.resolveReasoningLevelSupport
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
@@ -96,6 +100,7 @@ class ResponseAPI(
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.TEXT_GENERATION,
                     api = "responses",
+                    requestId = params.requestId,
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -147,6 +152,7 @@ class ResponseAPI(
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.STREAM_TEXT,
                     api = "responses",
+                    requestId = params.requestId,
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -237,17 +243,15 @@ class ResponseAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
-        val modelSupport = resolveOpenAIModelParameterSupport(params.model.modelId)
-        val grokSupport = resolveGrokModelParameterSupport(params.model.modelId)
-        val deepSeekSupport = resolveDeepSeekModelParameterSupport(params.model.modelId)
+        val parameterModelId = params.model.parameterModelId()
+        val modelSupport = resolveOpenAIModelParameterSupport(parameterModelId)
+        val parameterFamily = params.model.inferParameterFamily() ?: ModelParameterFamily.OPENAI
+        val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
+        val deepSeekSupport = resolveDeepSeekModelParameterSupport(parameterModelId)
         val useFunctionTools =
             params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
         val hasAnyTools = useFunctionTools || params.model.tools.isNotEmpty()
         val toolCount = (if (useFunctionTools) params.tools.size else 0) + params.model.tools.size
-        val maximumReasoningEffort = resolveResponseMaximumReasoningEffort(
-            host = host,
-            modelId = params.model.modelId,
-        )
         return buildJsonObject {
             put("model", params.model.modelId)
             put("stream", stream)
@@ -259,7 +263,7 @@ class ResponseAPI(
             }
             if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
 
-            if (modelSupport.available) {
+            if (modelSupport.available || parameterFamily == ModelParameterFamily.OPENAI) {
                 params.openAIOptions.verbosity.apiValue
                     ?.takeIf { modelSupport.supportsVerbosity }
                     ?.let { verbosity ->
@@ -299,8 +303,9 @@ class ResponseAPI(
             put("input", buildMessages(messages, params.deepSeekImageDetail()))
 
             // reasoning
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                val level = params.reasoningLevel
+            if (params.model.supportsReasoningCapability()) {
+                val level = resolveReasoningLevelSupport(params.model, providerSetting)
+                    .coerce(params.reasoningLevel)
                 put("reasoning", buildJsonObject {
                     if (capabilities.supportsReasoningSummary) {
                         val summary = if (modelSupport.available) {
@@ -313,7 +318,7 @@ class ResponseAPI(
                     val effort = when {
                         grokSupport.available -> grokSupport.reasoningEffort(level)
                         deepSeekSupport.available -> deepSeekSupport.reasoningEffort(level)
-                        else -> level.cappedEffort(maximumReasoningEffort)
+                        else -> level.effort.takeUnless { level == ReasoningLevel.AUTO }
                     }
                     effort?.let { put("effort", it) }
                     if (host == OPENAI_API_HOST && modelSupport.supportsReasoningContext) {
@@ -691,7 +696,7 @@ class ResponseAPI(
                     val callId = output["call_id"]?.jsonPrimitive?.content ?: error("call_id not found")
                     val name = output["name"]?.jsonPrimitive?.content ?: error("name not found")
                     val arguments =
-                        output["arguments"]?.jsonPrimitive?.content ?: error("arguments not found")
+                        output["arguments"]?.toToolArgumentString() ?: error("arguments not found")
                     parts.add(
                         UIMessagePart.Tool(
                             toolCallId = callId,
@@ -822,9 +827,4 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
 
         else -> ResponseProviderCapabilities()
     }
-}
-
-internal fun resolveResponseMaximumReasoningEffort(host: String, modelId: String): ReasoningLevel {
-    if (host != OPENAI_API_HOST) return ReasoningLevel.HIGH
-    return resolveOpenAIMaximumReasoningEffort(modelId)
 }

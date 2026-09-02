@@ -28,12 +28,26 @@ data class Conversation(
     val customSystemPrompt: String? = null,
     val modeInjectionIds: Set<Uuid> = emptySet(),
     val lorebookIds: Set<Uuid> = emptySet(),
-    // Absolute path inside the workspace rootfs
+    val temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
+    val lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
+    // Rootfs path (for example /workspace/src) or an encoded SAF CWD
+    // (saf:<grant_id>/<relative-path>) for an explicitly authorized local tree.
     val workspaceCwd: String? = null,
+    // Only takes effect when workspaceCwd points at a SAF authorization root.
+    // Keep the default as TOOLS so conversations created before this field was
+    // introduced retain the existing local-file tool behaviour.
+    val workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
     // 所属文件夹（助手内分组），null 表示未归入任何文件夹
     val folderId: Uuid? = null,
     // 压缩后的早期上下文快照；原始消息节点始终完整保留。
     val rollingContextSummary: RollingContextSummary? = null,
+    // A branch keeps only lightweight source metadata. There is deliberately no
+    // database relationship: deleting or editing either conversation must not affect the other.
+    val sourceConversationId: Uuid? = null,
+    val sourceMessageId: Uuid? = null,
+    @Serializable(with = InstantSerializer::class)
+    val branchedAt: Instant? = null,
+    val sourceConversationTitle: String? = null,
     @Transient
     val newConversation: Boolean = false
 ) {
@@ -107,6 +121,13 @@ data class Conversation(
         )
     }
 }
+
+@Serializable
+data class LorebookEntryRuntimeState(
+    val lastTriggeredTurn: Int = -1,
+    val activeUntilTurn: Int = -1,
+    val cooldownUntilTurn: Int = -1,
+)
 
 @Serializable
 data class MessageNode(

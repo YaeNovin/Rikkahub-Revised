@@ -72,7 +72,7 @@ fun LatexText(
         }
     } else {
         Text(
-            text = latex,
+            text = latexReadableFallback(latex),
             style = style,
             modifier = modifier
         )

@@ -243,6 +243,45 @@ class ResponseApiStreamDecoderTest {
     }
 
     @Test
+    fun `function call object arguments are preserved as tool json`() {
+        val decoder = ResponseApiStreamDecoder()
+        val chunks = buildList {
+            addAll(decoder.decode(buildJsonObject {
+                put("type", "response.output_item.added")
+                put("item", buildJsonObject {
+                    put("type", "function_call")
+                    put("id", "fc_1")
+                    put("call_id", "call_1")
+                    put("name", "workspace_shell")
+                    put("arguments", buildJsonObject { put("command", "ls -la") })
+                })
+            }))
+            addAll(decoder.decode(buildJsonObject {
+                put("type", "response.output_item.done")
+                put("item", buildJsonObject {
+                    put("type", "function_call")
+                    put("id", "fc_1")
+                    put("call_id", "call_1")
+                    put("name", "workspace_shell")
+                    put("arguments", buildJsonObject { put("command", "ls -la") })
+                })
+            }))
+        }
+
+        val handler = StreamChunkHandler(Model(modelId = "test-model"))
+        val messages = chunks.fold(listOf(UIMessage.user("run a command"))) { messages, chunk ->
+            handler.handle(messages, chunk)
+        }
+        val tool = messages.last().parts.single() as UIMessagePart.Tool
+
+        assertEquals("workspace_shell", tool.toolName)
+        assertEquals(
+            "ls -la",
+            json.parseToJsonElement(tool.input).jsonObject["command"]?.jsonPrimitive?.content,
+        )
+    }
+
+    @Test
     fun `non streaming response should parse web search without synthetic output`() {
         val result = api.parseResponseOutput(buildJsonObject {
             put("id", "resp_1")

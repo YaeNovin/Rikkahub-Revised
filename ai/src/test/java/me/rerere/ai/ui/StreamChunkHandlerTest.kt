@@ -84,6 +84,26 @@ class StreamChunkHandlerTest {
     }
 
     @Test
+    fun `tool delta without start still creates a complete tool part`() {
+        var messages = listOf(UIMessage.user("use a tool"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(
+            messages,
+            StreamChunk.ToolCallDelta(
+                id = "call-without-start",
+                toolNameDelta = "workspace_list_local_files",
+                inputDelta = "{}",
+            ),
+        )
+
+        val tool = messages.last().parts.single() as UIMessagePart.Tool
+        assertEquals("call-without-start", tool.toolCallId)
+        assertEquals("workspace_list_local_files", tool.toolName)
+        assertEquals("{}", tool.input)
+    }
+
+    @Test
     fun `interleaved text chunks should be merged by id`() {
         var messages = listOf(UIMessage.user("hello"))
         val handler = StreamChunkHandler(model)

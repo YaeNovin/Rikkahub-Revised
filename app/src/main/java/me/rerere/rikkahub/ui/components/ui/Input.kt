@@ -34,6 +34,7 @@ fun <T : Number> OutlinedNumberInput(
                     @Suppress("UNCHECKED_CAST")
                     val newVal = when (value) {
                         is Int -> newValue.toInt() as T
+                        is Long -> newValue.toLong() as T
                         is Float -> newValue.toFloat() as T
                         is Double -> newValue.toDouble() as T
                         else -> throw IllegalArgumentException("Unsupported number type")
@@ -45,7 +46,13 @@ fun <T : Number> OutlinedNumberInput(
             }
         },
         label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (value is Float || value is Double) {
+                KeyboardType.Decimal
+            } else {
+                KeyboardType.Number
+            }
+        ),
         isError = !textFieldValue.isValidNumberInput(),
         colors = colors
     )
@@ -70,6 +77,7 @@ fun <T : Number> NumberInput(
                     @Suppress("UNCHECKED_CAST")
                     val newVal = when (value) {
                         is Int -> newValue.toInt() as T
+                        is Long -> newValue.toLong() as T
                         is Float -> newValue.toFloat() as T
                         is Double -> newValue.toDouble() as T
                         else -> throw IllegalArgumentException("Unsupported number type")
@@ -81,7 +89,13 @@ fun <T : Number> NumberInput(
             }
         },
         label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (value is Float || value is Double) {
+                KeyboardType.Decimal
+            } else {
+                KeyboardType.Number
+            }
+        ),
         isError = !textFieldValue.isValidNumberInput(),
         colors = colors
     )

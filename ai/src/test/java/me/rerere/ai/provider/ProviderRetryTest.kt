@@ -21,6 +21,29 @@ import java.time.format.DateTimeFormatter
 
 class ProviderRetryTest {
     @Test
+    fun `extracts provider status code from wrapped stream failures`() {
+        val error = IOException(
+            "stream failed",
+            IllegalStateException(
+                "decoder failed",
+                ProviderRequestException(502, null, "upstream unavailable"),
+            ),
+        )
+
+        assertEquals(502, error.providerStatusCode())
+        assertEquals(
+            503,
+            ProviderRequestException(
+                200,
+                null,
+                "stream opened",
+                ProviderRequestException(503, null, "stream event failed"),
+            ).providerStatusCode(),
+        )
+        assertEquals(null, IOException("connection reset").providerStatusCode())
+    }
+
+    @Test
     fun `rejects retry counts above the hard limit`() {
         try {
             ProviderRetryController(maxRetries = MAX_PROVIDER_RETRIES + 1)

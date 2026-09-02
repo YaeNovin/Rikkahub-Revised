@@ -3,6 +3,7 @@ package me.rerere.ai.registry
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.normalizeCompactVendorModelId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,6 +21,17 @@ class ModelRegistryTest {
         assertFalse(ModelRegistry.GPT_5.match("gpt-4o"))
         assertFalse(ModelRegistry.GPT_5.match("gpt-5.0"))
         assertFalse(ModelRegistry.GPT_5.match("gpt-6"))
+    }
+
+    @Test
+    fun testCompactVendorIdsRetainReasoningCapabilities() {
+        val reasoning = listOf(ModelAbility.TOOL, ModelAbility.REASONING)
+        assertEquals("gpt-5-4", "GPT54".normalizeCompactVendorModelId())
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("GPT54"))
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("Gemini35-Flash"))
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("Claude46-Sonnet"))
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("Qwen38-Max"))
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("DeepSeekR1"))
     }
 
     @Test

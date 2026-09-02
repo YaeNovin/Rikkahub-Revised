@@ -50,11 +50,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
+import me.rerere.workspace.WorkspaceManager
 
 @Composable
 fun WorkspaceTerminalPage(id: String) {
     val vm: WorkspaceDetailVM = koinViewModel(parameters = { parametersOf(id) })
+    val workspaceManager: WorkspaceManager = koinInject()
     val state by vm.state.collectAsStateWithLifecycle()
 
     RikkahubTheme(colorMode = ColorMode.DARK) {
@@ -74,6 +77,8 @@ fun WorkspaceTerminalPage(id: String) {
         ) { innerPadding ->
             WorkspaceTerminalContent(
                 root = state.workspace?.root,
+                shellAllowed = state.accessPolicy.effectiveShellEnabled,
+                workspaceManager = workspaceManager,
                 contentPadding = innerPadding,
             )
         }
@@ -83,6 +88,8 @@ fun WorkspaceTerminalPage(id: String) {
 @Composable
 private fun WorkspaceTerminalContent(
     root: String?,
+    shellAllowed: Boolean,
+    workspaceManager: WorkspaceManager,
     contentPadding: PaddingValues,
 ) {
     val context = LocalContext.current
@@ -107,33 +114,44 @@ private fun WorkspaceTerminalContent(
     val sessionState by produceState<TerminalSessionUiState>(
         initialValue = TerminalSessionUiState.Loading,
         root,
+        shellAllowed,
         sessionClient,
     ) {
         val current = root
         value = if (current == null) {
             TerminalSessionUiState.Loading
+        } else if (!shellAllowed) {
+            TerminalSessionUiState.Disabled
         } else {
             // rootfs stat 与 RootfsPatcher().patch()/DNS 查询都是阻塞 I/O, 放到 IO 线程执行;
             // TerminalSession 构造内部会创建 Handler, 必须回到主线程执行
-            val prepared = withContext(Dispatchers.IO) {
+            val preparedMounts = withContext(Dispatchers.IO) {
                 if (!workspaceRootfsReady(context, current)) {
-                    false
+                    null
                 } else {
-                    prepareWorkspaceTerminalSession(context, current)
-                    true
+                    prepareWorkspaceTerminalSession(context, current, workspaceManager)
                 }
             }
-            if (!prepared) {
+            if (preparedMounts == null) {
                 TerminalSessionUiState.NotInstalled
             } else {
-                if (!isActive) return@produceState
-                val created = createWorkspaceTerminalSession(context, current, sessionClient)
+                if (!isActive) {
+                    preparedMounts.close()
+                    return@produceState
+                }
+                val created = createWorkspaceTerminalSession(
+                    context,
+                    current,
+                    sessionClient,
+                    preparedMounts.mounts,
+                )
                 // 创建后若组合已离开, 主动回收以免泄漏 proot 进程, 且不再把已 finish 的 session 暴露为 Ready
                 if (!isActive) {
                     created.finishIfRunning()
+                    preparedMounts.close()
                     return@produceState
                 }
-                TerminalSessionUiState.Ready(created)
+                TerminalSessionUiState.Ready(created, preparedMounts)
             }
         }
     }
@@ -148,10 +166,10 @@ private fun WorkspaceTerminalContent(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = if (currentState is TerminalSessionUiState.NotInstalled) {
-                    stringResource(R.string.workspace_terminal_not_installed)
-                } else {
-                    stringResource(R.string.workspace_terminal_loading)
+                text = when (currentState) {
+                    TerminalSessionUiState.NotInstalled -> stringResource(R.string.workspace_terminal_not_installed)
+                    TerminalSessionUiState.Disabled -> stringResource(R.string.workspace_terminal_disabled_by_policy)
+                    else -> stringResource(R.string.workspace_terminal_loading)
                 },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
@@ -166,6 +184,7 @@ private fun WorkspaceTerminalContent(
             sessionClient.terminalView = null
             viewClient.terminalView = null
             session.finishIfRunning()
+            currentState.preparedMounts.close()
         }
     }
 
@@ -314,5 +333,9 @@ private fun TerminalSession.writeText(text: String) {
 private sealed interface TerminalSessionUiState {
     data object Loading : TerminalSessionUiState
     data object NotInstalled : TerminalSessionUiState
-    data class Ready(val session: TerminalSession) : TerminalSessionUiState
+    data object Disabled : TerminalSessionUiState
+    data class Ready(
+        val session: TerminalSession,
+        val preparedMounts: me.rerere.workspace.PreparedWorkspaceBindMounts,
+    ) : TerminalSessionUiState
 }

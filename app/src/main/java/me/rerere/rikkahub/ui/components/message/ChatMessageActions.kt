@@ -9,11 +9,15 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
@@ -22,7 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +37,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
@@ -42,6 +44,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.FavouriteCircle
@@ -73,22 +76,15 @@ fun ColumnScope.ChatMessageActionButtons(
     node: MessageNode,
     onUpdate: (MessageNode) -> Unit,
     onRegenerate: () -> Unit,
+    onContinue: (() -> Unit)? = null,
     onOpenActionSheet: () -> Unit,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = LocalSettings.current
-    var isPendingDelete by remember { mutableStateOf(false) }
     var showTranslateDialog by remember { mutableStateOf(false) }
     var showRegenerateConfirm by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isPendingDelete) {
-        if (isPendingDelete) {
-            delay(3000) // 3秒后自动取消
-            isPendingDelete = false
-        }
-    }
 
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -108,6 +104,19 @@ fun ColumnScope.ChatMessageActionButtons(
                 .size(16.dp),
             tint = actionIconColor
         )
+
+        if (onContinue != null) {
+            Icon(
+                imageVector = HugeIcons.ArrowRight01,
+                contentDescription = stringResource(R.string.chat_message_continue_generation),
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onContinue)
+                    .padding(8.dp)
+                    .size(16.dp),
+                tint = actionIconColor,
+            )
+        }
 
         Icon(
             imageVector = HugeIcons.Refresh03,
@@ -255,6 +264,8 @@ fun ChatMessageActionsSheet(
     onEdit: () -> Unit,
     onShare: () -> Unit,
     onFork: () -> Unit,
+    forkEnabled: Boolean = true,
+    forkInProgress: Boolean = false,
     onSelectAndCopy: () -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
@@ -268,6 +279,8 @@ fun ChatMessageActionsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -388,9 +401,9 @@ fun ChatMessageActionsSheet(
             // Create a Fork
             Card(
                 onClick = {
-                    onDismissRequest()
                     onFork()
                 },
+                enabled = forkEnabled && !forkInProgress,
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Row(
@@ -400,13 +413,25 @@ fun ChatMessageActionsSheet(
                         .padding(16.dp)
                         .fillMaxWidth()
                 ) {
-                    Icon(
-                        imageVector = HugeIcons.GitFork,
-                        contentDescription = null,
-                        modifier = Modifier.padding(4.dp)
-                    )
+                    if (forkInProgress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(24.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = HugeIcons.GitFork,
+                            contentDescription = null,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    }
                     Text(
-                        text = stringResource(R.string.create_fork),
+                        text = stringResource(
+                            if (forkInProgress) R.string.create_fork_in_progress
+                            else R.string.create_fork
+                        ),
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }

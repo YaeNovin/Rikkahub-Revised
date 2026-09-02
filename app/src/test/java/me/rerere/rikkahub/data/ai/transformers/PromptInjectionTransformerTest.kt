@@ -217,7 +217,7 @@ class PromptInjectionTransformerTest {
     }
 
     @Test
-    fun `assistant mode injection should be ignored when conversation injection is allowed`() {
+    fun `conversation modes extend assistant defaults when conversation injection is allowed`() {
         val assistantInjectionId = Uuid.random()
         val conversationInjectionId = Uuid.random()
         val assistantInjection = createModeInjection(
@@ -245,7 +245,7 @@ class PromptInjectionTransformerTest {
         )
         val systemText = getMessageText(result.first())
 
-        assertFalse(systemText.contains("Assistant content"))
+        assertTrue(systemText.contains("Assistant content"))
         assertTrue(systemText.contains("Conversation content"))
     }
 
@@ -285,7 +285,7 @@ class PromptInjectionTransformerTest {
     }
 
     @Test
-    fun `assistant lorebook should be ignored when conversation injection is allowed`() {
+    fun `conversation lorebooks extend assistant defaults when conversation injection is allowed`() {
         val assistantLorebookId = Uuid.random()
         val conversationLorebookId = Uuid.random()
         val assistantLorebook = createLorebook(
@@ -323,7 +323,7 @@ class PromptInjectionTransformerTest {
         )
         val systemText = getMessageText(result.first())
 
-        assertFalse(systemText.contains("Assistant lorebook content"))
+        assertTrue(systemText.contains("Assistant lorebook content"))
         assertTrue(systemText.contains("Conversation lorebook content"))
     }
     // endregion

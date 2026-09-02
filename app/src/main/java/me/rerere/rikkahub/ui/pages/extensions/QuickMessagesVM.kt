@@ -7,7 +7,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.QuickMessageSortMode
 import me.rerere.rikkahub.data.model.QuickMessage
+import me.rerere.rikkahub.data.model.withQuickMessageIds
 import kotlin.uuid.Uuid
 
 class QuickMessagesVM(
@@ -16,12 +18,9 @@ class QuickMessagesVM(
     val settings = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
 
-    fun addQuickMessage(title: String, content: String) {
+    fun addQuickMessage(quickMessage: QuickMessage) {
         updateQuickMessages(
-            settings.value.quickMessages + QuickMessage(
-                title = title,
-                content = content,
-            )
+            settings.value.quickMessages + quickMessage
         )
     }
 
@@ -34,11 +33,13 @@ class QuickMessagesVM(
     }
 
     fun deleteQuickMessage(id: Uuid) {
-        updateQuickMessages(
-            settings.value.quickMessages.filterNot { quickMessage ->
-                quickMessage.id == id
-            }
-        )
+        viewModelScope.launch { settingsStore.deleteQuickMessage(id) }
+    }
+
+    fun setSortMode(mode: QuickMessageSortMode) {
+        viewModelScope.launch {
+            settingsStore.update { it.copy(quickMessageSortMode = mode) }
+        }
     }
 
     private fun updateQuickMessages(quickMessages: List<QuickMessage>) {
@@ -48,8 +49,8 @@ class QuickMessagesVM(
                 settings.copy(
                     quickMessages = quickMessages,
                     assistants = settings.assistants.map { assistant ->
-                        assistant.copy(
-                            quickMessageIds = assistant.quickMessageIds.filter { it in validIds }.toSet()
+                        assistant.withQuickMessageIds(
+                            assistant.quickMessageIds.filter { it in validIds }.toSet()
                         )
                     }
                 )

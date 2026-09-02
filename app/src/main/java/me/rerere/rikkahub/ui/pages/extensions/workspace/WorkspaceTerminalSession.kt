@@ -15,25 +15,31 @@ import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
-import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.workspace.RootfsPatchOptions
 import me.rerere.workspace.RootfsPatcher
+import me.rerere.workspace.PreparedWorkspaceBindMounts
+import me.rerere.workspace.WorkspaceBindMount
+import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.prepareWorkspaceBindMounts
 import java.io.File
 
 internal fun createWorkspaceTerminalSession(
     context: Context,
     root: String,
     client: TerminalSessionClient,
+    bindMounts: List<WorkspaceBindMount>,
 ): TerminalSession {
     val appContext = context.applicationContext
     val workspaceDir = File(File(appContext.filesDir, "workspaces"), root)
     val filesDir = File(workspaceDir, "files")
     val linuxDir = File(workspaceDir, "linux")
     val tempDir = File(workspaceDir, "tmp")
-    val skillsDir = File(appContext.filesDir, FileFolders.SKILLS).apply { mkdirs() }
     val nativeLibraryDir = File(appContext.applicationInfo.nativeLibraryDir)
     val proot = File(nativeLibraryDir, "libproot_exec.so")
     val loader = File(nativeLibraryDir, "libproot_loader.so")
+    val rootfsShell = linuxDir.rootfsShellPath()
+        ?: error("Rootfs does not contain /bin/bash or /bin/sh")
+    val rootfsEnv = linuxDir.rootfsEnvPath()
 
     val args = mutableListOf(
         "--root-id",
@@ -45,32 +51,50 @@ internal fun createWorkspaceTerminalSession(
         WORKSPACE_DIR,
         "-b",
         "${filesDir.absolutePath}:$WORKSPACE_DIR",
-        "-b",
-        "${skillsDir.absolutePath}:$SKILLS_DIR",
     )
+    bindMounts.forEach { mount ->
+        if (mount.source.exists()) {
+            args += "-b"
+            args += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
+        }
+    }
     listOf("/dev", "/proc", "/sys").forEach { path ->
         if (File(path).exists()) {
             args += "-b"
             args += path
         }
     }
-    args += listOf(
-        "/usr/bin/env",
-        "-i",
+    if (rootfsEnv != null) {
+        args += listOf(
+            rootfsEnv,
+            "-i",
+            "HOME=/root",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TERM=xterm-256color",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            "USER=root",
+            "SHELL=$rootfsShell",
+            rootfsShell,
+        )
+    } else {
+        // Minimal Rootfs images may omit coreutils/env. The shell can still
+        // start interactively; the same variables are supplied below.
+        args += rootfsShell
+    }
+    if (rootfsShell.endsWith("/bash")) args += "-l"
+
+    val env = arrayOf(
+        "PROOT_LOADER=${loader.absolutePath}",
+        "PROOT_TMP_DIR=${tempDir.absolutePath}",
+        "TMPDIR=${tempDir.absolutePath}",
         "HOME=/root",
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "TERM=xterm-256color",
         "LANG=C.UTF-8",
         "LC_ALL=C.UTF-8",
         "USER=root",
-        "SHELL=/bin/bash",
-        "/bin/bash",
-    )
-
-    val env = arrayOf(
-        "PROOT_LOADER=${loader.absolutePath}",
-        "PROOT_TMP_DIR=${tempDir.absolutePath}",
-        "TMPDIR=${tempDir.absolutePath}",
+        "SHELL=$rootfsShell",
     )
 
     return TerminalSession(
@@ -85,23 +109,43 @@ internal fun createWorkspaceTerminalSession(
     }
 }
 
-internal fun prepareWorkspaceTerminalSession(context: Context, root: String) {
+internal fun prepareWorkspaceTerminalSession(
+    context: Context,
+    root: String,
+    manager: WorkspaceManager,
+): PreparedWorkspaceBindMounts {
     val appContext = context.applicationContext
     val workspaceDir = File(File(appContext.filesDir, "workspaces"), root)
     val linuxDir = File(workspaceDir, "linux")
     File(workspaceDir, "files").mkdirs()
     File(workspaceDir, "tmp").mkdirs()
-    File(appContext.filesDir, FileFolders.SKILLS).mkdirs()
     RootfsPatcher().patch(
         linuxDir,
         RootfsPatchOptions(nameservers = appContext.activeDnsServers())
+    )
+    return prepareWorkspaceBindMounts(
+        bindMounts = manager.configuredBindMounts(),
+        tempDir = File(workspaceDir, "tmp"),
+        scope = "terminal-${System.nanoTime()}",
     )
 }
 
 internal fun workspaceRootfsReady(context: Context, root: String): Boolean {
     val linuxDir = File(File(File(context.applicationContext.filesDir, "workspaces"), root), "linux")
-    return linuxDir.isDirectory && File(linuxDir, "bin/sh").isFile
+    return linuxDir.isDirectory && linuxDir.rootfsShellPath() != null
 }
+
+private fun File.rootfsShellPath(): String? = listOf(
+    "bin/bash" to "/bin/bash",
+    "usr/bin/bash" to "/usr/bin/bash",
+    "bin/sh" to "/bin/sh",
+    "usr/bin/sh" to "/usr/bin/sh",
+).firstOrNull { (relative, _) -> File(this, relative).isFile }?.second
+
+private fun File.rootfsEnvPath(): String? = listOf(
+    "usr/bin/env" to "/usr/bin/env",
+    "bin/env" to "/bin/env",
+).firstOrNull { (relative, _) -> File(this, relative).isFile }?.second
 
 internal class WorkspaceTerminalSessionClient(
     private val context: Context,
@@ -314,7 +358,6 @@ internal class WorkspaceTerminalViewClient(
 }
 
 private const val WORKSPACE_DIR = "/workspace"
-private const val SKILLS_DIR = "/skills"
 
 // 一个 URL 最多还原跨越的软换行行数(向上/向下各算), 足够覆盖任意真实 URL
 private const val URL_MAX_WRAP_ROWS = 50

@@ -3,6 +3,8 @@ package me.rerere.workspace
 import com.sun.net.httpserver.HttpServer
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Assume.assumeFalse
+import org.junit.Assume.assumeTrue
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.InetSocketAddress
@@ -52,6 +54,11 @@ class ExampleUnitTest {
         File(manager.linuxDir(root), "etc").mkdirs()
         assertFalse(manager.hasRootfs(root))
 
+        File(manager.linuxDir(root), "usr/bin").mkdirs()
+        File(manager.linuxDir(root), "usr/bin/sh").writeText("#!/bin/sh\n")
+        assertTrue(manager.hasRootfs(root))
+        File(manager.linuxDir(root), "usr").deleteRecursively()
+
         File(manager.linuxDir(root), "bin").mkdirs()
         File(manager.linuxDir(root), "bin/sh").writeText("#!/bin/sh\n")
         assertTrue(manager.hasRootfs(root))
@@ -59,6 +66,7 @@ class ExampleUnitTest {
 
     @Test
     fun rootfsInstallerDownloadsAndExtractsTarGz() {
+        assumeTrue(symlinksSupported())
         val baseDir = Files.createTempDirectory("workspace-manager-test").toFile()
         val manager = WorkspaceManager(baseDir)
         val installer = RootfsInstaller(manager)
@@ -87,7 +95,38 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun rootfsChecksumFailureKeepsPreviousInstallation() {
+        val baseDir = Files.createTempDirectory("workspace-rootfs-rollback-test").toFile()
+        val manager = WorkspaceManager(baseDir)
+        val installer = RootfsInstaller(manager)
+        val root = "test-workspace"
+        manager.ensureWorkspace(root)
+        File(manager.linuxDir(root), "bin").mkdirs()
+        File(manager.linuxDir(root), "bin/sh").writeText("old-shell")
+        val archive = tarGz(TarTestEntry("bin/sh", content = "new-shell".toByteArray()))
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/rootfs.tar.gz") { exchange ->
+            exchange.sendResponseHeaders(200, archive.size.toLong())
+            exchange.responseBody.use { it.write(archive) }
+        }
+        server.start()
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                installer.install(
+                    root = root,
+                    url = "http://127.0.0.1:${server.address.port}/rootfs.tar.gz",
+                    expectedSha256 = "0".repeat(64),
+                )
+            }
+            assertEquals("old-shell", File(manager.linuxDir(root), "bin/sh").readText())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun commandRunsInsideWorkspaceFilesDirectory() {
+        assumeFalse(isWindows())
         val baseDir = Files.createTempDirectory("workspace-command-test").toFile()
         val manager = WorkspaceManager(baseDir)
         val root = "test-workspace"
@@ -101,7 +140,26 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun commonFileCommandsRunInWorkspace() {
+        assumeFalse(isWindows())
+        val baseDir = Files.createTempDirectory("workspace-file-commands-test").toFile()
+        val manager = WorkspaceManager(baseDir)
+        val root = "test-workspace"
+        manager.ensureWorkspace(root)
+
+        val result = manager.executeCommand(
+            root,
+            "mkdir -p nested/child && printf data > nested/child/source.txt && cp nested/child/source.txt copied.txt && mv copied.txt nested/moved.txt",
+        )
+
+        assertEquals(0, result.exitCode)
+        assertEquals("data", File(manager.filesDir(root), "nested/moved.txt").readText())
+        assertFalse(File(manager.filesDir(root), "copied.txt").exists())
+    }
+
+    @Test
     fun commandReceivesStdin() {
+        assumeFalse(isWindows())
         val baseDir = Files.createTempDirectory("workspace-stdin-test").toFile()
         val manager = WorkspaceManager(baseDir)
         val root = "test-workspace"
@@ -135,6 +193,7 @@ class ExampleUnitTest {
 
     @Test
     fun commandOutputIsTruncatedAtLimit() {
+        assumeFalse(isWindows())
         val baseDir = Files.createTempDirectory("workspace-truncate-test").toFile()
         val manager = WorkspaceManager(baseDir)
         val root = "test-workspace"
@@ -148,6 +207,24 @@ class ExampleUnitTest {
         assertEquals(0, result.exitCode)
         assertTrue(result.truncated)
         assertEquals(MAX_OUTPUT_CHARS, result.stdout.length)
+    }
+
+    @Test
+    fun `command limits reject unsafe requests`() {
+        val baseDir = Files.createTempDirectory("workspace-command-limit-test").toFile()
+        val manager = WorkspaceManager(baseDir)
+        val root = "test-workspace"
+        manager.ensureWorkspace(root)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            manager.executeCommand(root, "echo hello", timeoutMillis = 0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            manager.executeCommand(root, "x".repeat(WorkspaceManager.MAX_COMMAND_LENGTH + 1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            manager.executeCommand(root, "printf ok\u0000")
+        }
     }
 
     @Test
@@ -232,6 +309,23 @@ class ExampleUnitTest {
 
     private fun Int.paddingSize(): Int = (512 - (this % 512)).let {
         if (it == 512) 0 else it
+    }
+
+    private fun isWindows(): Boolean =
+        System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+
+    private fun symlinksSupported(): Boolean {
+        val directory = Files.createTempDirectory("workspace-symlink-check")
+        return try {
+            val target = directory.resolve("target")
+            Files.writeString(target, "test")
+            Files.createSymbolicLink(directory.resolve("link"), target.fileName)
+            true
+        } catch (_: Exception) {
+            false
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
     }
 
     private data class TarTestEntry(

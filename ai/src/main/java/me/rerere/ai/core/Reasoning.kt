@@ -12,6 +12,8 @@ enum class ReasoningLevel(
     OFF(0, "none"),
     @SerialName("auto")
     AUTO(-1, "auto"),
+    @SerialName("minimal")
+    MINIMAL(512, "minimal"),
     @SerialName("low")
     LOW(1_000, "low"),
     @SerialName("medium")
@@ -34,6 +36,7 @@ enum class ReasoningLevel(
 }
 
 private val ENABLED_REASONING_LEVELS = listOf(
+    ReasoningLevel.MINIMAL,
     ReasoningLevel.LOW,
     ReasoningLevel.MEDIUM,
     ReasoningLevel.HIGH,

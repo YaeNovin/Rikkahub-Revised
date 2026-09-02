@@ -26,7 +26,7 @@ fun buildMemoryTools(
     json: Json,
     allowEpisodicMemory: Boolean = false,
     onCreation: suspend (String, MemoryType) -> AssistantMemory,
-    onUpdate: suspend (Int, String) -> AssistantMemory?,
+    onUpdate: suspend (Int, String, MemoryType?) -> AssistantMemory?,
     onDelete: suspend (Int) -> Boolean,
     onList: suspend () -> List<AssistantMemory>,
 ): List<Tool> = listOf(
@@ -67,7 +67,7 @@ fun buildMemoryTools(
                                 add("list")
                             }
                         )
-                        put("description", "Operation to perform: create, edit, or delete")
+                        put("description", "Operation to perform: create, edit, delete, or list")
                     })
                     put("id", buildJsonObject {
                         put("type", "integer")
@@ -86,7 +86,7 @@ fun buildMemoryTools(
                                 if (allowEpisodicMemory) add("episodic")
                             }
                         )
-                        put("description", "Memory category for create: fact or episodic")
+                        put("description", "Memory category for create/edit: fact or episodic; omitted edit values keep the existing category")
                     })
                     put("offset", buildJsonObject {
                         put("type", "integer")
@@ -105,16 +105,9 @@ fun buildMemoryTools(
             val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("action is required")
             val payload = when (action) {
                 "create" -> {
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
+                    val content = params.requiredMemoryContent()
                     val rawType = params["type"]?.jsonPrimitive?.contentOrNull ?: "fact"
-                    val type = when (rawType.lowercase()) {
-                        "fact" -> MemoryType.FACT
-                        "episodic" -> {
-                            check(allowEpisodicMemory) { "episodic memory is disabled" }
-                            MemoryType.EPISODIC
-                        }
-                        else -> error("unknown memory type: $rawType")
-                    }
+                    val type = parseMemoryType(rawType, allowEpisodicMemory)
                     buildJsonObject {
                         put("status", "created")
                         put("memory", json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content, type)))
@@ -123,8 +116,11 @@ fun buildMemoryTools(
 
                 "edit" -> {
                     val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("id is required")
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
-                    onUpdate(id, content)?.let { memory ->
+                    val content = params.requiredMemoryContent()
+                    val type = params["type"]?.jsonPrimitive?.contentOrNull?.let { rawType ->
+                        parseMemoryType(rawType, allowEpisodicMemory)
+                    }
+                    onUpdate(id, content, type)?.let { memory ->
                         buildJsonObject {
                             put("status", "updated")
                             put("memory", json.encodeToJsonElement(AssistantMemory.serializer(), memory))
@@ -172,3 +168,19 @@ fun buildMemoryTools(
         }
     )
 )
+
+private fun kotlinx.serialization.json.JsonObject.requiredMemoryContent(): String =
+    this["content"]?.jsonPrimitive?.contentOrNull
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?: error("content must not be blank")
+
+private fun parseMemoryType(rawType: String, allowEpisodicMemory: Boolean): MemoryType =
+    when (rawType.lowercase()) {
+        "fact" -> MemoryType.FACT
+        "episodic" -> {
+            check(allowEpisodicMemory) { "episodic memory is disabled" }
+            MemoryType.EPISODIC
+        }
+        else -> error("unknown memory type: $rawType")
+    }

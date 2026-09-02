@@ -35,10 +35,9 @@ import me.rerere.ai.provider.GrokResponseFormat
 import me.rerere.ai.provider.GrokServiceTier
 import me.rerere.ai.provider.GrokToolChoice
 import me.rerere.ai.provider.ModelAbility
-import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.providers.openai.isValidGrokJsonSchema
-import me.rerere.ai.provider.providers.openai.requestChannel
 import me.rerere.ai.provider.providers.openai.resolveGrokModelParameterSupport
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -63,8 +62,8 @@ fun AssistantGrokPage(id: String) {
     val enabled = provider != null && support.available
     val isResponses = provider?.useResponseApi == true
     val isReasoningModel = support.reasoningModel ||
-        model?.abilities?.contains(ModelAbility.REASONING) == true
-    val channel = provider?.requestChannel()
+        model?.supportsReasoningCapability() == true
+    val route = provider?.parameterRequestRoute()
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_grok_unavailable_no_model)
         provider == null -> stringResource(R.string.assistant_grok_unavailable_protocol)
@@ -92,7 +91,7 @@ fun AssistantGrokPage(id: String) {
             isResponses = isResponses,
             isReasoningModel = isReasoningModel,
             supportsPresencePenalty = support.supportsPresencePenalty,
-            channel = channel,
+            route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
         )
@@ -107,7 +106,7 @@ private fun AssistantGrokContent(
     isResponses: Boolean,
     isReasoningModel: Boolean,
     supportsPresencePenalty: Boolean,
-    channel: ProviderRequestChannel?,
+    route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
 ) {
@@ -132,19 +131,12 @@ private fun AssistantGrokContent(
                 label = { Text(stringResource(R.string.assistant_grok_experimental_title)) },
                 description = {
                     Text(unavailableMessage ?: stringResource(R.string.assistant_grok_available_desc))
-                    channel?.let {
-                        Text(
-                            stringResource(
-                                R.string.assistant_grok_current_channel,
-                                it.grokDisplayName(),
-                                if (isResponses) "Responses" else "Chat Completions",
-                            )
-                        )
-                    }
+                    route?.DisplayText()
                     Text(stringResource(R.string.assistant_grok_common_parameters_desc))
                     Text(stringResource(R.string.assistant_grok_logging_desc))
-                    if (channel == ProviderRequestChannel.COMPATIBLE_ENDPOINT) {
-                        Text(stringResource(R.string.assistant_grok_compatible_warning))
+                    ParameterWarningText(stringResource(R.string.assistant_parameter_experimental_warning))
+                    if (route?.endpoint == ParameterEndpoint.THIRD_PARTY) {
+                        ParameterWarningText(stringResource(R.string.assistant_grok_compatible_warning))
                     }
                 },
             )
@@ -322,7 +314,7 @@ private fun <T> GrokSelectItem(
     FormItem(
         modifier = Modifier.padding(12.dp),
         label = { Text(title) },
-        description = { Text(description); Text(warning) },
+        description = { Text(description); ParameterWarningText(warning) },
     ) {
         Select(
             options = options,
@@ -347,7 +339,9 @@ private fun GrokSchemaItem(
         label = { Text(stringResource(R.string.assistant_grok_json_schema)) },
         description = {
             Text(stringResource(R.string.assistant_grok_json_schema_desc))
-            if (!validSchema) Text(stringResource(R.string.assistant_grok_json_schema_invalid))
+            if (!validSchema) {
+                ParameterWarningText(stringResource(R.string.assistant_grok_json_schema_invalid))
+            }
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -388,7 +382,7 @@ private fun GrokStopSequencesItem(
         label = { Text(stringResource(R.string.assistant_grok_stop_sequences)) },
         description = {
             Text(stringResource(R.string.assistant_grok_stop_sequences_desc))
-            Text(
+            ParameterWarningText(
                 stringResource(
                     if (reasoningModel) R.string.assistant_grok_reasoning_unsupported
                     else R.string.assistant_grok_stop_sequences_warning
@@ -514,23 +508,11 @@ private fun GrokTextItem(
     FormItem(
         modifier = Modifier.padding(12.dp),
         label = { Text(title) },
-        description = { Text(description); Text(warning) },
+        description = { Text(description); ParameterWarningText(warning) },
     ) {
         content()
     }
 }
-
-@Composable
-private fun ProviderRequestChannel.grokDisplayName(): String = stringResource(
-    when (this) {
-        ProviderRequestChannel.ANTHROPIC_API -> R.string.log_page_channel_anthropic_api
-        ProviderRequestChannel.XAI_API -> R.string.log_page_channel_xai_api
-        ProviderRequestChannel.OPENAI_API -> R.string.log_page_channel_openai_api
-        ProviderRequestChannel.COMPATIBLE_ENDPOINT -> R.string.log_page_channel_compatible
-        ProviderRequestChannel.GOOGLE_AI_STUDIO -> R.string.log_page_channel_google_ai_studio
-        ProviderRequestChannel.VERTEX_AI -> R.string.log_page_channel_vertex_ai
-    }
-)
 
 @Composable
 private fun GrokServiceTier.displayName(): String = stringResource(

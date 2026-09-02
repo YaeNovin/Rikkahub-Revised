@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 
@@ -30,14 +31,14 @@ class AssistantVM(
         }
     }
 
-    fun addAssistant(assistant: Assistant) {
+    fun addAssistant(assistant: Assistant, lorebooks: List<Lorebook> = emptyList()) {
         viewModelScope.launch {
-            val settings = settings.value
-            settingsStore.update(
-                settings.copy(
-                    assistants = settings.assistants.plus(assistant)
+            settingsStore.update { current ->
+                current.copy(
+                    assistants = current.assistants.plus(assistant),
+                    lorebooks = (current.lorebooks + lorebooks).distinctBy { it.id },
                 )
-            )
+            }
         }
     }
 

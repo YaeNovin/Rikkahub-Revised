@@ -7,9 +7,15 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.map
 import androidx.room.withTransaction
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
@@ -21,10 +27,42 @@ import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
+
+private const val MESSAGE_NODE_INITIAL_PAGE_SIZE = 16
+
+internal suspend fun <T> forEachAdaptivePage(
+    initialPageSize: Int,
+    loadPage: suspend (limit: Int, offset: Int) -> List<T>,
+    shouldReducePage: (Throwable) -> Boolean,
+    consumePage: (List<T>) -> Unit,
+) {
+    require(initialPageSize > 0)
+    var pageSize = initialPageSize
+    var offset = 0
+    while (true) {
+        currentCoroutineContext().ensureActive()
+        val page = try {
+            loadPage(pageSize, offset)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            val reducedPageSize = (pageSize / 2).coerceAtLeast(1)
+            if (!shouldReducePage(error) || reducedPageSize == pageSize) throw error
+            pageSize = reducedPageSize
+            continue
+        }
+        if (page.isEmpty()) break
+        consumePage(page)
+        offset += page.size
+        if (page.size < pageSize) break
+        yield()
+    }
+}
 
 class ConversationRepository(
     private val conversationDAO: ConversationDAO,
@@ -279,6 +317,10 @@ class ConversationRepository(
         return conversationDAO.existsById(uuid.toString())
     }
 
+    fun observeConversationExists(uuid: Uuid): Flow<Boolean> {
+        return conversationDAO.getConversationFlowById(uuid.toString()).map { it != null }
+    }
+
     suspend fun countConversations(): Int {
         return conversationDAO.countAll()
     }
@@ -360,9 +402,16 @@ class ConversationRepository(
             customSystemPrompt = conversation.customSystemPrompt ?: "",
             modeInjectionIds = JsonInstant.encodeToString(conversation.modeInjectionIds),
             lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
+            temporaryModeInjections = JsonInstant.encodeToString(conversation.temporaryModeInjections),
+            lorebookRuntimeStates = JsonInstant.encodeToString(conversation.lorebookRuntimeStates),
             workspaceCwd = conversation.workspaceCwd ?: "",
+            workspaceFileOperationMode = conversation.workspaceFileOperationMode.name,
             folderId = conversation.folderId?.toString() ?: "",
             rollingContextSummary = conversation.rollingContextSummary?.let(JsonInstant::encodeToString) ?: "",
+            sourceConversationId = conversation.sourceConversationId?.toString() ?: "",
+            sourceMessageId = conversation.sourceMessageId?.toString() ?: "",
+            branchedAt = conversation.branchedAt?.toEpochMilli() ?: 0,
+            sourceConversationTitle = conversation.sourceConversationTitle.orEmpty(),
         )
     }
 
@@ -382,11 +431,26 @@ class ConversationRepository(
             customSystemPrompt = conversationEntity.customSystemPrompt.ifEmpty { null },
             modeInjectionIds = JsonInstant.decodeFromString(conversationEntity.modeInjectionIds),
             lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
+            temporaryModeInjections = JsonInstant.decodeFromString(conversationEntity.temporaryModeInjections),
+            lorebookRuntimeStates = JsonInstant.decodeFromString(conversationEntity.lorebookRuntimeStates),
             workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
+            workspaceFileOperationMode = runCatching {
+                WorkspaceFileOperationMode.valueOf(conversationEntity.workspaceFileOperationMode)
+            }.getOrDefault(WorkspaceFileOperationMode.TOOLS),
             folderId = conversationEntity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
             rollingContextSummary = conversationEntity.rollingContextSummary
                 .ifEmpty { null }
                 ?.let(JsonInstant::decodeFromString),
+            sourceConversationId = conversationEntity.sourceConversationId
+                .ifEmpty { null }
+                ?.let(Uuid::parse),
+            sourceMessageId = conversationEntity.sourceMessageId
+                .ifEmpty { null }
+                ?.let(Uuid::parse),
+            branchedAt = conversationEntity.branchedAt
+                .takeIf { it > 0 }
+                ?.let(Instant::ofEpochMilli),
+            sourceConversationTitle = conversationEntity.sourceConversationTitle.ifEmpty { null },
         )
     }
 
@@ -405,6 +469,15 @@ class ConversationRepository(
             id = conversationId.toString(),
             isPinned = !(getConversationById(conversationId)?.isPinned ?: false)
         )
+    }
+
+    suspend fun updatePinnedStatus(conversationId: Uuid, isPinned: Boolean) {
+        conversationDAO.updatePinStatus(conversationId.toString(), isPinned)
+    }
+
+    suspend fun updateConversationTitle(conversationId: Uuid, title: String) {
+        conversationDAO.updateTitle(conversationId.toString(), title)
+        messageFtsManager.updateConversationTitle(conversationId.toString(), title)
     }
 
     /**
@@ -440,29 +513,23 @@ class ConversationRepository(
         )
     }
 
-    private suspend fun loadMessageNodes(conversationId: String): List<MessageNode> {
+    private suspend fun loadMessageNodes(conversationId: String): List<MessageNode> =
+        withContext(Dispatchers.Default) {
         val favoriteNodeIds = favoriteDAO
             .getFavoriteNodeIdsOfConversation(conversationId)
             .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
             .toSet()
 
-        return database.withTransaction {
-            val nodes = mutableListOf<MessageNode>()
-            var offset = 0
-            val pageSize = 64
-            while (true) {
-                val page = try {
-                    messageNodeDAO.getNodesOfConversationPaged(conversationId, pageSize, offset)
-                } catch (e: SQLiteBlobTooBigException) {
-                    e.printStackTrace()
-                    offset += pageSize
-                    continue
-                } catch (e: IllegalStateException) {
-                    e.printStackTrace()
-                    offset += pageSize
-                    continue
-                }
-                if (page.isEmpty()) break
+        val nodes = mutableListOf<MessageNode>()
+        forEachAdaptivePage(
+            initialPageSize = MESSAGE_NODE_INITIAL_PAGE_SIZE,
+            loadPage = { limit, offset ->
+                messageNodeDAO.getNodesOfConversationPaged(conversationId, limit, offset)
+            },
+            shouldReducePage = { error ->
+                error is SQLiteBlobTooBigException || error is IllegalStateException
+            },
+            consumePage = { page ->
                 page.forEach { entity ->
                     val messages = JsonInstant.decodeFromString<List<UIMessage>>(entity.messages)
                     val nodeId = Uuid.parse(entity.id)
@@ -475,10 +542,9 @@ class ConversationRepository(
                         )
                     )
                 }
-                offset += page.size
-            }
-            nodes
-        }
+            },
+        )
+        nodes
     }
 
     private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>) {

@@ -35,6 +35,7 @@ import me.rerere.ai.provider.DeepSeekOptionalToggle
 import me.rerere.ai.provider.DeepSeekResponseFormat
 import me.rerere.ai.provider.DeepSeekToolChoice
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.providers.openai.isOfficialDeepSeekHost
 import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
 import me.rerere.rikkahub.R
@@ -59,7 +60,7 @@ fun AssistantDeepSeekPage(id: String) {
     val provider = model?.findProvider(providers)
     val openAIProvider = provider as? ProviderSetting.OpenAI
     val claudeProvider = provider as? ProviderSetting.Claude
-    val support = resolveDeepSeekModelParameterSupport(model?.modelId.orEmpty())
+    val support = resolveDeepSeekModelParameterSupport(model?.parameterModelId().orEmpty())
     val supportedProtocol = openAIProvider != null || claudeProvider != null
     val enabled = supportedProtocol && support.available
     val isAnthropic = claudeProvider != null
@@ -68,6 +69,9 @@ fun AssistantDeepSeekPage(id: String) {
         ?.toHttpUrlOrNull()
         ?.host
         ?.let(::isOfficialDeepSeekHost) == true
+    val route = provider?.parameterRequestRoute(
+        endpointOverride = ParameterEndpoint.DEEPSEEK.takeIf { officialEndpoint },
+    )
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_deepseek_unavailable_no_model)
         !supportedProtocol -> stringResource(R.string.assistant_deepseek_unavailable_protocol)
@@ -94,7 +98,7 @@ fun AssistantDeepSeekPage(id: String) {
             enabled = enabled,
             isResponses = isResponses,
             isAnthropic = isAnthropic,
-            officialEndpoint = officialEndpoint,
+            route = route,
             supportsVision = support.supportsVision,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
@@ -109,7 +113,7 @@ private fun AssistantDeepSeekContent(
     enabled: Boolean,
     isResponses: Boolean,
     isAnthropic: Boolean,
-    officialEndpoint: Boolean,
+    route: ParameterRequestRoute?,
     supportsVision: Boolean,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
@@ -135,26 +139,12 @@ private fun AssistantDeepSeekContent(
                 label = { Text(stringResource(R.string.assistant_deepseek_experimental_title)) },
                 description = {
                     Text(unavailableMessage ?: stringResource(R.string.assistant_deepseek_available_desc))
-                    if (enabled) {
-                        Text(
-                            stringResource(
-                                R.string.assistant_deepseek_current_channel,
-                                stringResource(
-                                    if (officialEndpoint) R.string.assistant_deepseek_channel_official
-                                    else R.string.assistant_deepseek_channel_compatible
-                                ),
-                                when {
-                                    isAnthropic -> "Anthropic Messages"
-                                    isResponses -> "Responses"
-                                    else -> "Chat Completions"
-                                },
-                            )
-                        )
-                    }
+                    if (enabled) route?.DisplayText()
                     Text(stringResource(R.string.assistant_deepseek_common_parameters_desc))
                     Text(stringResource(R.string.assistant_deepseek_logging_desc))
-                    if (enabled && !officialEndpoint) {
-                        Text(stringResource(R.string.assistant_deepseek_compatible_warning))
+                    ParameterWarningText(stringResource(R.string.assistant_parameter_experimental_warning))
+                    if (enabled && route?.endpoint == ParameterEndpoint.THIRD_PARTY) {
+                        ParameterWarningText(stringResource(R.string.assistant_deepseek_compatible_warning))
                     }
                 },
             )
@@ -203,13 +193,13 @@ private fun AssistantDeepSeekContent(
                     description = {
                         Text(
                             stringResource(
-                                when {
-                                    isAnthropic -> R.string.assistant_deepseek_anthropic_parameters_desc
-                                    isResponses -> R.string.assistant_deepseek_chat_only
-                                    else -> R.string.assistant_deepseek_chat_parameters_desc
-                                }
+                                if (isAnthropic) R.string.assistant_deepseek_anthropic_parameters_desc
+                                else R.string.assistant_deepseek_chat_parameters_desc
                             )
                         )
+                        if (isResponses) {
+                            ParameterWarningText(stringResource(R.string.assistant_deepseek_chat_only))
+                        }
                     },
                 )
                 HorizontalDivider()
@@ -389,7 +379,7 @@ private fun DeepSeekTextItem(
     FormItem(
         modifier = Modifier.padding(12.dp),
         label = { Text(title) },
-        description = { Text(description); Text(warning) },
+        description = { Text(description); ParameterWarningText(warning) },
     ) {
         content()
     }

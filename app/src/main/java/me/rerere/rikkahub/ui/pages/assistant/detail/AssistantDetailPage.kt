@@ -37,12 +37,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.providers.claude.resolveClaudeModelParameterSupport
-import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
-import me.rerere.ai.provider.providers.openai.resolveGrokModelParameterSupport
-import me.rerere.ai.provider.providers.openai.resolveOpenAIModelParameterSupport
-import me.rerere.ai.provider.providers.openai.resolveQwenModelParameterSupport
-import me.rerere.ai.registry.ModelRegistry
+import me.rerere.ai.provider.ModelParameterFamily
+import me.rerere.ai.provider.inferParameterFamily
+import me.rerere.ai.provider.resolveParameterFamily
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
@@ -68,51 +65,47 @@ fun AssistantDetailPage(id: String) {
     val providers by vm.providers.collectAsStateWithLifecycle()
     val selectedModel = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val selectedProvider = selectedModel?.findProvider(providers)
-    val modelParameterEntry = when {
-        selectedModel != null &&
-            selectedProvider is ProviderSetting.Claude &&
-            resolveClaudeModelParameterSupport(selectedModel.modelId).available -> Triple(
+    val inferredFamily = selectedModel?.inferParameterFamily()
+    val modelParameterEntry = when (selectedModel?.resolveParameterFamily(selectedProvider)) {
+        ModelParameterFamily.CLAUDE -> Triple(
                 Screen.AssistantClaude(id),
                 R.string.assistant_page_tab_claude,
                 R.string.assistant_detail_claude_desc,
             )
-        selectedModel != null &&
-            (selectedProvider is ProviderSetting.OpenAI ||
-                selectedProvider is ProviderSetting.Claude) &&
-            resolveDeepSeekModelParameterSupport(selectedModel.modelId).available -> Triple(
+        ModelParameterFamily.DEEPSEEK -> Triple(
                 Screen.AssistantDeepSeek(id),
                 R.string.assistant_page_tab_deepseek,
                 R.string.assistant_detail_deepseek_desc,
             )
-        selectedModel != null &&
-            selectedProvider is ProviderSetting.OpenAI &&
-            resolveQwenModelParameterSupport(selectedModel.modelId).available -> Triple(
+        ModelParameterFamily.QWEN -> Triple(
                 Screen.AssistantQwen(id),
                 R.string.assistant_page_tab_qwen,
                 R.string.assistant_detail_qwen_desc,
             )
-        selectedModel != null &&
-            selectedProvider is ProviderSetting.OpenAI &&
-            resolveGrokModelParameterSupport(selectedModel.modelId).available -> Triple(
+        ModelParameterFamily.GROK -> Triple(
                 Screen.AssistantGrok(id),
                 R.string.assistant_page_tab_grok,
                 R.string.assistant_detail_grok_desc,
             )
-        selectedModel != null &&
-            selectedProvider is ProviderSetting.OpenAI &&
-            resolveOpenAIModelParameterSupport(selectedModel.modelId).available -> Triple(
+        ModelParameterFamily.OPENAI -> Triple(
                 Screen.AssistantOpenAI(id),
-                R.string.assistant_page_tab_openai,
-                R.string.assistant_detail_openai_desc,
+                if (inferredFamily == ModelParameterFamily.OPENAI) {
+                    R.string.assistant_page_tab_openai
+                } else {
+                    R.string.assistant_page_tab_model_parameters
+                },
+                if (inferredFamily == ModelParameterFamily.OPENAI) {
+                    R.string.assistant_detail_openai_desc
+                } else {
+                    R.string.assistant_detail_compatible_parameters_desc
+                },
             )
-        selectedModel != null &&
-            selectedProvider is ProviderSetting.Google &&
-            ModelRegistry.GEMINI_3_SERIES.match(selectedModel.modelId) -> Triple(
+        ModelParameterFamily.GEMINI -> Triple(
                 Screen.AssistantGemini(id),
                 R.string.assistant_page_tab_gemini,
                 R.string.assistant_detail_gemini_desc,
             )
-        else -> Triple<Screen?, Int, Int>(
+        null -> Triple<Screen?, Int, Int>(
             null,
             R.string.assistant_page_tab_model_parameters,
             R.string.assistant_detail_model_parameters_unavailable,

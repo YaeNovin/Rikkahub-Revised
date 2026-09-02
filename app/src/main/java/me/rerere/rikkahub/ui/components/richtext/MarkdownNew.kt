@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,9 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,14 +66,9 @@ import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.graphics.toColorInt
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.mapLatest
-import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.ui.components.table.DataTable
@@ -87,27 +81,12 @@ import org.intellij.markdown.parser.MarkdownParser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.TextNode
 
 // ---- Preprocessing (mirrors Markdown.kt logic) ----
 
-private val INLINE_LATEX_REGEX = Regex("\\\\\\((.+?)\\\\\\)")
-private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MATCHES_ALL)
-private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
-
-private fun preProcess(content: String): String {
-    val codeBlocks = mutableListOf<IntRange>()
-    CODE_BLOCK_REGEX.findAll(content).forEach { codeBlocks.add(it.range) }
-    fun isInCodeBlock(pos: Int) = codeBlocks.any { pos in it }
-
-    var result = INLINE_LATEX_REGEX.replace(content) { m ->
-        if (isInCodeBlock(m.range.first)) m.value else "$" + m.groupValues[1] + "$"
-    }
-    result = BLOCK_LATEX_REGEX.replace(result) { m ->
-        if (isInCodeBlock(m.range.first)) m.value else "$$" + m.groupValues[1] + "$$"
-    }
-    return result
-}
+private fun preProcess(content: String): String = normalizeMarkdownLatex(content)
 
 // ---- HTML generation ----
 
@@ -116,6 +95,33 @@ private val flavour by lazy {
 }
 
 private val parser by lazy { MarkdownParser(flavour) }
+private val htmlParserLock = Any()
+private const val MARKDOWN_HTML_CACHE_ENTRIES = 24
+private val markdownHtmlCache = object : LinkedHashMap<String, Document>(
+    MARKDOWN_HTML_CACHE_ENTRIES,
+    0.75f,
+    true,
+) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Document>?): Boolean =
+        size > MARKDOWN_HTML_CACHE_ENTRIES
+}
+
+private fun cachedMarkdownDocument(content: String): Document? =
+    synchronized(markdownHtmlCache) { markdownHtmlCache[content] }
+
+internal fun isMarkdownDocumentCached(content: String): Boolean =
+    cachedMarkdownDocument(content) != null
+
+internal fun preloadMarkdownDocument(content: String): Document {
+    cachedMarkdownDocument(content)?.let { return it }
+    val document = synchronized(htmlParserLock) {
+        Jsoup.parse(generateMarkdownHtml(content))
+    }
+    synchronized(markdownHtmlCache) {
+        markdownHtmlCache[content] = document
+    }
+    return document
+}
 
 private fun generateMarkdownHtml(content: String): String {
     val preprocessed = preProcess(content)
@@ -125,7 +131,6 @@ private fun generateMarkdownHtml(content: String): String {
 
 // ---- Main composable ----
 
-@OptIn(FlowPreview::class)
 @Composable
 fun MarkdownNew(
     content: String,
@@ -133,31 +138,42 @@ fun MarkdownNew(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
 ) {
-    var html by remember {
-        mutableStateOf(
-            value = generateMarkdownHtml(content),
-        )
-    }
+    var document by remember { mutableStateOf(cachedMarkdownDocument(content)) }
 
-    val updatedContent by rememberUpdatedState(content)
-    LaunchedEffect(Unit) {
-        snapshotFlow { updatedContent }
-            .distinctUntilChanged()
-            .debounce(100.milliseconds)
-            .mapLatest { generateMarkdownHtml(it) }
-            .catch { it.printStackTrace() }
-            .flowOn(Dispatchers.Default)
-            .collect { html = it }
-    }
-
-    val document = remember(html) {
-        runCatching { Jsoup.parse(html) }.getOrElse { Jsoup.parse("") }
+    LaunchedEffect(content) {
+        cachedMarkdownDocument(content)?.let {
+            document = it
+            return@LaunchedEffect
+        }
+        delay(STREAMING_MARKDOWN_PARSE_INTERVAL_MS)
+        try {
+            document = withContext(RichTextParsingDispatcher) {
+                preloadMarkdownDocument(content)
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (exception: Exception) {
+            exception.printStackTrace()
+        }
     }
 
     ProvideTextStyle(style) {
-        Column(modifier = modifier.padding(start = 4.dp)) {
-            document.body().childNodes().fastForEach { node ->
-                HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+        val parsedDocument = document
+        if (parsedDocument == null) {
+            Box(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .height(markdownLoadingPlaceholderHeightDp(content).dp)
+                    .padding(start = 4.dp)
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
+            )
+        } else {
+            Column(modifier = modifier.padding(start = 4.dp)) {
+                parsedDocument.body().childNodes().fastForEach { node ->
+                    HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+                }
             }
         }
     }
@@ -258,10 +274,11 @@ private fun HtmlBlockElement(
                     ZoomableAsyncImage(
                         model = src,
                         contentDescription = alt.takeIf { it.isNotEmpty() },
+                        respectIntrinsicSize = true,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .widthIn(min = 120.dp)
-                            .heightIn(min = 120.dp),
+                            .widthIn(max = 360.dp)
+                            .heightIn(max = 280.dp),
                     )
                 }
             }
@@ -773,10 +790,11 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         ZoomableAsyncImage(
                             model = src,
                             contentDescription = alt.takeIf { it.isNotEmpty() },
+                            respectIntrinsicSize = true,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .widthIn(min = 120.dp)
-                                .heightIn(min = 120.dp),
+                                .widthIn(max = 360.dp)
+                                .heightIn(max = 280.dp),
                         )
                     }
                 }
@@ -1002,7 +1020,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                         )
                     } else {
                         withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.95.em)) {
-                            append(formula)
+                            append(latexReadableFallback(formula))
                         }
                     }
                 } else {

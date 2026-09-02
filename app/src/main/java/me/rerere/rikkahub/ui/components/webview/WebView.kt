@@ -2,7 +2,11 @@ package me.rerere.rikkahub.ui.components.webview
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.util.Log
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup.LayoutParams
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
@@ -12,6 +16,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
@@ -22,9 +27,98 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlin.math.abs
+import kotlin.math.min
 
 private const val TAG = "WebView"
+
+internal enum class WebViewGestureOwner {
+    UNDECIDED,
+    PARENT_VERTICAL,
+    WEB_VIEW,
+}
+
+internal fun resolveWebViewGestureOwner(
+    deltaX: Float,
+    deltaY: Float,
+    pointerCount: Int,
+    touchSlop: Float,
+    isZoomed: Boolean = false,
+): WebViewGestureOwner = when {
+    pointerCount > 1 -> WebViewGestureOwner.WEB_VIEW
+    maxOf(abs(deltaX), abs(deltaY)) < touchSlop -> WebViewGestureOwner.UNDECIDED
+    isZoomed -> WebViewGestureOwner.WEB_VIEW
+    abs(deltaY) > abs(deltaX) -> WebViewGestureOwner.PARENT_VERTICAL
+    else -> WebViewGestureOwner.WEB_VIEW
+}
+
+private class ParentVerticalScrollTouchListener(
+    private val touchSlop: Float,
+) : View.OnTouchListener {
+    private var downX = 0f
+    private var downY = 0f
+    private var minimumPageScale = Float.POSITIVE_INFINITY
+    private var lockedOwner = WebViewGestureOwner.UNDECIDED
+
+    @Suppress("DEPRECATION")
+    override fun onTouch(view: View, event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                lockedOwner = WebViewGestureOwner.UNDECIDED
+                (view as? WebView)?.getScale()?.takeIf { it > 0f }?.let {
+                    minimumPageScale = min(minimumPageScale, it)
+                }
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                lockedOwner = WebViewGestureOwner.WEB_VIEW
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                val currentScale = (view as? WebView)?.getScale()?.takeIf { it > 0f }
+                val isZoomed = currentScale != null && minimumPageScale.isFinite() &&
+                    currentScale > minimumPageScale * 1.02f
+                val owner = if (lockedOwner == WebViewGestureOwner.WEB_VIEW) {
+                    lockedOwner
+                } else {
+                    resolveWebViewGestureOwner(
+                        deltaX = event.x - downX,
+                        deltaY = event.y - downY,
+                        pointerCount = event.pointerCount,
+                        touchSlop = touchSlop,
+                        isZoomed = isZoomed,
+                    ).also { resolved ->
+                        if (resolved == WebViewGestureOwner.WEB_VIEW) lockedOwner = resolved
+                    }
+                }
+                when (owner) {
+                    WebViewGestureOwner.PARENT_VERTICAL ->
+                        view.parent?.requestDisallowInterceptTouchEvent(false)
+
+                    WebViewGestureOwner.WEB_VIEW ->
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
+
+                    WebViewGestureOwner.UNDECIDED -> Unit
+                }
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                lockedOwner = WebViewGestureOwner.UNDECIDED
+                view.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+        }
+        return false
+    }
+}
 
 internal class MyWebChromeClient(private val state: WebViewState) : WebChromeClient() {
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -100,16 +194,33 @@ private fun WebView.release(interfaces: Map<String, Any>) {
 fun WebView(
     state: WebViewState,
     modifier: Modifier = Modifier,
+    deferUntilVisible: Boolean = false,
+    preferParentVerticalScroll: Boolean = false,
+    transparentBackground: Boolean = false,
     onCreated: (WebView) -> Unit = {},
     onUpdated: (WebView) -> Unit = {},
 ) {
     // Remember the clients based on the state
     val webChromeClient = remember { MyWebChromeClient(state) }
     val webViewClient = remember { MyWebViewClient(state) }
+    val hostView = LocalView.current
+    var nearViewport by remember(state, deferUntilVisible) {
+        mutableStateOf(!deferUntilVisible)
+    }
 
     Box(
-        modifier = modifier
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            if (deferUntilVisible) {
+                val bounds = coordinates.boundsInWindow()
+                val viewportHeight = hostView.height.toFloat().coerceAtLeast(1f)
+                val preloadDistance = viewportHeight * 0.75f
+                nearViewport = bounds.bottom >= -preloadDistance &&
+                    bounds.top <= viewportHeight + preloadDistance
+            }
+        }
     ) {
+        if (!nearViewport) return@Box
+
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
@@ -120,12 +231,30 @@ fun WebView(
 
                     state.webView = this // Assign the WebView instance to the state
 
+                    if (transparentBackground) {
+                        setBackgroundColor(Color.TRANSPARENT)
+                    }
                     onCreated(this)
+                    if (preferParentVerticalScroll) {
+                        setOnTouchListener(
+                            ParentVerticalScrollTouchListener(
+                                touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
+                            )
+                        )
+                    }
 
                     settings.javaScriptEnabled = true // Enable JavaScript
                     settings.domStorageEnabled = true
                     settings.allowContentAccess = true
                     settings.apply(state.settings)
+                    // Keep native WebView gestures available for every preview:
+                    // pinch zoom, zoom-out and two-finger panning must not depend
+                    // on each individual renderer remembering these flags.
+                    settings.setSupportZoom(true)
+                    settings.builtInZoomControls = true
+                    settings.displayZoomControls = false
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
 
                     // Use the created clients
                     this.webChromeClient = webChromeClient
@@ -136,11 +265,7 @@ fun WebView(
                     }
                 }
             },
-            modifier = Modifier.fillMaxWidth(), // Make WebView fill the width
-            onReset = {
-                it.resetState(state.interfaces)
-                Log.d(TAG, "AndroidView: Resetting WebView")
-            },
+            modifier = Modifier.fillMaxSize(),
             onRelease = {
                 if (state.webView === it) {
                     state.webView = null
@@ -150,16 +275,24 @@ fun WebView(
             },
             update = { webView ->
                 state.webView = webView
+                if (transparentBackground) {
+                    webView.setBackgroundColor(Color.TRANSPARENT)
+                }
                 state.interfaces.forEach { (name, obj) ->
                     webView.addJavascriptInterface(obj, name)
                 }
                 Log.d(TAG, "AndroidView: Updating WebView")
-                // Ensure clients are updated if state changes (though unlikely here)
-                // webView.webChromeClient = webChromeClient
-                // webView.webViewClient = webViewClient
+                webView.webChromeClient = webChromeClient
+                webView.webViewClient = webViewClient
 
                 // Update settings that might change
                 webView.settings.javaScriptEnabled = state.javaScriptEnabled
+                webView.settings.apply(state.settings)
+                webView.settings.setSupportZoom(true)
+                webView.settings.builtInZoomControls = true
+                webView.settings.displayZoomControls = false
+                webView.settings.useWideViewPort = true
+                webView.settings.loadWithOverviewMode = true
 
                 when (val content = state.content) {
                     is WebContent.Url -> {

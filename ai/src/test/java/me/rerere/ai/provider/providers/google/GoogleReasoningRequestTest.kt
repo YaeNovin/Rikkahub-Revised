@@ -31,6 +31,16 @@ class GoogleReasoningRequestTest {
     }
 
     @Test
+    fun `minimal maps to Gemini Flash minimal thinking level`() {
+        val thinking = buildRequest(
+            modelId = "gemini-3-flash-preview",
+            reasoningLevel = ReasoningLevel.MINIMAL,
+        )["generationConfig"]?.jsonObject?.get("thinkingConfig")?.jsonObject
+
+        assertEquals("minimal", thinking?.get("thinkingLevel")?.jsonPrimitive?.content)
+    }
+
+    @Test
     fun `max budget respects Gemini model limits`() {
         val pro = buildRequest("gemini-2.5-pro")["generationConfig"]
             ?.jsonObject?.get("thinkingConfig")?.jsonObject
@@ -41,7 +51,32 @@ class GoogleReasoningRequestTest {
         assertEquals(24_576, flash?.get("thinkingBudget")?.jsonPrimitive?.int)
     }
 
-    private fun buildRequest(modelId: String): JsonObject {
+    @Test
+    fun `unsupported persisted Gemini 3 levels are coerced before request`() {
+        val thinking = buildRequest(
+            modelId = "gemini-3-pro",
+            reasoningLevel = ReasoningLevel.MEDIUM,
+        )["generationConfig"]?.jsonObject?.get("thinkingConfig")?.jsonObject
+
+        assertEquals("high", thinking?.get("thinkingLevel")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `persisted Gemini model without abilities still sends thinking level`() {
+        val thinking = buildRequest(
+            modelId = "Gemini35-Flash",
+            reasoningLevel = ReasoningLevel.MINIMAL,
+            abilities = emptyList(),
+        )["generationConfig"]?.jsonObject?.get("thinkingConfig")?.jsonObject
+
+        assertEquals("minimal", thinking?.get("thinkingLevel")?.jsonPrimitive?.content)
+    }
+
+    private fun buildRequest(
+        modelId: String,
+        reasoningLevel: ReasoningLevel = ReasoningLevel.MAX,
+        abilities: List<ModelAbility> = listOf(ModelAbility.REASONING),
+    ): JsonObject {
         val method = GoogleProvider::class.java.getDeclaredMethod(
             "buildCompletionRequestBody",
             List::class.java,
@@ -52,8 +87,8 @@ class GoogleReasoningRequestTest {
             provider,
             listOf(UIMessage.user("hello")),
             TextGenerationParams(
-                model = Model(modelId = modelId, abilities = listOf(ModelAbility.REASONING)),
-                reasoningLevel = ReasoningLevel.MAX,
+                model = Model(modelId = modelId, abilities = abilities),
+                reasoningLevel = reasoningLevel,
             ),
         ) as JsonObject
     }

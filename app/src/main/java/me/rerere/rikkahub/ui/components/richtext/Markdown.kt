@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -40,12 +41,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,14 +84,15 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.net.toUri
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.hugeicons.HugeIcons
@@ -111,7 +115,6 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.milliseconds
 
 private val flavour by lazy {
     GFMFlavourDescriptor(
@@ -123,49 +126,13 @@ private val parser by lazy {
     MarkdownParser(flavour)
 }
 
-private val INLINE_LATEX_REGEX = Regex("\\\\\\((.+?)\\\\\\)")
-private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MATCHES_ALL)
+internal val RichTextParsingDispatcher = Dispatchers.Default.limitedParallelism(2)
+
 val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
-private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
-private val LATEX_BLOCK_LINE_BREAK_REGEX = Regex("""[ \t]*\r?\n[ \t]*""")
 
 // 预处理markdown内容
-private fun preProcess(content: String): String {
-    // 先找出所有代码块的位置
-    val codeBlocks = mutableListOf<IntRange>()
-    CODE_BLOCK_REGEX.findAll(content).forEach { match ->
-        codeBlocks.add(match.range)
-    }
-
-    // 检查位置是否在代码块内
-    fun isInCodeBlock(position: Int): Boolean {
-        return codeBlocks.any { range -> position in range }
-    }
-
-    // 替换行内公式 \( ... \) 到 $ ... $，但跳过代码块内的内容
-    var result = INLINE_LATEX_REGEX.replace(content) { matchResult ->
-        if (isInCodeBlock(matchResult.range.first)) {
-            matchResult.value // 保持原样
-        } else {
-            "$" + matchResult.groupValues[1] + "$"
-        }
-    }
-
-    // 替换块级公式 \[ ... \] 到 $$ ... $$，但跳过代码块内的内容
-    result = BLOCK_LATEX_REGEX.replace(result) { matchResult ->
-        if (isInCodeBlock(matchResult.range.first)) {
-            matchResult.value // 保持原样
-        } else {
-            val formula = matchResult.groupValues[1]
-                .trim()
-                .replace(LATEX_BLOCK_LINE_BREAK_REGEX, " ")
-            "$$" + formula + "$$"
-        }
-    }
-
-    return result
-}
+private fun preProcess(content: String): String = normalizeMarkdownLatex(content)
 
 @Preview(showBackground = true)
 @Composable
@@ -217,23 +184,235 @@ private fun MarkdownPreview() {
 }
 
 private data class MarkdownParseResult(
+    val source: String,
     val preprocessed: String,
     val astTree: ASTNode,
     val hasHtml: Boolean,
 )
+
+private const val MARKDOWN_PARSE_CACHE_ENTRIES = 48
+private const val MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS = 256 * 1024
+private const val TABLE_CELL_PRELOAD_LIMIT = 32
+private const val TABLE_CELL_PRELOAD_CHAR_BUDGET = 24 * 1024
+internal const val STREAMING_MARKDOWN_PARSE_INTERVAL_MS = 160L
+internal const val GRAPHICAL_STREAMING_MARKDOWN_PARSE_INTERVAL_MS = 320L
+private val markdownParserLock = Any()
+private val markdownParseCache = object : LinkedHashMap<String, MarkdownParseResult>(
+    MARKDOWN_PARSE_CACHE_ENTRIES,
+    0.75f,
+    true,
+) {
+    override fun removeEldestEntry(
+        eldest: MutableMap.MutableEntry<String, MarkdownParseResult>?,
+    ): Boolean = size > MARKDOWN_PARSE_CACHE_ENTRIES
+}
+
+private val GRAPHICAL_CODE_FENCE_REGEX = Regex(
+    pattern = "(?m)^\\s*```\\s*(?:mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|html|svg)\\b",
+    option = RegexOption.IGNORE_CASE,
+)
+
+internal fun markdownLoadingPlaceholderHeightDp(content: String): Int = when {
+    GRAPHICAL_CODE_FENCE_REGEX.containsMatchIn(content) -> 240
+    content.contains("![") || content.contains("<img", ignoreCase = true) -> 120
+    else -> content.lineSequence().take(6).count().coerceAtLeast(1) * 20
+}
+
+internal fun streamingMarkdownParseIntervalMs(content: String): Long =
+    if (
+        GRAPHICAL_CODE_FENCE_REGEX.containsMatchIn(content) ||
+        content.contains("<svg", ignoreCase = true)
+    ) {
+        GRAPHICAL_STREAMING_MARKDOWN_PARSE_INTERVAL_MS
+    } else {
+        STREAMING_MARKDOWN_PARSE_INTERVAL_MS
+    }
+
+private fun cachedMarkdownParse(content: String): MarkdownParseResult? =
+    synchronized(markdownParseCache) { markdownParseCache[content] }
 
 private fun ASTNode.containsHtml(): Boolean {
     if (type == MarkdownElementTypes.HTML_BLOCK || type == MarkdownTokenTypes.HTML_TAG) return true
     return children.any { it.containsHtml() }
 }
 
-private fun parseMarkdown(content: String): MarkdownParseResult {
-    val preprocessed = preProcess(content)
-    val astTree = parser.buildMarkdownTreeFromString(preprocessed)
-    return MarkdownParseResult(preprocessed, astTree, astTree.containsHtml())
+private fun collectTableCellContents(
+    node: ASTNode,
+    content: String,
+    destination: MutableList<String>,
+) {
+    if (destination.size >= TABLE_CELL_PRELOAD_LIMIT) return
+    if (node.type == GFMTokenTypes.CELL) {
+        node.getTextInNode(content).trim().takeIf(String::isNotEmpty)?.let(destination::add)
+        return
+    }
+    node.children.fastForEach { child ->
+        collectTableCellContents(child, content, destination)
+    }
 }
 
-@OptIn(FlowPreview::class)
+private fun preloadTableCellMarkdown(result: MarkdownParseResult) {
+    val cells = ArrayList<String>(TABLE_CELL_PRELOAD_LIMIT)
+    collectTableCellContents(result.astTree, result.preprocessed, cells)
+    var usedChars = 0
+    cells.distinct().forEach { cell ->
+        if (usedChars + cell.length > TABLE_CELL_PRELOAD_CHAR_BUDGET) return@forEach
+        usedChars += cell.length
+        try {
+            val cellResult = parseMarkdown(cell, preloadTableCells = false)
+            if (cellResult.hasHtml) preloadMarkdownDocument(cell)
+        } catch (exception: Exception) {
+            exception.printStackTrace()
+        }
+    }
+}
+
+private fun parseMarkdown(
+    content: String,
+    preloadTableCells: Boolean = true,
+): MarkdownParseResult {
+    if (content.length <= MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS) {
+        synchronized(markdownParseCache) {
+            markdownParseCache[content]?.let { return it }
+        }
+    }
+    val preprocessed = preProcess(content)
+    val astTree = synchronized(markdownParserLock) {
+        parser.buildMarkdownTreeFromString(preprocessed)
+    }
+    val result = MarkdownParseResult(content, preprocessed, astTree, astTree.containsHtml())
+    if (preloadTableCells && !result.hasHtml) preloadTableCellMarkdown(result)
+    if (content.length <= MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS) {
+        synchronized(markdownParseCache) {
+            // Insert the parent last so a table's cells cannot immediately evict it.
+            markdownParseCache[content] = result
+        }
+    }
+    return result
+}
+
+internal suspend fun preloadMarkdownContents(
+    contents: List<String>,
+    maxTotalChars: Int,
+) = withContext(RichTextParsingDispatcher) {
+    var remainingChars = maxTotalChars.coerceAtLeast(0)
+    val visited = HashSet<String>()
+    contents.forEach { content ->
+        currentCoroutineContext().ensureActive()
+        if (content.isBlank() || !visited.add(content) || isMarkdownContentPreloaded(content)) {
+            return@forEach
+        }
+        if (content.length > remainingChars) return@forEach
+        remainingChars -= content.length
+        try {
+            val result = parseMarkdown(content)
+            if (result.hasHtml) preloadMarkdownDocument(content)
+        } catch (exception: Exception) {
+            exception.printStackTrace()
+        }
+    }
+}
+
+internal fun isMarkdownContentPreloaded(content: String): Boolean {
+    val parsed = cachedMarkdownParse(content) ?: return false
+    return !parsed.hasHtml || isMarkdownDocumentCached(content)
+}
+
+internal data class MarkdownDiffPart(
+    val content: String,
+    val isDiff: Boolean,
+)
+
+private fun isPotentialUnifiedDiffLine(line: String): Boolean {
+    val trimmed = line.trimStart()
+    return line.isBlank() ||
+        line.startsWith(" ") ||
+        line.startsWith("\t") ||
+        trimmed.startsWith("diff --git ") ||
+        trimmed.startsWith("index ") ||
+        trimmed.startsWith("--- ") ||
+        trimmed.startsWith("+++ ") ||
+        trimmed.startsWith("@@ ") ||
+        trimmed.startsWith("@@-") ||
+        trimmed.startsWith("new file mode ") ||
+        trimmed.startsWith("deleted file mode ") ||
+        trimmed.startsWith("old mode ") ||
+        trimmed.startsWith("new mode ") ||
+        trimmed.startsWith("similarity index ") ||
+        trimmed.startsWith("rename from ") ||
+        trimmed.startsWith("rename to ") ||
+        trimmed.startsWith("+") ||
+        trimmed.startsWith("-") ||
+        trimmed.startsWith("\\ No newline")
+}
+
+/**
+ * Finds standalone unified-diff blocks in a normal Markdown response.  A
+ * response may contain an explanation before or after the patch; parsing the
+ * complete response as Markdown turns +/- lines into ordinary paragraphs, so
+ * those blocks need to be routed through the existing DiffView renderer first.
+ */
+internal fun splitMarkdownAroundDiff(content: String): List<MarkdownDiffPart> {
+    if (!content.contains("\n")) return emptyList()
+    val lines = content.split('\n', ignoreCase = false, limit = Int.MAX_VALUE)
+    val ranges = mutableListOf<IntRange>()
+    var index = 0
+    var fenceMarker: Pair<Char, Int>? = null
+    while (index < lines.size) {
+        val candidate = lines[index].trimStart()
+        if (fenceMarker != null) {
+            val (marker, length) = fenceMarker
+            val closingRun = candidate.takeWhile { it == marker }.length
+            if (closingRun >= length && candidate.drop(closingRun).isBlank()) {
+                fenceMarker = null
+            }
+            index++
+            continue
+        }
+        val fenceLength = candidate.takeWhile { it == '`' || it == '~' }.length
+        if (fenceLength >= 3 && candidate.firstOrNull() != null) {
+            fenceMarker = candidate.first() to fenceLength
+            index++
+            continue
+        }
+        val startsFilePair = candidate.startsWith("--- ") &&
+            lines.drop(index + 1).firstOrNull { it.isNotBlank() }?.trimStart()?.startsWith("+++ ") == true
+        val startsHunk = candidate.startsWith("@@ ") || candidate.startsWith("@@-")
+        if (!candidate.startsWith("diff --git ") && !startsFilePair && !startsHunk) {
+            index++
+            continue
+        }
+
+        var end = index + 1
+        while (end < lines.size && isPotentialUnifiedDiffLine(lines[end])) end++
+        val block = lines.subList(index, end).joinToString("\n").trimIndent().trim()
+        if (looksLikeStandaloneUnifiedDiff(block)) {
+            ranges += index until end
+            index = end
+        } else {
+            index++
+        }
+    }
+    if (ranges.isEmpty()) return emptyList()
+
+    val result = ArrayList<MarkdownDiffPart>(ranges.size * 2 + 1)
+    var cursor = 0
+    ranges.forEach { range ->
+        if (cursor < range.first) {
+            val text = lines.subList(cursor, range.first).joinToString("\n")
+            if (text.isNotBlank()) result += MarkdownDiffPart(text, isDiff = false)
+        }
+        val diff = lines.subList(range.first, range.last + 1).joinToString("\n").trimIndent().trim()
+        result += MarkdownDiffPart(diff, isDiff = true)
+        cursor = range.last + 1
+    }
+    if (cursor < lines.size) {
+        val text = lines.subList(cursor, lines.size).joinToString("\n")
+        if (text.isNotBlank()) result += MarkdownDiffPart(text, isDiff = false)
+    }
+    return result
+}
+
 @Composable
 fun MarkdownBlock(
     content: String,
@@ -241,24 +420,70 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {}
 ) {
-    var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
-
-    // 监听内容变化，重新解析AST树
-    // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
+    val diffParts = remember(content) { splitMarkdownAroundDiff(content) }
+    if (diffParts.isNotEmpty()) {
+        Column(modifier = modifier.fillMaxWidth()) {
+            diffParts.forEachIndexed { index, part ->
+                key(index, part.isDiff, part.content.hashCode()) {
+                    if (part.isDiff) {
+                        DiffView(
+                            diff = part.content,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        MarkdownBlock(
+                            content = part.content,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = style,
+                            onClickCitation = onClickCitation,
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
+    var data by remember { mutableStateOf(cachedMarkdownParse(content)) }
     val updatedContent by rememberUpdatedState(content)
+
+    // Conflate continuous token updates and parse them sequentially. The previous successful tree
+    // stays composed while a new one is prepared, so completed WebViews are never replaced by a
+    // loading placeholder merely because trailing text arrived.
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .debounce(100.milliseconds)
-            .mapLatest { parseMarkdown(it) }
-            .catch { exception -> exception.printStackTrace() }
-            .flowOn(Dispatchers.Default)
-            .collect { setData(it) }
+            .conflate()
+            .collect {
+                delay(streamingMarkdownParseIntervalMs(updatedContent))
+                val targetContent = updatedContent
+                if (data?.source == targetContent) return@collect
+                try {
+                    data = cachedMarkdownParse(targetContent) ?: withContext(RichTextParsingDispatcher) {
+                        parseMarkdown(targetContent).also { parsed ->
+                            if (parsed.hasHtml) preloadMarkdownDocument(targetContent)
+                        }
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (exception: Exception) {
+                    exception.printStackTrace()
+                }
+            }
     }
 
-    if (data.hasHtml) {
+    val parsed = data
+    if (parsed == null) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(markdownLoadingPlaceholderHeightDp(content).dp)
+                .padding(horizontal = 4.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
+        )
+    } else if (parsed.hasHtml) {
         MarkdownNew(
-            content = content,
+            content = parsed.source,
             modifier = modifier,
             style = style,
             onClickCitation = onClickCitation,
@@ -268,10 +493,14 @@ fun MarkdownBlock(
             Column(
                 modifier = modifier.padding(horizontal = 4.dp)
             ) {
-                data.astTree.children.fastForEach { child ->
-                    MarkdownNode(
-                        node = child, content = data.preprocessed, onClickCitation = onClickCitation
-                    )
+                parsed.astTree.children.fastForEach { child ->
+                    key(child.type, child.startOffset) {
+                        MarkdownNode(
+                            node = child,
+                            content = parsed.preprocessed,
+                            onClickCitation = onClickCitation,
+                        )
+                    }
                 }
             }
         }
@@ -534,10 +763,11 @@ private fun MarkdownNode(
                 ZoomableAsyncImage(
                     model = imageUrl,
                     contentDescription = altText,
+                    respectIntrinsicSize = true,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .widthIn(min = 120.dp)
-                        .heightIn(min = 120.dp),
+                        .widthIn(max = 360.dp)
+                        .heightIn(max = 280.dp),
                 )
             }
         }
@@ -1213,7 +1443,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                             })
                         )
                     } else {
-                        append(formula)
+                        append(latexReadableFallback(formula))
                     }
                 } else {
                     drawables.forEachIndexed { index, drawable ->

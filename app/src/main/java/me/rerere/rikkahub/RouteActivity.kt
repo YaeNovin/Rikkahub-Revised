@@ -112,6 +112,7 @@ import me.rerere.rikkahub.ui.pages.extensions.skills.SkillsPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspacePage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
+import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceLocalFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBasePage
 import me.rerere.workspace.WorkspaceStorageArea
@@ -615,6 +616,14 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
+                            entry<Screen.WorkspaceLocalFileEditor> { key ->
+                                WorkspaceLocalFileEditorPage(
+                                    id = key.id,
+                                    grantId = key.grantId,
+                                    path = key.path,
+                                )
+                            }
+
                             entry<Screen.SkillDetail> { key ->
                                 SkillDetailPage(skillName = key.skillName)
                             }
@@ -841,6 +850,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class WorkspaceFileEditor(val id: String, val area: String, val path: String) : Screen
+
+    @Serializable
+    data class WorkspaceLocalFileEditor(val id: String, val grantId: String, val path: String) : Screen
 
     @Serializable
     data class SkillDetail(val skillName: String) : Screen

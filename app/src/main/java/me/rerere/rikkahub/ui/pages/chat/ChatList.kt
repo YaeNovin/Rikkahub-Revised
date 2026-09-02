@@ -97,15 +97,25 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.data.ai.canContinueInterruptedResponse
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.richtext.preloadMarkdownContents
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
@@ -120,6 +130,89 @@ import kotlin.uuid.Uuid
 private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
+private const val HISTORY_PRELOAD_BEFORE_COUNT = 3
+private const val HISTORY_PRELOAD_AFTER_COUNT = 1
+private const val HISTORY_PRELOAD_CHAR_BUDGET = 256 * 1024
+private const val STREAMING_SCROLL_INTERVAL_MS = 96L
+
+private data class StreamingOutputRevision(
+    val messageCount: Int,
+    val lastMessageId: Uuid?,
+    val lastMessagePartCount: Int,
+    val visibleTextLength: Int,
+)
+
+private fun UIMessage.streamingVisibleTextLength(): Int = parts.sumOf { part ->
+    when (part) {
+        is UIMessagePart.Text -> part.text.length
+        is UIMessagePart.Reasoning -> part.reasoning.length
+        else -> 0
+    }
+}
+
+internal fun shouldFollowStreamingOutput(
+    loading: Boolean,
+    isScrollInProgress: Boolean,
+    lastVisibleItemIndex: Int,
+    totalItemCount: Int,
+    lastVisibleItemEndPx: Int,
+    viewportEndPx: Int,
+    bottomInsetPx: Int,
+    tolerancePx: Int,
+): Boolean = loading &&
+    !isScrollInProgress &&
+    totalItemCount > 0 &&
+    lastVisibleItemIndex == totalItemCount - 1 &&
+    lastVisibleItemEndPx <= viewportEndPx - bottomInsetPx + tolerancePx.coerceAtLeast(0)
+
+internal fun streamingBottomOverflowPx(
+    lastVisibleItemEndPx: Int,
+    viewportEndPx: Int,
+    bottomInsetPx: Int,
+): Int = (lastVisibleItemEndPx - (viewportEndPx - bottomInsetPx)).coerceAtLeast(0)
+
+internal fun historyPreloadIndices(
+    firstVisibleIndex: Int,
+    lastVisibleIndex: Int,
+    messageCount: Int,
+    beforeCount: Int = HISTORY_PRELOAD_BEFORE_COUNT,
+    afterCount: Int = HISTORY_PRELOAD_AFTER_COUNT,
+): List<Int> {
+    if (messageCount <= 0 || firstVisibleIndex !in 0 until messageCount) return emptyList()
+    val safeLastVisible = lastVisibleIndex.coerceIn(firstVisibleIndex, messageCount - 1)
+    return buildList {
+        val firstPreloadIndex = (firstVisibleIndex - beforeCount.coerceAtLeast(0)).coerceAtLeast(0)
+        for (index in firstVisibleIndex - 1 downTo firstPreloadIndex) add(index)
+        val lastPreloadIndex = (safeLastVisible + afterCount.coerceAtLeast(0))
+            .coerceAtMost(messageCount - 1)
+        for (index in safeLastVisible + 1..lastPreloadIndex) add(index)
+    }
+}
+
+private fun UIMessage.markdownPreloadContents(assistant: Assistant?): List<String> {
+    val textScope = if (role == MessageRole.USER) {
+        AssistantAffectScope.USER
+    } else {
+        AssistantAffectScope.ASSISTANT
+    }
+    return parts.mapNotNull { part ->
+        when (part) {
+            is UIMessagePart.Text -> part.text.replaceRegexes(
+                assistant = assistant,
+                scope = textScope,
+                visual = true,
+            )
+
+            is UIMessagePart.Reasoning -> part.reasoning.replaceRegexes(
+                assistant = assistant,
+                scope = AssistantAffectScope.ASSISTANT,
+                visual = true,
+            )
+
+            else -> null
+        }?.takeIf(String::isNotBlank)
+    }
+}
 
 @Composable
 fun ChatList(
@@ -135,8 +228,10 @@ fun ChatList(
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
     onRegenerate: (UIMessage) -> Unit = {},
+    onContinue: (UIMessage) -> Unit = {},
     onEdit: (UIMessage) -> Unit = {},
     onForkMessage: (UIMessage) -> Unit = {},
+    forkingMessageId: Uuid? = null,
     onDelete: (UIMessage) -> Unit = {},
     onUpdateMessage: (MessageNode) -> Unit = {},
     onClickSuggestion: (String) -> Unit = {},
@@ -177,8 +272,10 @@ fun ChatList(
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = onRegenerate,
+                onContinue = onContinue,
                 onEdit = onEdit,
                 onForkMessage = onForkMessage,
+                forkingMessageId = forkingMessageId,
                 onDelete = onDelete,
                 onUpdateMessage = onUpdateMessage,
                 onClickSuggestion = onClickSuggestion,
@@ -207,8 +304,10 @@ private fun ChatListNormal(
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
     onRegenerate: (UIMessage) -> Unit,
+    onContinue: (UIMessage) -> Unit,
     onEdit: (UIMessage) -> Unit,
     onForkMessage: (UIMessage) -> Unit,
+    forkingMessageId: Uuid?,
     onDelete: (UIMessage) -> Unit,
     onUpdateMessage: (MessageNode) -> Unit,
     onClickSuggestion: (String) -> Unit,
@@ -245,15 +344,6 @@ private fun ChatListNormal(
         }
     }
 
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
-        // println("lastPos = $lastPos, inputPos = $inputPos  | ${lastPos <= inputPos - 8}")
-        return lastPos <= inputPos - 8
-    }
-
     // 聊天选择
     val selectedItems = remember { mutableStateListOf<Uuid>() }
     var selecting by remember { mutableStateOf(false) }
@@ -275,6 +365,7 @@ private fun ChatListNormal(
     val assistant = remember(settings.assistants, conversation.assistantId) {
         settings.getAssistantById(conversation.assistantId)
     }
+    val assistantUpdated by rememberUpdatedState(assistant)
     val modelById = remember(settings.providers) {
         settings.providers
             .flatMap { it.models }
@@ -283,22 +374,99 @@ private fun ChatListNormal(
     val lastMessageIndex = conversation.messageNodes.lastIndex
     val captureProgress = LocalScrollCaptureInProgress.current
 
+    LaunchedEffect(state, conversation.id) {
+        snapshotFlow {
+            val messageCount = conversationUpdated.messageNodes.size
+            val visibleItems = state.layoutInfo.visibleItemsInfo
+            val firstVisibleMessage = visibleItems.firstOrNull {
+                it.index in 0 until messageCount
+            }?.index
+            val lastVisibleMessage = visibleItems.lastOrNull {
+                it.index in 0 until messageCount
+            }?.index
+            if (firstVisibleMessage == null || lastVisibleMessage == null) {
+                null
+            } else {
+                Triple(
+                    firstVisibleMessage,
+                    lastVisibleMessage,
+                    messageCount,
+                )
+            }
+        }
+            .distinctUntilChanged()
+            .collectLatest { visibleRange ->
+                if (visibleRange == null) return@collectLatest
+                val nodes = conversationUpdated.messageNodes
+                val contents = historyPreloadIndices(
+                    firstVisibleIndex = visibleRange.first,
+                    lastVisibleIndex = visibleRange.second,
+                    messageCount = visibleRange.third,
+                ).flatMap { index ->
+                    nodes.getOrNull(index)
+                        ?.currentMessage
+                        ?.markdownPreloadContents(assistantUpdated)
+                        .orEmpty()
+                }
+                preloadMarkdownContents(
+                    contents = contents,
+                    maxTotalChars = HISTORY_PRELOAD_CHAR_BUDGET,
+                )
+            }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize(),
     ) {
         // 自动滚动到底部
         if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                            // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
-                        }
-                    }
+            LaunchedEffect(state, conversation.id) {
+                snapshotFlow {
+                    val nodes = conversationUpdated.messageNodes
+                    val lastNode = nodes.lastOrNull()
+                    StreamingOutputRevision(
+                        messageCount = nodes.size,
+                        lastMessageId = lastNode?.id,
+                        lastMessagePartCount = lastNode?.currentMessage?.parts?.size ?: 0,
+                        visibleTextLength = lastNode?.currentMessage?.streamingVisibleTextLength() ?: 0,
+                    )
                 }
+                    .distinctUntilChanged()
+                    .conflate()
+                    .collect {
+                        val layout = state.layoutInfo
+                        val lastVisibleItem = layout.visibleItemsInfo.lastOrNull() ?: return@collect
+                        val bottomInsetPx = with(density) {
+                            innerPadding.calculateBottomPadding().roundToPx()
+                        }
+                        val followOutput = shouldFollowStreamingOutput(
+                            loading = loadingState,
+                            isScrollInProgress = state.isScrollInProgress,
+                            lastVisibleItemIndex = lastVisibleItem.index,
+                            totalItemCount = layout.totalItemsCount,
+                            lastVisibleItemEndPx = lastVisibleItem.offset + lastVisibleItem.size,
+                            viewportEndPx = layout.viewportEndOffset,
+                            bottomInsetPx = bottomInsetPx,
+                            tolerancePx = with(density) { 96.dp.roundToPx() },
+                        )
+                        if (!followOutput) return@collect
+
+                        delay(STREAMING_SCROLL_INTERVAL_MS)
+                        if (!loadingState || state.isScrollInProgress) return@collect
+                        val updatedLayout = state.layoutInfo
+                        val updatedLastItem = updatedLayout.visibleItemsInfo.lastOrNull() ?: return@collect
+                        if (updatedLastItem.index != updatedLayout.totalItemsCount - 1) {
+                            state.scrollToItem((updatedLayout.totalItemsCount - 1).coerceAtLeast(0))
+                            return@collect
+                        }
+                        val overflowPx = streamingBottomOverflowPx(
+                            lastVisibleItemEndPx = updatedLastItem.offset + updatedLastItem.size,
+                            viewportEndPx = updatedLayout.viewportEndOffset,
+                            bottomInsetPx = bottomInsetPx,
+                        )
+                        if (overflowPx > 0) state.scrollBy(overflowPx.toFloat())
+                    }
             }
         }
 
@@ -345,6 +513,7 @@ private fun ChatListNormal(
             itemsIndexed(
                 items = conversation.messageNodes,
                 key = { index, item -> item.id },
+                contentType = { _, _ -> "ChatMessage" },
             ) { index, node ->
                 Column {
                     ListSelectableItem(
@@ -368,12 +537,22 @@ private fun ChatListNormal(
                             onRegenerate = {
                                 onRegenerate(node.currentMessage)
                             },
+                            onContinue = if (
+                                index == lastMessageIndex &&
+                                node.currentMessage.canContinueInterruptedResponse()
+                            ) {
+                                { onContinue(node.currentMessage) }
+                            } else {
+                                null
+                            },
                             onEdit = {
                                 onEdit(node.currentMessage)
                             },
                             onFork = {
                                 onForkMessage(node.currentMessage)
                             },
+                            forkEnabled = !loading && forkingMessageId == null,
+                            forkInProgress = forkingMessageId == node.currentMessage.id,
                             onDelete = {
                                 onDelete(node.currentMessage)
                             },

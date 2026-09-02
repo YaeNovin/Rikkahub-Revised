@@ -58,6 +58,14 @@ class MessageFtsManager(private val database: AppDatabase) {
         db.execSQL("DELETE FROM message_fts WHERE conversation_id = ?", arrayOf(conversationId))
     }
 
+    suspend fun updateConversationTitle(conversationId: String, title: String) =
+        withContext(Dispatchers.IO) {
+            db.execSQL(
+                "UPDATE message_fts SET title = ? WHERE conversation_id = ?",
+                arrayOf(title, conversationId),
+            )
+        }
+
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         db.execSQL("DELETE FROM message_fts")
     }

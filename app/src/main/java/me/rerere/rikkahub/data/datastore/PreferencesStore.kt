@@ -53,6 +53,7 @@ import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.model.withQuickMessageIds
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.ui.theme.CustomTheme
 import me.rerere.rikkahub.ui.theme.PresetThemes
@@ -161,6 +162,8 @@ class SettingsStore(
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
         val QUICK_MESSAGES = stringPreferencesKey("quick_messages")
+        val EXTENSION_MANAGEMENT_MODE = stringPreferencesKey("extension_management_mode")
+        val QUICK_MESSAGE_SORT_MODE = stringPreferencesKey("quick_message_sort_mode")
 
         // 备份提醒
         val BACKUP_REMINDER_CONFIG = stringPreferencesKey("backup_reminder_config")
@@ -271,6 +274,12 @@ class SettingsStore(
                 quickMessages = preferences[QUICK_MESSAGES]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
+                extensionManagementMode = decodeExtensionManagementMode(
+                    preferences[EXTENSION_MANAGEMENT_MODE]
+                ),
+                quickMessageSortMode = decodeQuickMessageSortMode(
+                    preferences[QUICK_MESSAGE_SORT_MODE]
+                ),
                 webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
@@ -342,6 +351,9 @@ class SettingsStore(
                     }
                 },
                 assistants = settings.assistants.distinctBy { it.id }.map { assistant ->
+                    val quickMessageIds = assistant.quickMessageIds.filter { id ->
+                        id in validQuickMessageIds
+                    }.toSet()
                     assistant.copy(
                         // 过滤掉不存在的 MCP 服务器 ID
                         mcpServers = assistant.mcpServers.filter { serverId ->
@@ -356,9 +368,14 @@ class SettingsStore(
                             id in validLorebookIds
                         }.toSet(),
                         // 过滤掉不存在的快捷消息 ID
-                        quickMessageIds = assistant.quickMessageIds.filter { id ->
-                            id in validQuickMessageIds
-                        }.toSet()
+                        quickMessageIds = quickMessageIds,
+                        quickMessageGroups = assistant.quickMessageGroups
+                            .distinctBy { it.id }
+                            .map { group ->
+                                group.copy(
+                                    quickMessageIds = group.quickMessageIds.intersect(quickMessageIds)
+                                )
+                            },
                     )
                 },
                 ttsProviders = settings.ttsProviders.distinctBy { it.id },
@@ -459,6 +476,8 @@ class SettingsStore(
             preferences[MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
+            preferences[EXTENSION_MANAGEMENT_MODE] = settings.extensionManagementMode.name
+            preferences[QUICK_MESSAGE_SORT_MODE] = settings.quickMessageSortMode.name
             preferences[WEB_SERVER_ENABLED] = settings.webServerEnabled
             preferences[WEB_SERVER_PORT] = settings.webServerPort
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
@@ -598,15 +617,49 @@ class SettingsStore(
             settings.copy(
                 assistants = settings.assistants.map { assistant ->
                     if (assistant.id == assistantId) {
-                        assistant.copy(
+                        assistant.withQuickMessageIds(quickMessageIds).copy(
                             modeInjectionIds = modeInjectionIds,
                             lorebookIds = lorebookIds,
-                            quickMessageIds = quickMessageIds,
                         )
                     } else {
                         assistant
                     }
                 }
+            )
+        }
+    }
+
+    suspend fun recordQuickMessageUse(
+        quickMessageId: Uuid,
+        usedAt: Long = System.currentTimeMillis(),
+    ) {
+        update { settings ->
+            settings.copy(
+                quickMessages = settings.quickMessages.map { quickMessage ->
+                    if (quickMessage.id == quickMessageId) {
+                        quickMessage.copy(
+                            useCount = if (quickMessage.useCount == Long.MAX_VALUE) {
+                                Long.MAX_VALUE
+                            } else {
+                                quickMessage.useCount + 1
+                            },
+                            lastUsedAt = usedAt,
+                        )
+                    } else {
+                        quickMessage
+                    }
+                }
+            )
+        }
+    }
+
+    suspend fun deleteQuickMessage(quickMessageId: Uuid) {
+        update { settings ->
+            settings.copy(
+                quickMessages = settings.quickMessages.filterNot { it.id == quickMessageId },
+                assistants = settings.assistants.map { assistant ->
+                    assistant.withQuickMessageIds(assistant.quickMessageIds - quickMessageId)
+                },
             )
         }
     }
@@ -661,6 +714,8 @@ data class Settings(
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
+    val extensionManagementMode: ExtensionManagementMode = ExtensionManagementMode.NORMAL,
+    val quickMessageSortMode: QuickMessageSortMode = QuickMessageSortMode.DEFAULT,
     val webServerEnabled: Boolean = false,
     val webServerPort: Int = 8080,
     val webServerJwtEnabled: Boolean = false,
@@ -675,6 +730,27 @@ data class Settings(
         fun dummy() = Settings(init = true)
     }
 }
+
+@Serializable
+enum class ExtensionManagementMode {
+    NORMAL,
+    ENTERTAINMENT,
+}
+
+@Serializable
+enum class QuickMessageSortMode {
+    DEFAULT,
+    RECENT,
+    FREQUENT,
+}
+
+internal fun decodeExtensionManagementMode(raw: String?): ExtensionManagementMode =
+    runCatching { ExtensionManagementMode.valueOf(raw.orEmpty()) }
+        .getOrDefault(ExtensionManagementMode.NORMAL)
+
+internal fun decodeQuickMessageSortMode(raw: String?): QuickMessageSortMode =
+    runCatching { QuickMessageSortMode.valueOf(raw.orEmpty()) }
+        .getOrDefault(QuickMessageSortMode.DEFAULT)
 
 const val MIN_GLOBAL_BACKGROUND_BLUR_RADIUS = 4f
 const val MAX_GLOBAL_BACKGROUND_BLUR_RADIUS = 40f
@@ -851,6 +927,12 @@ fun Settings.isEnhancedChatBubbleActive(): Boolean =
 
 fun Settings.isChatInputGlassActive(): Boolean =
     displaySetting.enableBlurEffect && hasActiveChatBackground()
+
+fun Settings.chatInputContainerOpacity(): Float =
+    displaySetting.inputSurfaceOpacity.coerceIn(0f, 1f)
+
+fun Settings.chatInputContainerBlurRadius(): Float =
+    displaySetting.inputBlurRadius.coerceAtLeast(0f)
 
 fun Settings.isAutoAccentActive(): Boolean =
     isGlobalBackgroundActive() &&

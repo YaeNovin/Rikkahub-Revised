@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.components.richtext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,7 +31,8 @@ internal data class DiffStats(val additions: Int, val deletions: Int)
 internal fun parseDiffStats(diff: String): DiffStats {
     var additions = 0
     var deletions = 0
-    diff.lineSequence().forEach { line ->
+    diff.lineSequence().forEach { rawLine ->
+        val line = rawLine.trimStart()
         when {
             line.startsWith("+++") || line.startsWith("---") -> {}
             line.startsWith("+") -> additions++
@@ -54,7 +56,10 @@ fun DiffView(
     showFileHeader: Boolean = true,
 ) {
     val allLines = remember(diff, showFileHeader) {
-        val lines = diff.lines()
+        // Remove presentation indentation introduced when a model embeds a
+        // patch in a quoted or indented paragraph, while preserving the single
+        // leading space used by unified-diff context lines.
+        val lines = diff.trimIndent().lines()
         if (!showFileHeader && lines.size >= 2 &&
             lines[0].startsWith("---") && lines[1].startsWith("+++")
         ) {
@@ -66,26 +71,30 @@ fun DiffView(
     val lines = remember(allLines, maxLines) { allLines.take(maxLines) }
     val truncated = allLines.size - lines.size
 
-    Column(
+    Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .horizontalScroll(rememberScrollState())
-            .width(IntrinsicSize.Max)
-            .padding(vertical = 4.dp),
+            .horizontalScroll(rememberScrollState()),
     ) {
-        lines.fastForEach { line ->
-            DiffLine(line)
-        }
-        if (truncated > 0) {
-            Text(
-                text = "… +$truncated lines",
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 16.sp,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
+        Column(
+            modifier = Modifier
+                .width(IntrinsicSize.Max)
+                .padding(vertical = 4.dp),
+        ) {
+            lines.fastForEach { line ->
+                DiffLine(line)
+            }
+            if (truncated > 0) {
+                Text(
+                    text = "... +$truncated lines",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
         }
     }
 }

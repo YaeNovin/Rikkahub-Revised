@@ -344,4 +344,41 @@ class GoogleImageProtocolTest {
         assertTrue(decoded.chunks.any { it is StreamChunk.ImageDelta })
         assertTrue(decoder.onClosed().any { it is StreamChunk.ImageEnd })
     }
+
+    @Test
+    fun `image-capable Gemini stream accepts a tool-only turn`() {
+        val decoder = GoogleStreamDecoder(
+            responseId = "response",
+            model = "gemini-3.1-flash-image",
+            expectsImageOutput = true,
+        )
+        val decoded = decoder.accept(
+            SseEvent(
+                data = """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"workspace_list_local_files","args":{"grant_id":"g1"},"id":"call-1"}}]},"finishReason":"STOP"}]}""",
+            )
+        )
+
+        assertTrue(decoded.chunks.any { it is StreamChunk.ToolCallStart })
+        assertTrue(decoded.chunks.any { it is StreamChunk.ToolCallDelta })
+        // A client-tool turn is actionable output and must not be rejected by the image guard.
+        assertTrue(decoder.onClosed().any { it is StreamChunk.ToolCallEnd })
+    }
+
+    @Test
+    fun `image-capable Gemini keeps a complete tool call when relay omits finish reason`() {
+        val decoder = GoogleStreamDecoder(
+            responseId = "response",
+            model = "gemini-3.1-flash-image",
+            expectsImageOutput = true,
+        )
+        decoder.accept(
+            SseEvent(
+                data = """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"workspace_list_local_files","args":{},"id":"call-1"}}]}}]}""",
+            )
+        )
+
+        val closingChunks = decoder.onClosed()
+        assertTrue(closingChunks.any { it is StreamChunk.ToolCallEnd })
+        assertTrue(closingChunks.any { it is StreamChunk.Finish })
+    }
 }

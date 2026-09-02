@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
@@ -304,9 +305,10 @@ private fun RenderImage(
             ZoomableAsyncImage(
                 model = src,
                 contentDescription = alt.takeIf { it.isNotEmpty() },
+                respectIntrinsicSize = true,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 400.dp)
+                    .widthIn(max = 360.dp)
+                    .heightIn(max = 280.dp)
                     .clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Fit,
             )

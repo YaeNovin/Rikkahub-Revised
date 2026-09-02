@@ -148,25 +148,53 @@ class StreamChunkHandler(private val model: Model? = null) {
             }
 
             is StreamChunk.ToolCallStart -> {
-                if (parts.any { it is UIMessagePart.Tool && it.toolCallId == chunk.id }) this
-                else copy(parts = parts + UIMessagePart.Tool(
-                    toolCallId = chunk.id,
-                    toolName = chunk.toolName,
-                    input = "",
-                    metadata = chunk.metadata,
-                ))
+                val index = parts.indexOfFirst {
+                    it is UIMessagePart.Tool && it.toolCallId == chunk.id
+                }
+                if (index < 0) {
+                    copy(parts = parts + UIMessagePart.Tool(
+                        toolCallId = chunk.id,
+                        toolName = chunk.toolName,
+                        input = "",
+                        metadata = chunk.metadata,
+                    ))
+                } else {
+                    // A few compatible endpoints emit a delta before the start event. Merge the
+                    // later name/metadata without creating a duplicate tool part.
+                    copy(parts = parts.toMutableList().apply {
+                        val tool = get(index) as UIMessagePart.Tool
+                        set(index, tool.copy(
+                            toolName = chunk.toolName.ifBlank { tool.toolName },
+                            metadata = chunk.metadata ?: tool.metadata,
+                        ))
+                    })
+                }
             }
 
-            is StreamChunk.ToolCallDelta -> copy(parts = parts.map { part ->
-                // 工具调用可以并行生成，通过 toolCallId 而不是 part 位置识别目标。
-                if (part is UIMessagePart.Tool && part.toolCallId == chunk.id) {
-                    part.copy(
-                        toolName = part.toolName + chunk.toolNameDelta,
-                        input = part.input + chunk.inputDelta,
-                        metadata = chunk.metadata ?: part.metadata,
-                    )
-                } else part
-            })
+            is StreamChunk.ToolCallDelta -> {
+                val index = parts.indexOfFirst {
+                    it is UIMessagePart.Tool && it.toolCallId == chunk.id
+                }
+                if (index < 0) {
+                    // Tolerate providers that omit ToolCallStart for the first delta.
+                    copy(parts = parts + UIMessagePart.Tool(
+                        toolCallId = chunk.id,
+                        toolName = chunk.toolNameDelta,
+                        input = chunk.inputDelta,
+                        metadata = chunk.metadata,
+                    ))
+                } else {
+                    copy(parts = parts.toMutableList().apply {
+                        // 工具调用可以并行生成，通过 toolCallId 而不是 part 位置识别目标。
+                        val tool = get(index) as UIMessagePart.Tool
+                        set(index, tool.copy(
+                            toolName = tool.toolName + chunk.toolNameDelta,
+                            input = tool.input + chunk.inputDelta,
+                            metadata = chunk.metadata ?: tool.metadata,
+                        ))
+                    })
+                }
+            }
 
             is StreamChunk.ToolCallEnd -> this
             is StreamChunk.ServerToolStart -> {

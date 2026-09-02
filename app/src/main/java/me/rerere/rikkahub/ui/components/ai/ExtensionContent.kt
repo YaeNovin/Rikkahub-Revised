@@ -39,6 +39,7 @@ fun ModeInjectionsContent(
     onToggle: (kotlin.uuid.Uuid, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onManage: (() -> Unit)? = null,
+    scopeLabels: Map<kotlin.uuid.Uuid, String> = emptyMap(),
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -48,6 +49,9 @@ fun ModeInjectionsContent(
             ListItem(
                 headlineContent = {
                     Text(injection.name.ifBlank { stringResource(R.string.extension_content_unnamed) })
+                },
+                supportingContent = scopeLabels[injection.id]?.let { label ->
+                    { Text(label, style = MaterialTheme.typography.bodySmall) }
                 },
                 trailingContent = {
                     Switch(

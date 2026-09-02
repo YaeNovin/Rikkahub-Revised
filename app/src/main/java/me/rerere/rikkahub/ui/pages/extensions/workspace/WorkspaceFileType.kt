@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
+import me.rerere.rikkahub.data.files.WorkspaceLocalFileEntry
 import me.rerere.workspace.WorkspaceFileEntry
 
 /**
@@ -24,6 +25,16 @@ private val TEXT_EXTENSIONS = setOf(
 )
 
 fun WorkspaceFileEntry.detectFileType(): WorkspaceFileType {
+    return detectWorkspaceFileType(name)
+}
+
+fun WorkspaceLocalFileEntry.detectFileType(): WorkspaceFileType {
+    if (mimeType.startsWith("image/")) return WorkspaceFileType.IMAGE
+    if (mimeType.startsWith("text/")) return WorkspaceFileType.TEXT
+    return detectWorkspaceFileType(name)
+}
+
+private fun detectWorkspaceFileType(name: String): WorkspaceFileType {
     val ext = name.substringAfterLast('.', "").lowercase()
     return when {
         ext.isEmpty() -> WorkspaceFileType.OTHER

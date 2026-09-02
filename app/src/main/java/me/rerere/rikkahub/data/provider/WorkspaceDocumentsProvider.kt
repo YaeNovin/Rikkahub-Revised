@@ -16,6 +16,8 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.workspace.WorkspaceManager
 import org.koin.core.context.GlobalContext
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * 通过 Storage Access Framework 将 workspace 的 files 目录暴露给系统文件管理器。
@@ -141,8 +143,12 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
         val target = parseDocId(documentId)
         require(!target.isRoot && target.relPath.isNotEmpty()) { "Cannot delete this document" }
         val file = resolveFile(target.root, target.relPath)
-        val ok = if (file.isDirectory) file.deleteRecursively() else file.delete()
-        require(ok) { "Failed to delete: $documentId" }
+        val deleted = manager().moveFileToTrash(
+            root = target.root,
+            path = target.relPath,
+            recursive = file.isDirectory,
+        )
+        require(deleted != null) { "Failed to delete: $documentId" }
         notifyChange(buildDocId(target.root, target.relPath.substringBeforeLast('/', "")))
     }
 
@@ -170,7 +176,7 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
         require(!dest.canonicalPath.startsWith(srcFile.canonicalPath + File.separator)) {
             "Cannot copy a directory into itself"
         }
-        require(srcFile.copyRecursively(dest)) { "Failed to copy: $sourceDocumentId" }
+        copyRecursivelySafely(srcFile, dest)
         notifyChange(targetParentDocumentId)
         return buildDocId(targetParent.root, relPathOf(targetParent.root, dest))
     }
@@ -194,7 +200,7 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
         }
         if (!srcFile.renameTo(dest)) {
             // 所有 workspace 都在应用私有目录下，renameTo 一般可行；失败则回退为复制+删除
-            require(srcFile.copyRecursively(dest)) { "Failed to move: $sourceDocumentId" }
+            copyRecursivelySafely(srcFile, dest)
             require(if (srcFile.isDirectory) srcFile.deleteRecursively() else srcFile.delete()) {
                 "Failed to remove source after move: $sourceDocumentId"
             }
@@ -267,6 +273,39 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
         return candidate
     }
 
+    private fun copyRecursivelySafely(source: File, destination: File) {
+        var entries = 0
+        var bytes = 0L
+        try {
+            if (source.isFile) {
+                require(source.length() <= MAX_COPY_BYTES) { "File is too large to copy" }
+                destination.parentFile?.mkdirs()
+                Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                return
+            }
+            Files.walk(source.toPath(), MAX_COPY_DEPTH).use { stream ->
+                stream.forEach { path ->
+                    entries++
+                    require(entries <= MAX_COPY_ENTRIES) { "Directory contains too many entries" }
+                    require(!Files.isSymbolicLink(path)) { "Symbolic links cannot be copied" }
+                    val target = destination.toPath().resolve(source.toPath().relativize(path))
+                    if (Files.isDirectory(path)) {
+                        Files.createDirectories(target)
+                    } else if (Files.isRegularFile(path)) {
+                        val size = Files.size(path)
+                        require(bytes <= MAX_COPY_BYTES - size) { "Directory is too large to copy" }
+                        bytes += size
+                        target.parent?.let { Files.createDirectories(it) }
+                        Files.copy(path, target, StandardCopyOption.COPY_ATTRIBUTES)
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            destination.deleteRecursively()
+            throw error
+        }
+    }
+
     /** 将 workspace files 目录下的文件解析为相对路径（root 自身返回空串） */
     private fun relPathOf(root: String, file: File): String {
         val base = manager().filesDir(root).canonicalFile
@@ -321,6 +360,9 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
         private const val ROOT_ID = "rikkahub_workspaces"
         private const val ROOT_DOC_ID = "root"
         private const val DOC_PREFIX = "ws/"
+        private const val MAX_COPY_ENTRIES = 20_000
+        private const val MAX_COPY_DEPTH = 64
+        private const val MAX_COPY_BYTES = 2L * 1024 * 1024 * 1024
 
         private val DEFAULT_ROOT_PROJECTION = arrayOf(
             Root.COLUMN_ROOT_ID,

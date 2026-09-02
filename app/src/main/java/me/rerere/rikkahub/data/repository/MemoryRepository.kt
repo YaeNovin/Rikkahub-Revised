@@ -46,8 +46,16 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
     }
 
     suspend fun updateContent(id: Int, content: String): AssistantMemory {
+        return updateMemory(id = id, content = content)
+    }
+
+    suspend fun updateMemory(
+        id: Int,
+        content: String,
+        type: MemoryType? = null,
+    ): AssistantMemory {
         val old = memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
-        return updateContent(old, content)
+        return updateMemory(old = old, content = content, type = type)
     }
 
     suspend fun updateContent(
@@ -55,13 +63,31 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         id: Int,
         content: String,
     ): AssistantMemory? {
-        val old = memoryDAO.getMemoryByIdOfAssistant(id, assistantId) ?: return null
-        return updateContent(old, content)
+        return updateMemory(assistantId = assistantId, id = id, content = content)
     }
 
-    private suspend fun updateContent(old: MemoryEntity, content: String): AssistantMemory {
+    suspend fun updateMemory(
+        assistantId: String,
+        id: Int,
+        content: String,
+        type: MemoryType? = null,
+    ): AssistantMemory? {
+        val old = memoryDAO.getMemoryByIdOfAssistant(id, assistantId) ?: return null
+        return updateMemory(old = old, content = content, type = type)
+    }
+
+    private suspend fun updateMemory(
+        old: MemoryEntity,
+        content: String,
+        type: MemoryType?,
+    ): AssistantMemory {
+        val normalizedContent = content.trim().also {
+            require(it.isNotEmpty()) { "Memory content must not be blank" }
+        }
+        val effectiveType = type ?: MemoryType.fromWireName(old.memoryType)
         val newMemory = old.copy(
-            content = content,
+            content = normalizedContent,
+            memoryType = effectiveType.name.lowercase(),
             embedding = null,
             embeddingModelId = null,
             embeddingDimension = null,
@@ -82,10 +108,13 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         type: MemoryType = MemoryType.FACT,
         sourceConversationId: String? = null,
     ): AssistantMemory {
+        val normalizedContent = content.trim().also {
+            require(it.isNotEmpty()) { "Memory content must not be blank" }
+        }
         val createdAt = Clock.System.now().toEpochMilliseconds()
         val memory = AssistantMemory(
             id = 0,
-            content = content,
+            content = normalizedContent,
             type = type,
             createdAt = createdAt,
             sourceConversationId = sourceConversationId,

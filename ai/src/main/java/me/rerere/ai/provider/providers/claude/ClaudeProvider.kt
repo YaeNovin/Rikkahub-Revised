@@ -15,6 +15,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -42,6 +43,8 @@ import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
@@ -318,6 +321,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.TEXT_GENERATION,
                     hasCustomBody = params.customBody.isNotEmpty(),
+                    requestId = params.requestId,
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -382,6 +386,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.STREAM_TEXT,
                     hasCustomBody = params.customBody.isNotEmpty(),
+                    requestId = params.requestId,
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -470,11 +475,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams,
         stream: Boolean = false
     ): JsonObject {
-        val support = resolveClaudeModelParameterSupport(params.model.modelId)
-        val deepSeekSupport = resolveDeepSeekModelParameterSupport(params.model.modelId)
+        val parameterModelId = params.model.parameterModelId()
+        val support = resolveClaudeModelParameterSupport(parameterModelId)
+        val deepSeekSupport = resolveDeepSeekModelParameterSupport(parameterModelId)
         val maxTokens = params.maxTokens ?: 64_000
         val supportsReasoning = deepSeekSupport.available ||
-            params.model.abilities.contains(ModelAbility.REASONING) ||
+            params.model.supportsReasoningCapability() ||
             support.supportsAdaptiveThinking || support.supportsManualThinking
         val reasoningEnabled = if (deepSeekSupport.available) {
             params.reasoningLevel.isEnabled
@@ -482,7 +488,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             supportsReasoning && (params.reasoningLevel.isEnabled || support.requiresAdaptiveThinking)
         }
         val reasoningEffort = resolveAnthropicReasoningEffort(
-            modelId = params.model.modelId,
+            modelId = parameterModelId,
             level = params.reasoningLevel,
         )
         return buildJsonObject {
@@ -862,16 +868,26 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         put("type", "tool_use")
         put("id", toolCallId)
         put("name", toolName)
-        put("input", inputAsJson())
+        // Anthropic requires tool_use.input to be a JSON object. Invalid or legacy persisted
+        // arguments are left for the common executor to report, but history replay must remain
+        // a valid Messages request.
+        put("input", inputAsJson() as? JsonObject ?: JsonObject(emptyMap()))
     }
 
     private fun UIMessagePart.Tool.toToolResultBlock() = buildJsonObject {
         put("type", "tool_result")
         put("tool_use_id", toolCallId)
+        if (output.any { it is UIMessagePart.Text && it.text.isToolErrorJson() }) {
+            put("is_error", true)
+        }
         putJsonArray("content") {
             output.mapNotNull { it.toContentBlock() }.forEach { add(it) }
         }
     }
+
+    private fun String.isToolErrorJson(): Boolean = runCatching {
+        json.parseToJsonElement(this).jsonObject.containsKey("error")
+    }.getOrDefault(false)
 
     internal fun parseMessage(content: JsonArray): UIMessage {
         val parts = mutableListOf<UIMessagePart>()
@@ -912,12 +928,19 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 "tool_use" -> {
                     val id = block["id"]?.jsonPrimitive?.contentOrNull ?: ""
                     val name = block["name"]?.jsonPrimitive?.contentOrNull ?: ""
-                    val input = block["input"]?.jsonObject ?: JsonObject(emptyMap())
+                    // Keep malformed/non-object input visible to the common tool argument
+                    // validator. Silently replacing it with {} can execute a command with
+                    // unintended defaults and hides protocol errors from the model.
+                    val input = block["input"]
                     parts.add(
                         UIMessagePart.Tool(
                             toolCallId = id,
                             toolName = name,
-                            input = if (input.isEmpty()) "" else json.encodeToString(input),
+                            input = when (input) {
+                                null -> ""
+                                JsonNull -> "null"
+                                else -> input.toString()
+                            },
                             output = emptyList()
                         )
                     )

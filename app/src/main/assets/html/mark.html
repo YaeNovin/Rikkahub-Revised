@@ -129,7 +129,17 @@
             max-width: 100%;
             height: auto;
             border-radius: 6px;
-            margin: 8px 0;
+            margin: 8px auto;
+        }
+
+        /* Keep every rendered media surface centered while retaining native
+           WebView pinch zoom and scroll/pan behavior. */
+        img, svg, video, canvas, iframe {
+            display: block;
+            max-width: 100%;
+            box-sizing: border-box;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         /* Horizontal rules */

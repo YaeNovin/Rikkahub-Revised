@@ -221,6 +221,9 @@ private fun SearchServiceOptionsEditor(
         is SearchServiceOptions.SerperOptions -> {
             SerperOptions(options) { onUpdateOptions(it) }
         }
+        is SearchServiceOptions.AnySearchOptions -> {
+            AnySearchOptions(options) { onUpdateOptions(it) }
+        }
         is SearchServiceOptions.CustomJsOptions -> {
             CustomJsOptions(options) { onUpdateOptions(it) }
         }
@@ -587,6 +590,80 @@ internal fun SerperOptions(
                 onUpdateOptions(options.copy(apiKey = it))
             },
             modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+internal fun AnySearchOptions(
+    options: SearchServiceOptions.AnySearchOptions,
+    onUpdateOptions: (SearchServiceOptions.AnySearchOptions) -> Unit
+) {
+    FormItem(
+        label = {
+            Text(stringResource(R.string.search_detail_api_key))
+        },
+        description = {
+            Text(stringResource(R.string.search_detail_anysearch_api_key_desc))
+        }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = {
+                onUpdateOptions(options.copy(apiKey = it))
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    FormItem(
+        label = {
+            Text(stringResource(R.string.search_detail_anysearch_zone))
+        },
+        description = {
+            Text(stringResource(R.string.search_detail_anysearch_zone_desc))
+        }
+    ) {
+        val zoneOptions = listOf(
+            "" to R.string.search_detail_anysearch_zone_auto,
+            "cn" to R.string.search_detail_anysearch_zone_china,
+            "intl" to R.string.search_detail_anysearch_zone_international,
+        )
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            zoneOptions.forEachIndexed { index, (zone, label) ->
+                SegmentedButton(
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = zoneOptions.size),
+                    onClick = {
+                        onUpdateOptions(options.copy(zone = zone))
+                    },
+                    selected = options.zone == zone
+                ) {
+                    Text(stringResource(label))
+                }
+            }
+        }
+    }
+
+    FormItem(
+        label = {
+            Text(stringResource(R.string.search_detail_language))
+        },
+        description = {
+            Text(stringResource(R.string.search_detail_anysearch_language_desc))
+        }
+    ) {
+        OutlinedTextField(
+            value = options.language,
+            onValueChange = {
+                onUpdateOptions(options.copy(language = it))
+            },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = {
+                Text("zh-CN")
+            }
         )
     }
 }

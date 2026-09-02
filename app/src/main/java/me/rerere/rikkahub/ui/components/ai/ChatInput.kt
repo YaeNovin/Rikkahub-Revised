@@ -45,8 +45,6 @@ import me.rerere.rikkahub.ui.components.ui.IsolatedOverlaySurface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,13 +77,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
+import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.resolveReasoningLevelSupport
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
@@ -96,11 +100,15 @@ import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.chatInputContainerBlurRadius
+import me.rerere.rikkahub.data.datastore.chatInputContainerOpacity
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
-import me.rerere.rikkahub.data.datastore.isChatDockGlassActive
-import me.rerere.rikkahub.data.datastore.isChatInputGlassActive
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.QuickMessage
@@ -109,8 +117,6 @@ import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionList
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionProvider
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
-import me.rerere.rikkahub.ui.components.ui.LiveDockGlassSurface
-import me.rerere.rikkahub.ui.components.ui.LiveLiquidGlassSurface
 import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
@@ -145,13 +151,30 @@ fun ChatInput(
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
     val appearanceCapabilities = LocalAdvancedAppearanceCapabilities.current
-    val dockGlassActive = settings.isChatDockGlassActive() &&
-        appearanceCapabilities.supportsRealtimeBlur
+    val containerBlurRadius = appearanceCapabilities.limitLiveBlur(
+        settings.chatInputContainerBlurRadius()
+    ).coerceAtLeast(0f)
+    val containerBlurActive = appearanceCapabilities.supportsRealtimeBlur &&
+        containerBlurRadius > 0f
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(
+        alpha = settings.chatInputContainerOpacity()
+    )
+    val containerBlurStyle = HazeBlurStyle.Material3 {
+        blurRadius(containerBlurRadius.dp)
+    }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
     val imeVisible = WindowInsets.isImeVisible
+    val containerShape = if (imeVisible) {
+        MaterialTheme.shapes.largeIncreased.copy(
+            bottomStart = CornerSize(0.dp),
+            bottomEnd = CornerSize(0.dp),
+        )
+    } else {
+        MaterialTheme.shapes.largeIncreased
+    }
 
     fun sendMessage() {
         focusManager.clearFocus(force = true)
@@ -193,55 +216,63 @@ fun ChatInput(
         }
     }
 
-    Column(
-        modifier = modifier
-            .imePadding()
-            .navigationBarsPadding()
-            .padding(horizontal = 8.dp)
-            .padding(bottom = if (imeVisible) 0.dp else 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    Surface(color = Color.Transparent) {
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = modifier
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 8.dp)
+                .padding(bottom = if (imeVisible) 0.dp else 8.dp),
         ) {
-            if (state.messageContent.isNotEmpty()) {
-                MediaFileInputRow(state = state)
-            }
-
-            TextInputRow(
-                state = state,
-                hazeState = hazeState,
-                completionProviders = completionProviders,
-                onSendMessage = { sendMessage() },
-            )
-        }
-
-        val dockAppearance = settings.advancedAppearanceSetting
-        val dockShape = MaterialTheme.shapes.largeIncreased
-        LiveDockGlassSurface(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = dockGlassActive,
-            hazeState = hazeState,
-            blurRadius = dockAppearance.chatDockGlassBlurRadius,
-            opacity = dockAppearance.chatDockGlassOpacity.coerceIn(0.2f, 0.95f),
-            shape = dockShape,
-            strength = 0.68f,
-            borderStrength = 0.48f,
-        ) {
-            Row(
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .clip(containerShape)
+                    .then(
+                        if (containerBlurActive) {
+                            Modifier.hazeBlur(
+                                input = HazeInput.Sources(hazeState),
+                                style = containerBlurStyle,
+                            )
+                        } else {
+                            Modifier
+                        }
+                    ),
+                shape = containerShape,
+                tonalElevation = 0.dp,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                ),
+                color = containerColor,
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    if (state.messageContent.isNotEmpty()) {
+                        MediaFileInputRow(state = state)
+                    }
+
+                    TextInputRow(
+                        state = state,
+                        completionProviders = completionProviders,
+                        onSendMessage = { sendMessage() },
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
                     ModelSelector(
                         modelId = assistant.chatModelId ?: settings.chatModelId,
                         providers = settings.providers,
@@ -270,13 +301,35 @@ fun ChatInput(
                         model = chatModel,
                     )
 
-                    val model = settings.getCurrentChatModel()
-                    if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
+                    val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+                    if (model?.supportsReasoningCapability() == true) {
+                        val provider = model.findProvider(settings.providers)
+                        val reasoningSupport = remember(model, provider) {
+                            resolveReasoningLevelSupport(model, provider)
+                        }
+                        val effectiveReasoningLevel = reasoningSupport.coerce(assistant.reasoningLevel)
+                        LaunchedEffect(
+                            model.id,
+                            provider?.id,
+                            reasoningSupport.levels,
+                            assistant.reasoningLevel,
+                        ) {
+                            if (effectiveReasoningLevel != assistant.reasoningLevel) {
+                                onUpdateAssistant(
+                                    assistant.copy(reasoningLevel = effectiveReasoningLevel)
+                                )
+                            }
+                        }
                         ReasoningButton(
-                            reasoningLevel = assistant.reasoningLevel,
+                            reasoningLevel = effectiveReasoningLevel,
                             onUpdateReasoningLevel = {
-                                onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                onUpdateAssistant(
+                                    assistant.copy(reasoningLevel = reasoningSupport.coerce(it))
+                                )
                             },
+                            availableLevels = reasoningSupport.levels,
+                            modelName = model.displayName.ifBlank { model.modelId },
+                            compatibleEndpoint = reasoningSupport.compatibleEndpoint,
                             onlyIcon = true,
                         )
                     }
@@ -366,10 +419,12 @@ fun ChatInput(
                             )
                         }
                     }
+                        }
+                    }
                 }
+            }
         }
     }
-}
 }
 
 @Composable
@@ -395,7 +450,6 @@ private fun ActionIconButton(
 @Composable
 private fun TextInputRow(
     state: ChatInputState,
-    hazeState: HazeState,
     completionProviders: List<ChatCompletionProvider>,
     onSendMessage: () -> Unit,
 ) {
@@ -520,89 +574,58 @@ private fun TextInputRow(
             )
         }
 
-        val inputTextStyle = MaterialTheme.typography.bodyLarge.copy(
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        val inputGlassActive = settings.isChatInputGlassActive() &&
-            LocalAdvancedAppearanceCapabilities.current.supportsRealtimeBlur
-        val inputShape = if (WindowInsets.isImeVisible) {
-            MaterialTheme.shapes.largeIncreased.copy(
-                bottomStart = CornerSize(0.dp),
-                bottomEnd = CornerSize(0.dp),
-            )
-        } else {
-            MaterialTheme.shapes.largeIncreased
-        }
-        val unfocusedBorderColor = if (inputGlassActive) {
-            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
-        } else {
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.62f)
-        }
-
-        LiveLiquidGlassSurface(
+        TextField(
+            state = state.textContent,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 56.dp),
-            enabled = inputGlassActive,
-            hazeState = hazeState,
-            blurRadius = settings.displaySetting.inputBlurRadius,
-            opacity = settings.displaySetting.inputSurfaceOpacity.coerceIn(0f, 1f),
-            shape = inputShape,
-            strength = 0.68f,
-            borderStrength = 0.48f,
-        ) {
-            OutlinedTextField(
-                state = state.textContent,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .testTag("chat_input")
-                    .contentReceiver(receiveContentListener)
-                    .onFocusChanged {
-                        isFocused = it.isFocused
-                    },
-                textStyle = inputTextStyle,
-                shape = inputShape,
-                placeholder = {
-                    Text(
-                        text = stringResource(R.string.chat_input_placeholder),
-                        style = inputTextStyle,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                .testTag("chat_input")
+                .contentReceiver(receiveContentListener)
+                .onFocusChanged {
+                    isFocused = it.isFocused
                 },
-                leadingIcon = if (quickMessages.isNotEmpty()) {
-                    { QuickMessageButton(quickMessages = quickMessages, state = state) }
-                } else {
-                    null
-                },
-                trailingIcon = if (isFocused) {
-                    {
-                        IconButton(onClick = { isFullScreen = !isFullScreen }) {
-                            Icon(HugeIcons.FullScreen, null)
-                        }
+            shape = MaterialTheme.shapes.largeIncreased,
+            placeholder = { Text(stringResource(R.string.chat_input_placeholder)) },
+            leadingIcon = if (quickMessages.isNotEmpty()) {
+                {
+                    if (settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT) {
+                        EntertainmentQuickMessageButton(
+                            quickMessages = quickMessages,
+                            assistant = assistant,
+                            sortMode = settings.quickMessageSortMode,
+                            state = state,
+                        )
+                    } else {
+                        QuickMessageButton(quickMessages = quickMessages, state = state)
                     }
-                } else {
-                    null
-                },
-                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
-                keyboardOptions = KeyboardOptions(
-                    imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
-                ),
-                onKeyboardAction = {
-                    if (settings.displaySetting.sendOnEnter && !state.isEmpty()) {
-                        onSendMessage()
+                }
+            } else {
+                null
+            },
+            trailingIcon = if (isFocused) {
+                {
+                    IconButton(onClick = { isFullScreen = !isFullScreen }) {
+                        Icon(HugeIcons.FullScreen, null)
                     }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
-                    unfocusedBorderColor = if (inputGlassActive) Color.Transparent else unfocusedBorderColor,
-                    disabledBorderColor = if (inputGlassActive) Color.Transparent else unfocusedBorderColor,
-                ),
-            )
-        }
+                }
+            } else {
+                null
+            },
+            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
+            keyboardOptions = KeyboardOptions(
+                imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
+            ),
+            onKeyboardAction = {
+                if (settings.displaySetting.sendOnEnter && !state.isEmpty()) {
+                    onSendMessage()
+                }
+            },
+            colors = TextFieldDefaults.colors().copy(
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+            ),
+        )
         if (isFullScreen) {
             FullScreenEditor(state = state) {
                 isFullScreen = false
@@ -697,6 +720,8 @@ private fun QuickMessageButton(
     quickMessages: List<QuickMessage>,
     state: ChatInputState,
 ) {
+    val settingsStore: SettingsStore = koinInject()
+    val scope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
     IconButton(
         onClick = {
@@ -713,6 +738,7 @@ private fun QuickMessageButton(
                 Surface(
                     onClick = {
                         state.appendText(quickMessage.content)
+                        scope.launch { settingsStore.recordQuickMessageUse(quickMessage.id) }
                         expanded = false
                     },
                     color = Color.Transparent,

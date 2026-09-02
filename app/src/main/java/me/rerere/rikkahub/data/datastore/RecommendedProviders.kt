@@ -2,12 +2,14 @@ package me.rerere.rikkahub.data.datastore
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import kotlin.uuid.Uuid
 
@@ -62,6 +64,36 @@ val RECOMMENDED_PROVIDERS: List<ProviderSetting> = listOf(
                     }
                 }
             )
+        },
+    ),
+    ProviderSetting.OpenAI(
+        name = "OrcaRouter",
+        baseUrl = "https://api.orcarouter.ai/v1",
+        apiKey = "",
+        enabled = true,
+        description = {
+            Text(
+                text = buildAnnotatedString {
+                    append(stringResource(R.string.orca_router_provider_description))
+                    appendLine()
+                    append(stringResource(R.string.orca_router_provider_website_label))
+                    withLink(LinkAnnotation.Url("https://www.orcarouter.ai")) {
+                        withStyle(SpanStyle(MaterialTheme.colorScheme.primary)) {
+                            append("https://www.orcarouter.ai")
+                        }
+                    }
+                    appendLine()
+                    append(stringResource(R.string.orca_router_provider_docs_label))
+                    withLink(LinkAnnotation.Url("https://docs.orcarouter.ai")) {
+                        withStyle(SpanStyle(MaterialTheme.colorScheme.primary)) {
+                            append("https://docs.orcarouter.ai")
+                        }
+                    }
+                }
+            )
+        },
+        shortDescription = {
+            Text(stringResource(R.string.orca_router_provider_short_description))
         },
     ),
 )

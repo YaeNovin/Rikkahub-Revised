@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -63,7 +64,10 @@ import me.rerere.ai.provider.ProviderRequestException
 import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.inferModelTypeFromId
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.providerRequestFailure
+import me.rerere.ai.provider.resolveReasoningLevelSupport
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
@@ -551,6 +555,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         operation = ProviderRequestOperation.TEXT_GENERATION,
                         requestBody = requestBody,
                         hasCustomBody = params.customBody.isNotEmpty(),
+                        requestId = params.requestId,
                     ),
                 )
                 .build()
@@ -622,6 +627,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         operation = ProviderRequestOperation.STREAM_TEXT,
                         requestBody = requestBody,
                         hasCustomBody = params.customBody.isNotEmpty(),
+                        requestId = params.requestId,
                     ),
                 )
                 .build()
@@ -723,8 +729,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         uploadedFiles: Map<String, UploadedGoogleFile>,
     ): JsonObject = buildJsonObject {
         val supportsImageOutput = params.model.supportsGoogleNativeImageOutput()
-        val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(params.model.modelId)
-        val isGemini37Flash = ModelRegistry.GEMINI_3_7_FLASH.match(params.model.modelId)
+        val parameterModelId = params.model.parameterModelId()
+        val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(parameterModelId)
+        val isGemini37Flash = ModelRegistry.GEMINI_3_7_FLASH.match(parameterModelId)
+        val reasoningLevel = resolveReasoningLevelSupport(
+            params.model,
+            ProviderSetting.Google(),
+        ).coerce(params.reasoningLevel)
         val perPartMediaResolution = params.geminiOptions.mediaResolution.apiValue
             .takeIf { isGemini3 && params.geminiOptions.mediaResolution == GeminiMediaResolution.ULTRA_HIGH }
         // System message if available
@@ -786,17 +797,16 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     add(JsonPrimitive("IMAGE"))
                 })
             }
-            if (isGemini3 || params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (isGemini3 || params.model.supportsReasoningCapability()) {
                 put("thinkingConfig", buildJsonObject {
                     put(
                         "includeThoughts",
                         if (isGemini3) params.geminiOptions.includeThoughts else true,
                     )
 
-                    val isGeminiPro =
-                        params.model.modelId.contains(Regex("2\\.5.*pro", RegexOption.IGNORE_CASE))
+                    val isGeminiPro = parameterModelId.contains(Regex("2[.-]5.*pro", RegexOption.IGNORE_CASE))
 
-                    when (params.reasoningLevel) {
+                    when (reasoningLevel) {
                         ReasoningLevel.AUTO -> {} // 自动模式，不设置参数
 
                         ReasoningLevel.OFF -> {
@@ -811,14 +821,15 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                         else -> {
                             if (isGemini3) {
-                                when (params.reasoningLevel) {
+                                when (reasoningLevel) {
+                                    ReasoningLevel.MINIMAL -> put("thinkingLevel", "minimal")
                                     ReasoningLevel.LOW -> put("thinkingLevel", "low")
                                     ReasoningLevel.MEDIUM -> put("thinkingLevel", "medium")
                                     else -> put("thinkingLevel", "high") // HIGH, XHIGH, MAX
                                 }
                             } else {
                                 val maximumBudget = if (isGeminiPro) 32_768 else 24_576
-                                params.reasoningLevel.cappedBudget(maximumBudget)?.let {
+                                reasoningLevel.cappedBudget(maximumBudget)?.let {
                                     put("thinkingBudget", it)
                                 }
                             }
@@ -834,41 +845,41 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             buildContents(messages, uploadedFiles, perPartMediaResolution)
         )
 
-        // Tools
-        if (params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)) {
-            put("tools", buildJsonArray {
-                add(buildJsonObject {
-                    put("functionDeclarations", buildJsonArray {
-                        params.tools.forEach { tool ->
-                            add(buildJsonObject {
-                                put("name", JsonPrimitive(tool.name))
-                                put("description", JsonPrimitive(tool.description))
-                                put(
-                                    key = "parameters",
-                                    element = json.encodeToJsonElement(tool.parameters())
-                                        .removeElements(
-                                            listOf(
-                                                "const",
-                                                "exclusiveMaximum",
-                                                "exclusiveMinimum",
-                                                "format",
-                                                "additionalProperties",
-                                                "enum",
-                                            )
-                                        )
-                                )
-                            })
-                        }
-                    })
-                })
-            })
-        }
-        // Model BuiltIn Tools
-        // 目前不能和工具调用兼容
+        // Gemini 3 can combine function declarations with built-in tools. Older Gemini
+        // versions cannot, so client-side tools take priority instead of being overwritten.
+        val clientToolsEnabled = params.tools.isNotEmpty() &&
+            params.model.abilities.contains(ModelAbility.TOOL)
         val serverTools = params.model.tools - BuiltInTools.ImageGeneration
-        if (serverTools.isNotEmpty()) {
-            put("tools", buildJsonArray {
-                serverTools.forEach { builtInTool ->
+        val enabledServerTools = if (clientToolsEnabled && !isGemini3) emptySet() else serverTools
+        if (clientToolsEnabled || enabledServerTools.isNotEmpty()) {
+            putJsonArray("tools") {
+                if (clientToolsEnabled) {
+                    add(buildJsonObject {
+                        put("functionDeclarations", buildJsonArray {
+                            params.tools.forEach { tool ->
+                                add(buildJsonObject {
+                                    put("name", JsonPrimitive(tool.name))
+                                    put("description", JsonPrimitive(tool.description))
+                                    put(
+                                        key = "parameters",
+                                        element = json.encodeToJsonElement(tool.parameters())
+                                            .removeElements(
+                                                listOf(
+                                                    "const",
+                                                    "exclusiveMaximum",
+                                                    "exclusiveMinimum",
+                                                    "format",
+                                                    "additionalProperties",
+                                                    "enum",
+                                                )
+                                            )
+                                    )
+                                })
+                            }
+                        })
+                    })
+                }
+                enabledServerTools.forEach { builtInTool ->
                     when (builtInTool) {
                         BuiltInTools.Search -> {
                             add(buildJsonObject {
@@ -885,7 +896,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         else -> {}
                     }
                 }
-            })
+            }
         }
 
         // Safety Settings
@@ -1207,13 +1218,24 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             jsonObject.containsKey("functionCall") -> {
+                val functionCall = jsonObject["functionCall"] as? JsonObject
+                    ?: error("Gemini functionCall must be a JSON object")
+                val toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { it.isNotBlank() }
+                    ?: error("Gemini functionCall.name is required")
+                val functionCallId = functionCall["id"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { it.isNotBlank() }
                 UIMessagePart.Tool(
+                    // Keep a local ID for UI bookkeeping. The provider ID is stored separately
+                    // and is echoed only in the wire-level functionResponse.
                     toolCallId = Uuid.random().toString(),
-                    toolName = jsonObject["functionCall"]!!.jsonObject["name"]!!.jsonPrimitive.content,
-                    input = json.encodeToString(jsonObject["functionCall"]!!.jsonObject["args"]),
+                    toolName = toolName,
+                    input = functionCall["args"]?.let { if (it is JsonNull) "null" else it.toString() }
+                        .orEmpty(),
                     output = emptyList(),
                     metadata = GoogleThoughtMetadata(
-                        thoughtSignature = jsonObject["thoughtSignature"]?.jsonPrimitive?.contentOrNull
+                        thoughtSignature = jsonObject["thoughtSignature"]?.jsonPrimitive?.contentOrNull,
+                        functionCallId = functionCallId,
                     ).toMetadata()
                 )
             }
@@ -1400,18 +1422,23 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun UIMessagePart.Tool.toFunctionCallPart() = buildJsonObject {
+        val metadata = metadataAs<GoogleThoughtMetadata>()
         put("functionCall", buildJsonObject {
             put("name", toolName)
-            put("args", inputAsJson())
+            val args = inputAsJson()
+            put("args", args as? JsonObject ?: JsonObject(emptyMap()))
+            metadata?.functionCallId?.takeIf { it.isNotBlank() }?.let { put("id", it) }
         })
-        metadataAs<GoogleThoughtMetadata>()?.thoughtSignature?.let {
+        metadata?.thoughtSignature?.let {
             put("thoughtSignature", it)
         }
     }
 
     private fun UIMessagePart.Tool.toFunctionResponsePart(mediaResolution: String? = null) = buildJsonObject {
+            val metadata = metadataAs<GoogleThoughtMetadata>()
             put("functionResponse", buildJsonObject {
                 put("name", toolName)
+                metadata?.functionCallId?.takeIf { it.isNotBlank() }?.let { put("id", it) }
 
                 // 1. 拆分出纯文本部分
                 val textParts = output.filterIsInstance<UIMessagePart.Text>()
@@ -1507,6 +1534,7 @@ internal fun buildGoogleRequestDiagnostics(
     requestBody: JsonObject,
     referenceImageCount: Int = 0,
     hasCustomBody: Boolean = false,
+    requestId: String? = null,
 ): ProviderRequestDiagnostics {
     val generationConfig = requestBody["generationConfig"] as? JsonObject
     val parameters = linkedMapOf<String, String>()
@@ -1638,6 +1666,7 @@ internal fun buildGoogleRequestDiagnostics(
         channel = providerSetting.requestChannel(),
         operation = operation,
         parameters = parameters,
+        requestId = requestId,
     )
 }
 

@@ -13,6 +13,7 @@ import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.RequestStatDAO
 import me.rerere.rikkahub.data.db.dao.KnowledgeBaseDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
@@ -23,6 +24,7 @@ import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.RequestStatEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity
@@ -48,8 +50,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         KnowledgeDocumentEntity::class,
         KnowledgeChunkEntity::class,
         KnowledgeCitationEntity::class,
+        RequestStatEntity::class,
     ],
-    version = 30,
+    version = 34,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -75,6 +78,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 27, to = 28),
         AutoMigration(from = 28, to = 29),
         AutoMigration(from = 29, to = 30),
+        AutoMigration(from = 30, to = 31),
+        AutoMigration(from = 31, to = 32),
+        AutoMigration(from = 32, to = 33),
+        AutoMigration(from = 33, to = 34),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -94,6 +101,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun workspaceDao(): WorkspaceDAO
 
     abstract fun folderDao(): FolderDAO
+
+    abstract fun requestStatDao(): RequestStatDAO
 
     abstract fun knowledgeBaseDao(): KnowledgeBaseDAO
 }

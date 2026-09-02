@@ -87,6 +87,11 @@ data class OpenRouterReasoningMetadata(
 @Serializable
 data class GoogleThoughtMetadata(
     val thoughtSignature: String? = null,
+    /**
+     * Gemini 3 为 functionCall 返回的服务端调用 ID。旧版 Gemini 可能不返回该字段，
+     * 这种情况下不能把客户端生成的内部 ID 伪装成协议 ID 回传。
+     */
+    val functionCallId: String? = null,
 ) : PartMetadata
 
 /**

@@ -2,6 +2,7 @@ package me.rerere.ai.registry
 
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.normalizeCompactVendorModelId
 
 interface ModelSelector {
     fun match(modelId: String): Boolean
@@ -189,7 +190,7 @@ private const val EXACT_ID_BONUS = 1000
 
 private fun tokenize(modelId: String): List<String> {
     val tokens = mutableListOf<String>()
-    val input = modelId.lowercase()
+    val input = modelId.normalizeCompactVendorModelId().lowercase()
     var index = 0
     while (index < input.length) {
         val ch = input[index]

@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -14,6 +17,15 @@ class WorkspaceToolApprovalTest {
         assertTrue(resolveWorkspaceToolApproval("workspace_write_rootfs", emptyMap()))
         assertTrue(resolveWorkspaceToolApproval("workspace_edit_rootfs", emptyMap()))
         assertTrue(resolveWorkspaceToolApproval("workspace_shell", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_create_directory", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_delete", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_move", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_copy", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_create_local_directory", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_delete_local", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_move_local", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_copy_local", emptyMap()))
+        assertTrue(resolveWorkspaceToolApproval("workspace_local_shell", emptyMap()))
     }
 
     @Test
@@ -34,5 +46,16 @@ class WorkspaceToolApprovalTest {
         assertTrue("/tmp/session.log".isRootfsPath())
         assertTrue("/etc/hosts".isRootfsPath())
         assertTrue("/skills/agent.md".isRootfsPath())
+    }
+
+    @Test
+    fun `local command mode is restricted to a SAF root`() {
+        assertEquals("grant-1", "saf:grant-1".safRootGrantId())
+        assertNull("saf:grant-1/subdir".safRootGrantId())
+        assertNull("/workspace".safRootGrantId())
+        assertEquals("nested/path", normalizeLocalCommandCwd("/nested\\path/"))
+        assertThrows(IllegalArgumentException::class.java) {
+            normalizeLocalCommandCwd("../outside")
+        }
     }
 }

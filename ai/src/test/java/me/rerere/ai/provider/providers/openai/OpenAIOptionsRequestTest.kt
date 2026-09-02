@@ -151,7 +151,7 @@ class OpenAIOptionsRequestTest {
         val reasoning = body["reasoning"]?.jsonObject
         assertFalse(reasoning?.containsKey("context") == true)
         assertFalse(reasoning?.containsKey("mode") == true)
-        assertEquals("high", reasoning?.get("effort")?.jsonPrimitive?.content)
+        assertEquals("max", reasoning?.get("effort")?.jsonPrimitive?.content)
     }
 
     @Test

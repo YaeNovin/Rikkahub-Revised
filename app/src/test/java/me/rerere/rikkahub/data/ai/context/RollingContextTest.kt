@@ -13,6 +13,25 @@ import org.junit.Test
 
 class RollingContextTest {
     @Test
+    fun `automatic compression can be disabled without losing its threshold`() {
+        assertNull(
+            automaticRollingContextThreshold(
+                enabled = false,
+                configuredThresholdTokens = 48_000,
+                modelContextWindowTokens = 128_000,
+            )
+        )
+        assertEquals(
+            48_000,
+            automaticRollingContextThreshold(
+                enabled = true,
+                configuredThresholdTokens = 48_000,
+                modelContextWindowTokens = 128_000,
+            )
+        )
+    }
+
+    @Test
     fun `automatic plan summarizes an old prefix and leaves a recent window`() {
         val messages = messages(count = 8, contentLength = 120)
 

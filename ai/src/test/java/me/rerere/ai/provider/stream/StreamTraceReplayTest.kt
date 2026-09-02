@@ -166,6 +166,13 @@ class StreamTraceReplayTest {
         }
         assertTrue("$path should provide a query for every tool call", queries.all { !it.isNullOrBlank() })
         assertEquals("$path should contain three distinct searches", tools.size, queries.toSet().size)
+        if (path.contains("google")) {
+            assertEquals(
+                "$path should preserve Gemini provider function IDs",
+                setOf("gijqjkbj", "tcfd9yi0", "1yhibm10"),
+                tools.mapNotNull { it.metadataAs<GoogleThoughtMetadata>()?.functionCallId }.toSet(),
+            )
+        }
     }
 
     private fun assertOpenRouterCompletionsTraceSemantics(
@@ -398,7 +405,16 @@ class StreamTraceReplayTest {
                         else -> error("Unsupported trace part: ${part::class.simpleName}")
                     }
                     if (part !is UIMessagePart.ServerTool) {
-                        part.metadata?.let { put("metadata", it) }
+                        part.metadata?.let { metadata ->
+                            // Provider call IDs are asserted above but omitted from the stable
+                            // UI snapshot; they are transport correlation data, not rendering.
+                            val snapshotMetadata = if (part is UIMessagePart.Tool) {
+                                JsonObject(metadata - "functionCallId")
+                            } else {
+                                metadata
+                            }
+                            put("metadata", snapshotMetadata)
+                        }
                     }
                 })
             }

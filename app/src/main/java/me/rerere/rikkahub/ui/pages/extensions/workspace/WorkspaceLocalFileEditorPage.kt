@@ -1,0 +1,193 @@
+package me.rerere.rikkahub.ui.pages.extensions.workspace
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.dokar.sonner.ToastType
+import kotlinx.coroutines.launch
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.service.formatUserFacingError
+import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.workspace.WorkspaceFileRevision
+import org.koin.compose.koinInject
+
+@Composable
+fun WorkspaceLocalFileEditorPage(
+    id: String,
+    grantId: String,
+    path: String,
+) {
+    val context = LocalContext.current
+    val navController = LocalNavController.current
+    val repository = koinInject<WorkspaceRepository>()
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    val fileName = path.substringAfterLast('/').ifBlank { path }
+    val saveSuccessMessage = stringResource(R.string.workspace_file_editor_save_success)
+
+    val textState = rememberTextFieldState()
+    var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var writable by remember { mutableStateOf(false) }
+    var loadedText by remember(id, grantId, path) { mutableStateOf("") }
+    var loadedRevision by remember(id, grantId, path) { mutableStateOf<WorkspaceFileRevision?>(null) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val hasUnsavedChanges = writable && !loading && textState.text.toString() != loadedText
+
+    fun requestBack() {
+        if (hasUnsavedChanges) showDiscardDialog = true else navController.popBackStack()
+    }
+
+    BackHandler(enabled = hasUnsavedChanges) { showDiscardDialog = true }
+
+    LaunchedEffect(id, grantId, path) {
+        loading = true
+        loadError = null
+        runCatching {
+            val grant = repository.getLocalDirectoryGrants(id).firstOrNull { it.id == grantId }
+                ?: error("Local directory authorization is no longer available")
+            writable = grant.canWrite
+            repository.readLocalTextSnapshot(id, grantId, path)
+        }.onSuccess { snapshot ->
+            textState.setTextAndPlaceCursorAtEnd(snapshot.text)
+            loadedText = snapshot.text
+            loadedRevision = snapshot.revision
+            loading = false
+        }.onFailure {
+            loadError = context.formatUserFacingError(it)
+            loading = false
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = fileName,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = { BackButton(onClick = ::requestBack) },
+                actions = {
+                    if (writable && !loading && loadError == null) {
+                        TextButton(
+                            onClick = {
+                                if (saving) return@TextButton
+                                saving = true
+                                scope.launch {
+                                    runCatching {
+                                        repository.writeLocalText(
+                                            id = id,
+                                            grantId = grantId,
+                                            path = path,
+                                            text = textState.text.toString(),
+                                            expectedRevision = loadedRevision,
+                                        )
+                                        repository.readLocalTextSnapshot(id, grantId, path)
+                                    }.onSuccess { snapshot ->
+                                        loadedRevision = snapshot.revision
+                                        loadedText = snapshot.text
+                                        toaster.show(saveSuccessMessage, type = ToastType.Success)
+                                    }.onFailure {
+                                        toaster.show(context.formatUserFacingError(it), type = ToastType.Error)
+                                    }
+                                    saving = false
+                                }
+                            },
+                            enabled = !saving,
+                        ) {
+                            Text(stringResource(R.string.workspace_file_editor_save))
+                        }
+                    }
+                },
+                colors = CustomColors.topBarColors,
+            )
+        },
+        containerColor = CustomColors.topBarColors.containerColor,
+    ) { innerPadding ->
+        when {
+            loading -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+
+            loadError != null -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp),
+            ) {
+                Text(text = loadError.orEmpty(), color = MaterialTheme.colorScheme.error)
+            }
+
+            else -> TextField(
+                state = textState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .imePadding(),
+                readOnly = !writable,
+                lineLimits = TextFieldLineLimits.MultiLine(),
+                textStyle = LocalTextStyle.current.copy(
+                    fontFamily = JetbrainsMono,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                ),
+            )
+        }
+    }
+
+    RikkaConfirmDialog(
+        show = showDiscardDialog,
+        title = stringResource(R.string.workspace_file_editor_discard_title),
+        confirmText = stringResource(R.string.workspace_file_editor_discard),
+        dismissText = stringResource(R.string.common_cancel),
+        onConfirm = {
+            showDiscardDialog = false
+            navController.popBackStack()
+        },
+        onDismiss = { showDiscardDialog = false },
+    ) {
+        Text(stringResource(R.string.workspace_file_editor_discard_desc))
+    }
+}

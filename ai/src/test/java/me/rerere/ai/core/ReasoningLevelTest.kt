@@ -6,6 +6,13 @@ import org.junit.Test
 
 class ReasoningLevelTest {
     @Test
+    fun `minimal has its own serialized effort and budget tier`() {
+        assertEquals(512, ReasoningLevel.MINIMAL.budgetTokens)
+        assertEquals("minimal", ReasoningLevel.MINIMAL.effort)
+        assertEquals(ReasoningLevel.MINIMAL, ReasoningLevel.fromBudgetTokens(512))
+    }
+
+    @Test
     fun `max exposes the highest budget and effort`() {
         assertEquals(32_000, ReasoningLevel.MAX.budgetTokens)
         assertEquals("max", ReasoningLevel.MAX.effort)

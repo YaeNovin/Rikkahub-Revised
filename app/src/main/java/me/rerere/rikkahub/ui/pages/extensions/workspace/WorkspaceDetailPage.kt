@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
+import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
@@ -33,6 +35,9 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -41,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +68,7 @@ import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.FolderAdd
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Refresh01
@@ -70,6 +77,7 @@ import me.rerere.hugeicons.stroke.Share08
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.files.WorkspaceLocalFileEntry
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.formatUserFacingError
@@ -82,11 +90,18 @@ import me.rerere.rikkahub.utils.fileSizeToString
 import me.rerere.rikkahub.utils.plus
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstallStage
+import me.rerere.workspace.WorkspaceAccessPolicy
+import me.rerere.workspace.WorkspaceAuditEntry
 import me.rerere.workspace.WorkspaceFileEntry
+import me.rerere.workspace.WorkspaceIntegrityReport
+import me.rerere.workspace.WorkspaceLocalDirectoryGrant
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
+import me.rerere.workspace.WorkspaceStorageStats
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun WorkspaceDetailPage(id: String) {
@@ -95,9 +110,13 @@ fun WorkspaceDetailPage(id: String) {
     val state by vm.state.collectAsStateWithLifecycle()
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
-    val pagerState = rememberPagerState { 2 }
+    val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val deletedMessage = stringResource(R.string.workspace_detail_deleted)
+    val undoDelete = stringResource(R.string.workspace_detail_undo_delete)
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
+    var revokeLocalTarget by remember { mutableStateOf<WorkspaceLocalDirectoryGrant?>(null) }
     var showInstallDialog by remember { mutableStateOf(false) }
     var previewImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -123,12 +142,51 @@ fun WorkspaceDetailPage(id: String) {
         val outputStream = context.contentResolver.openOutputStream(uri) ?: return@rememberLauncherForActivityResult
         vm.exportFile(entry, outputStream)
     }
+    val localDirectoryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val data = result.data ?: return@rememberLauncherForActivityResult
+        val uri = data.data ?: return@rememberLauncherForActivityResult
+        val flags = data.flags and (
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        vm.addLocalDirectory(uri.toString(), flags)
+    }
+
+    fun launchLocalDirectoryPicker() {
+        localDirectoryPicker.launch(
+            Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            }
+        )
+    }
 
     BackHandler(enabled = pagerState.currentPage == 1 && state.path.isNotBlank()) {
         vm.goUp()
     }
+    BackHandler(enabled = pagerState.currentPage == 2 && state.selectedLocalGrantId != null) {
+        vm.goUpLocalDirectory()
+    }
+
+    LaunchedEffect(vm, snackbarHostState) {
+        vm.deletionEvents.collect { deletedFile ->
+            val result = snackbarHostState.showSnackbar(
+                message = deletedMessage,
+                actionLabel = undoDelete,
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                vm.restoreDeletedFile(deletedFile)
+            }
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -148,10 +206,29 @@ fun WorkspaceDetailPage(id: String) {
                             )
                         }
                     }
-                    IconButton(onClick = { vm.refresh() }) {
+                    if (pagerState.currentPage == 2) {
+                        IconButton(onClick = ::launchLocalDirectoryPicker) {
+                            Icon(
+                                HugeIcons.FolderAdd,
+                                contentDescription = stringResource(R.string.workspace_local_add_directory),
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            if (pagerState.currentPage == 2) {
+                                if (state.selectedLocalGrantId == null) vm.refreshLocalDirectories()
+                                else vm.refreshLocalFiles()
+                            } else {
+                                vm.refresh()
+                            }
+                        }
+                    ) {
                         Icon(HugeIcons.Refresh01, contentDescription = null)
                     }
-                    if (state.workspace?.shellStatus != WorkspaceShellStatus.DISABLED.name) {
+                    if (state.workspace?.shellStatus != WorkspaceShellStatus.DISABLED.name &&
+                        state.accessPolicy.effectiveShellEnabled
+                    ) {
                         IconButton(onClick = { navController.navigate(Screen.WorkspaceTerminal(id)) }) {
                             Icon(HugeIcons.ComputerTerminal01, contentDescription = null)
                         }
@@ -174,6 +251,12 @@ fun WorkspaceDetailPage(id: String) {
                     icon = { Icon(HugeIcons.File02, contentDescription = null) },
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 )
+                NavigationBarItem(
+                    selected = pagerState.currentPage == 2,
+                    label = { Text(stringResource(R.string.workspace_detail_tab_local_files)) },
+                    icon = { Icon(HugeIcons.Folder01, contentDescription = null) },
+                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
+                )
             }
         },
         containerColor = CustomColors.topBarColors.containerColor,
@@ -187,9 +270,15 @@ fun WorkspaceDetailPage(id: String) {
             when (page) {
                 0 -> WorkspaceBasicPage(
                     workspace = state.workspace,
+                    storageStats = state.stats,
+                    accessPolicy = state.accessPolicy,
+                    audit = state.audit,
+                    integrity = state.integrity,
                     installProgress = installProgress,
                     onInstallRootfs = { showInstallDialog = true },
                     onToolApprovalChange = vm::setToolApproval,
+                    onAccessPolicyChange = vm::setAccessPolicy,
+                    onRepairWorkspace = vm::repairWorkspace,
                 )
 
                 1 -> WorkspaceFilesPage(
@@ -252,6 +341,42 @@ fun WorkspaceDetailPage(id: String) {
                             context.startActivity(Intent.createChooser(intent, null))
                         }
                     },
+                    onLoadMore = vm::loadMore,
+                )
+
+                2 -> WorkspaceLocalFilesPage(
+                    state = state,
+                    onAddDirectory = ::launchLocalDirectoryPicker,
+                    onSelectDirectory = vm::selectLocalDirectory,
+                    onRevokeDirectory = { grant -> revokeLocalTarget = grant },
+                    onGoUp = vm::goUpLocalDirectory,
+                    onOpen = { entry ->
+                        when {
+                            entry.isDirectory -> vm.openLocalDirectory(entry)
+
+                            else -> when (entry.detectFileType()) {
+                                WorkspaceFileType.TEXT -> navController.navigate(
+                                    Screen.WorkspaceLocalFileEditor(id, entry.grantId, entry.path)
+                                )
+
+                                WorkspaceFileType.IMAGE -> vm.exportLocalToCacheFile(
+                                    entry,
+                                    context.cacheDir,
+                                ) { file -> previewImageUri = file.absolutePath }
+
+                                WorkspaceFileType.OTHER -> {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(Uri.parse(entry.uri), entry.mimeType)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    runCatching {
+                                        context.startActivity(Intent.createChooser(intent, null))
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onLoadMore = vm::loadMoreLocalFiles,
                 )
             }
         }
@@ -262,8 +387,8 @@ fun WorkspaceDetailPage(id: String) {
             InstallRootfsDialog(
                 workspace = workspace,
                 onDismiss = { showInstallDialog = false },
-                onConfirm = { url ->
-                    vm.installRootfs(url)
+                onConfirm = { url, sha256 ->
+                    vm.installRootfs(url, sha256)
                     showInstallDialog = false
                 },
             )
@@ -305,14 +430,36 @@ fun WorkspaceDetailPage(id: String) {
             Text(stringResource(R.string.workspace_detail_will_delete, entry.path))
         }
     }
+
+    revokeLocalTarget?.let { grant ->
+        RikkaConfirmDialog(
+            show = true,
+            title = stringResource(R.string.workspace_local_revoke_title),
+            confirmText = stringResource(R.string.workspace_local_revoke),
+            dismissText = stringResource(R.string.common_cancel),
+            onConfirm = {
+                vm.removeLocalDirectory(grant.id)
+                revokeLocalTarget = null
+            },
+            onDismiss = { revokeLocalTarget = null },
+        ) {
+            Text(stringResource(R.string.workspace_local_revoke_desc, grant.displayName))
+        }
+    }
 }
 
 @Composable
 private fun WorkspaceBasicPage(
     workspace: WorkspaceEntity?,
+    storageStats: WorkspaceStorageStats?,
+    accessPolicy: WorkspaceAccessPolicy,
+    audit: List<WorkspaceAuditEntry>,
+    integrity: WorkspaceIntegrityReport?,
     installProgress: RootfsInstallProgress?,
     onInstallRootfs: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
+    onAccessPolicyChange: (WorkspaceAccessPolicy) -> Unit,
+    onRepairWorkspace: () -> Unit,
 ) {
     val shellStatus = workspace?.shellStatus
     val installing = installProgress != null || shellStatus == WorkspaceShellStatus.INSTALLING.name
@@ -328,6 +475,23 @@ private fun WorkspaceBasicPage(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item {
+            WorkspaceSecurityPolicyCard(
+                policy = accessPolicy,
+                onPolicyChange = onAccessPolicyChange,
+            )
+        }
+
+        item {
+            WorkspaceIntegrityCard(integrity, onRepairWorkspace)
+        }
+
+        if (audit.isNotEmpty()) {
+            item {
+                WorkspaceAuditCard(audit)
+            }
+        }
+
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -345,6 +509,41 @@ private fun WorkspaceBasicPage(
                     )
                     WorkspaceInfoRow(stringResource(R.string.workspace_detail_name), workspace?.name ?: stringResource(R.string.workspace_detail_loading))
                     WorkspaceInfoRow(stringResource(R.string.workspace_detail_shell_status), workspace?.shellStatus?.toShellStatusLabel() ?: "-")
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CustomColors.cardColorsOnSurfaceContainer,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.workspace_detail_storage),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    WorkspaceInfoRow(
+                        stringResource(R.string.workspace_detail_files_size),
+                        storageStats?.filesBytes?.fileSizeToString() ?: "-",
+                    )
+                    WorkspaceInfoRow(
+                        stringResource(R.string.workspace_detail_rootfs_size),
+                        storageStats?.rootfsBytes?.fileSizeToString() ?: "-",
+                    )
+                    WorkspaceInfoRow(
+                        stringResource(R.string.workspace_detail_trash_size),
+                        storageStats?.trashBytes?.fileSizeToString() ?: "-",
+                    )
+                    WorkspaceInfoRow(
+                        stringResource(R.string.workspace_detail_file_count),
+                        storageStats?.fileCount?.toString() ?: "-",
+                    )
                 }
             }
         }
@@ -394,6 +593,172 @@ private fun WorkspaceBasicPage(
                 workspace = workspace,
                 onToolApprovalChange = onToolApprovalChange,
             )
+        }
+    }
+}
+
+private enum class WorkspacePolicyPreset {
+    READ_ONLY,
+    SAFE_WRITE,
+    FULL_ACCESS,
+}
+
+@Composable
+private fun WorkspaceSecurityPolicyCard(
+    policy: WorkspaceAccessPolicy,
+    onPolicyChange: (WorkspaceAccessPolicy) -> Unit,
+) {
+    val preset = when {
+        policy.readOnly -> WorkspacePolicyPreset.READ_ONLY
+        !policy.effectiveShellEnabled && policy.allowedWriteRoots == listOf("/workspace") ->
+            WorkspacePolicyPreset.SAFE_WRITE
+        else -> WorkspacePolicyPreset.FULL_ACCESS
+    }
+    val options = listOf(
+        WorkspacePolicyPreset.READ_ONLY to stringResource(R.string.workspace_policy_read_only),
+        WorkspacePolicyPreset.SAFE_WRITE to stringResource(R.string.workspace_policy_safe_write),
+        WorkspacePolicyPreset.FULL_ACCESS to stringResource(R.string.workspace_policy_full_access),
+    )
+    val description = when (preset) {
+        WorkspacePolicyPreset.READ_ONLY -> stringResource(R.string.workspace_policy_read_only_desc)
+        WorkspacePolicyPreset.SAFE_WRITE -> stringResource(R.string.workspace_policy_safe_write_desc)
+        WorkspacePolicyPreset.FULL_ACCESS -> stringResource(R.string.workspace_policy_full_access_desc)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.workspace_policy_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, (option, label) ->
+                    SegmentedButton(
+                        selected = preset == option,
+                        onClick = {
+                            onPolicyChange(
+                                when (option) {
+                                    WorkspacePolicyPreset.READ_ONLY -> WorkspaceAccessPolicy(
+                                        readOnly = true,
+                                        shellEnabled = false,
+                                        allowedWriteRoots = listOf("/workspace"),
+                                    )
+                                    WorkspacePolicyPreset.SAFE_WRITE -> WorkspaceAccessPolicy(
+                                        readOnly = false,
+                                        shellEnabled = false,
+                                        allowedWriteRoots = listOf("/workspace"),
+                                    )
+                                    WorkspacePolicyPreset.FULL_ACCESS -> WorkspaceAccessPolicy()
+                                }
+                            )
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                    ) {
+                        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (preset == WorkspacePolicyPreset.FULL_ACCESS) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceIntegrityCard(
+    report: WorkspaceIntegrityReport?,
+    onRepair: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.workspace_integrity_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (report == null) {
+                Text(stringResource(R.string.workspace_detail_loading))
+            } else if (report.healthy) {
+                Text(
+                    text = stringResource(R.string.workspace_integrity_healthy),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                report.issues.forEach { issue ->
+                    Text(
+                        text = issue,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Button(onClick = onRepair) {
+                    Text(stringResource(R.string.workspace_integrity_repair))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceAuditCard(entries: List<WorkspaceAuditEntry>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.workspace_audit_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            entries.forEach { entry ->
+                val time = remember(entry.timestamp) {
+                    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
+                        .format(Date(entry.timestamp))
+                }
+                Text(
+                    text = buildString {
+                        append(time)
+                        append(" · ")
+                        append(entry.action)
+                        if (entry.target.isNotBlank()) append(" · ${entry.target}")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (entry.success) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -469,6 +834,19 @@ private fun workspaceToolApprovalItems() = listOf(
     "workspace_write_rootfs" to stringResource(R.string.workspace_detail_tool_write_rootfs),
     "workspace_edit_rootfs" to stringResource(R.string.workspace_detail_tool_edit_rootfs),
     "workspace_shell" to stringResource(R.string.workspace_detail_tool_shell),
+    "workspace_local_shell" to stringResource(R.string.workspace_detail_tool_local_shell),
+    "workspace_create_directory" to stringResource(R.string.workspace_detail_tool_create_directory),
+    "workspace_delete" to stringResource(R.string.workspace_detail_tool_delete),
+    "workspace_move" to stringResource(R.string.workspace_detail_tool_move),
+    "workspace_copy" to stringResource(R.string.workspace_detail_tool_copy),
+    "workspace_list_local_files" to stringResource(R.string.workspace_detail_tool_list_local_files),
+    "workspace_read_local_file" to stringResource(R.string.workspace_detail_tool_read_local_file),
+    "workspace_write_local_file" to stringResource(R.string.workspace_detail_tool_write_local_file),
+    "workspace_edit_local_file" to stringResource(R.string.workspace_detail_tool_edit_local_file),
+    "workspace_create_local_directory" to stringResource(R.string.workspace_detail_tool_create_local_directory),
+    "workspace_delete_local" to stringResource(R.string.workspace_detail_tool_delete_local),
+    "workspace_move_local" to stringResource(R.string.workspace_detail_tool_move_local),
+    "workspace_copy_local" to stringResource(R.string.workspace_detail_tool_copy_local),
 )
 
 @Composable
@@ -542,9 +920,12 @@ private fun RootfsProgress(progress: RootfsInstallProgress) {
 private fun InstallRootfsDialog(
     workspace: WorkspaceEntity,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, String?) -> Unit,
 ) {
     var url by rememberSaveable(workspace.id) { mutableStateOf(DEFAULT_ROOTFS_URL) }
+    var sha256 by rememberSaveable(workspace.id) { mutableStateOf("") }
+    val normalizedSha256 = sha256.trim().lowercase()
+    val sha256Valid = normalizedSha256.isEmpty() || normalizedSha256.matches(Regex("[0-9a-f]{64}"))
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -563,12 +944,23 @@ private fun InstallRootfsDialog(
                     label = { Text(stringResource(R.string.workspace_detail_download_url)) },
                     maxLines = 5,
                 )
+                OutlinedTextField(
+                    value = sha256,
+                    onValueChange = { sha256 = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.workspace_detail_sha256)) },
+                    supportingText = {
+                        Text(stringResource(R.string.workspace_detail_sha256_desc))
+                    },
+                    isError = !sha256Valid,
+                    singleLine = true,
+                )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(url.trim()) },
-                enabled = url.isNotBlank(),
+                onClick = { onConfirm(url.trim(), normalizedSha256.ifBlank { null }) },
+                enabled = url.isNotBlank() && sha256Valid,
             ) {
                 Text(stringResource(R.string.common_install))
             }
@@ -591,6 +983,7 @@ private fun WorkspaceFilesPage(
     onDelete: (WorkspaceFileEntry) -> Unit,
     onExport: (WorkspaceFileEntry) -> Unit,
     onShare: (WorkspaceFileEntry) -> Unit,
+    onLoadMore: () -> Unit,
 ) {
     val context = LocalContext.current
     LazyColumn(
@@ -633,6 +1026,283 @@ private fun WorkspaceFilesPage(
                 onExport = { onExport(entry) },
                 onShare = { onShare(entry) },
             )
+        }
+        if (state.nextOffset != null) {
+            item(key = "load-more") {
+                TextButton(
+                    onClick = onLoadMore,
+                    enabled = !state.loadingMore,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (state.loadingMore) {
+                            stringResource(R.string.workspace_detail_loading)
+                        } else {
+                            stringResource(R.string.workspace_detail_load_more)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceLocalFilesPage(
+    state: WorkspaceDetailState,
+    onAddDirectory: () -> Unit,
+    onSelectDirectory: (String) -> Unit,
+    onRevokeDirectory: (WorkspaceLocalDirectoryGrant) -> Unit,
+    onGoUp: () -> Unit,
+    onOpen: (WorkspaceLocalFileEntry) -> Unit,
+    onLoadMore: () -> Unit,
+) {
+    val context = LocalContext.current
+    val selectedGrant = state.localDirectories.firstOrNull { it.id == state.selectedLocalGrantId }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (selectedGrant == null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CustomColors.cardColorsOnSurfaceContainer,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.workspace_local_title),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = stringResource(R.string.workspace_local_description),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(onClick = onAddDirectory) {
+                            Icon(HugeIcons.FolderAdd, contentDescription = null)
+                            Text(
+                                text = stringResource(R.string.workspace_local_add_directory),
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            state.localError?.let { error ->
+                item { ErrorCard(context.formatUserFacingError(error)) }
+            }
+            if (state.localLoading) {
+                item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+            }
+            if (!state.localLoading && state.localDirectories.isEmpty() && state.localError == null) {
+                item {
+                    Text(
+                        text = stringResource(R.string.workspace_local_empty),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            items(state.localDirectories, key = { it.id }) { grant ->
+                WorkspaceLocalDirectoryCard(
+                    grant = grant,
+                    onOpen = { onSelectDirectory(grant.id) },
+                    onRevoke = { onRevokeDirectory(grant) },
+                )
+            }
+        } else {
+            item {
+                WorkspacePathBar(
+                    path = buildString {
+                        append(selectedGrant.displayName)
+                        if (state.localPath.isNotBlank()) append("/${state.localPath}")
+                    },
+                    canGoUp = true,
+                    onGoUp = onGoUp,
+                )
+            }
+            item {
+                Text(
+                    text = if (selectedGrant.canWrite) {
+                        stringResource(R.string.workspace_local_access_read_write)
+                    } else {
+                        stringResource(R.string.workspace_local_access_read_only)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.localError?.let { error ->
+                item { ErrorCard(context.formatUserFacingError(error)) }
+            }
+            if (state.localLoading) {
+                item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+            }
+            if (!state.localLoading && state.localEntries.isEmpty() && state.localError == null) {
+                item { EmptyDirectoryState() }
+            }
+            items(state.localEntries, key = { "${it.grantId}:${it.path}" }) { entry ->
+                WorkspaceLocalFileCard(entry = entry, onOpen = { onOpen(entry) })
+            }
+            if (state.localNextOffset != null) {
+                item(key = "local-load-more") {
+                    TextButton(
+                        onClick = onLoadMore,
+                        enabled = !state.localLoadingMore,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (state.localLoadingMore) {
+                                stringResource(R.string.workspace_detail_loading)
+                            } else {
+                                stringResource(R.string.workspace_detail_load_more)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceLocalDirectoryCard(
+    grant: WorkspaceLocalDirectoryGrant,
+    onOpen: () -> Unit,
+    onRevoke: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Folder01,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = grant.displayName,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (grant.canWrite) {
+                        stringResource(R.string.workspace_local_access_read_write)
+                    } else {
+                        stringResource(R.string.workspace_local_access_read_only)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(HugeIcons.MoreVertical, contentDescription = null)
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = stringResource(R.string.workspace_local_revoke),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = HugeIcons.Delete01,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onRevoke()
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceLocalFileCard(
+    entry: WorkspaceLocalFileEntry,
+    onOpen: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (entry.isDirectory) HugeIcons.Folder01 else HugeIcons.File02,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = if (entry.isDirectory) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = entry.name,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (entry.isDirectory) entry.path else "${entry.path} · ${entry.sizeBytes.fileSizeToString()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

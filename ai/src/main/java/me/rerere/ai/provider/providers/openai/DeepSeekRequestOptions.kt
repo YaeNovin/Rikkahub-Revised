@@ -8,12 +8,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.provider.DeepSeekResponseFormat
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.parameterModelId
 
 internal fun JsonObjectBuilder.applyDeepSeekChatOptions(
     params: TextGenerationParams,
     hasFunctionTools: Boolean,
 ) {
-    if (!resolveDeepSeekModelParameterSupport(params.model.modelId).available) return
+    if (!resolveDeepSeekModelParameterSupport(params.model.parameterModelId()).available) return
     val options = params.deepSeekOptions
 
     if (hasFunctionTools) {
@@ -35,7 +36,7 @@ internal fun JsonObjectBuilder.applyDeepSeekResponseOptions(
     params: TextGenerationParams,
     hasAnyTools: Boolean,
 ) {
-    if (!resolveDeepSeekModelParameterSupport(params.model.modelId).available) return
+    if (!resolveDeepSeekModelParameterSupport(params.model.parameterModelId()).available) return
     val options = params.deepSeekOptions
 
     if (hasAnyTools) {
@@ -49,11 +50,11 @@ internal fun JsonObjectBuilder.applyDeepSeekResponseOptions(
 }
 
 internal fun TextGenerationParams.usesDeepSeekThinkingMode(): Boolean =
-    resolveDeepSeekModelParameterSupport(model.modelId).available && reasoningLevel.isEnabled
+    resolveDeepSeekModelParameterSupport(model.parameterModelId()).available && reasoningLevel.isEnabled
 
 internal fun TextGenerationParams.deepSeekImageDetail(): String? =
     deepSeekOptions.imageDetail.apiValue
-        ?.takeIf { resolveDeepSeekModelParameterSupport(model.modelId).supportsVision }
+        ?.takeIf { resolveDeepSeekModelParameterSupport(model.parameterModelId()).supportsVision }
 
 private fun buildDeepSeekResponseFormat(format: DeepSeekResponseFormat): JsonObject? =
     format.apiValue?.let { type -> buildJsonObject { put("type", type) } }

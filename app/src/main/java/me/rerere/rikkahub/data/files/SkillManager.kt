@@ -22,15 +22,11 @@ class SkillManager(
     }
 
     fun listSkills(): List<SkillMetadata> {
-        val skillsDir = getSkillsDir()
-        return skillsDir.listFiles()
-            ?.filter { it.isDirectory }
-            ?.mapNotNull { dir ->
-                val skillFile = dir.resolve("SKILL.md")
-                if (!skillFile.exists()) return@mapNotNull null
-                parseSkillFile(skillFile, dir)
-            }
-            ?: emptyList()
+        return scanSkills().skills
+    }
+
+    fun scanSkills(): SkillScanResult {
+        return scanSkillDirectory(getSkillsDir())
     }
 
     fun readSkillBody(skillName: String): String? {
@@ -215,3 +211,67 @@ data class SkillMetadata(
 ) {
     val skillFile: File get() = skillDir.resolve("SKILL.md")
 }
+
+data class SkillScanResult(
+    val skills: List<SkillMetadata> = emptyList(),
+    val problems: List<SkillScanProblem> = emptyList(),
+)
+
+data class SkillScanProblem(
+    val directoryName: String,
+    val kind: SkillScanProblemKind,
+)
+
+enum class SkillScanProblemKind {
+    MISSING_MANIFEST,
+    UNREADABLE_MANIFEST,
+    MISSING_NAME,
+    MISSING_DESCRIPTION,
+}
+
+internal fun scanSkillDirectory(skillsDir: File): SkillScanResult {
+    val candidates = skillsDir.listFiles()
+        ?.filter { it.isDirectory && !it.name.matches(SKILL_TEMP_DIRECTORY_REGEX) }
+        .orEmpty()
+    val skills = mutableListOf<SkillMetadata>()
+    val problems = mutableListOf<SkillScanProblem>()
+
+    candidates.forEach { dir ->
+        val skillFile = dir.resolve("SKILL.md")
+        if (!skillFile.isFile) {
+            problems += SkillScanProblem(dir.name, SkillScanProblemKind.MISSING_MANIFEST)
+            return@forEach
+        }
+        val content = runCatching { skillFile.readText() }.getOrElse {
+            problems += SkillScanProblem(dir.name, SkillScanProblemKind.UNREADABLE_MANIFEST)
+            return@forEach
+        }
+        val frontmatter = SkillFrontmatterParser.parse(content)
+        val name = frontmatter["name"]?.trim().orEmpty()
+        val description = frontmatter["description"]?.trim().orEmpty()
+        if (name.isBlank()) {
+            problems += SkillScanProblem(dir.name, SkillScanProblemKind.MISSING_NAME)
+            return@forEach
+        }
+        if (description.isBlank()) {
+            problems += SkillScanProblem(dir.name, SkillScanProblemKind.MISSING_DESCRIPTION)
+            return@forEach
+        }
+        skills += SkillMetadata(
+            name = name,
+            description = description,
+            compatibility = frontmatter["compatibility"],
+            allowedTools = frontmatter["allowed-tools"]
+                ?.split(" ")
+                ?.filter { it.isNotBlank() }
+                .orEmpty(),
+            skillDir = dir,
+        )
+    }
+
+    return SkillScanResult(skills = skills, problems = problems)
+}
+
+private val SKILL_TEMP_DIRECTORY_REGEX = Regex(
+    pattern = "^\\..+\\.(staging|backup)\\.\\d+\\.tmp$"
+)

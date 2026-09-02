@@ -51,6 +51,7 @@ private fun buildDeepSeekAnthropicToolChoice(choice: DeepSeekToolChoice): JsonOb
 private fun deepSeekAnthropicReasoningEffort(level: ReasoningLevel): String? = when (level) {
     ReasoningLevel.OFF,
     ReasoningLevel.AUTO -> null
+    ReasoningLevel.MINIMAL,
     ReasoningLevel.LOW -> "low"
     ReasoningLevel.MEDIUM,
     ReasoningLevel.HIGH,

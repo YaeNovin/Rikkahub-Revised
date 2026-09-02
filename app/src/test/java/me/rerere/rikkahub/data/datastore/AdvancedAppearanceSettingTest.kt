@@ -290,6 +290,34 @@ class AdvancedAppearanceSettingTest {
     }
 
     @Test
+    fun `unified chat input adjustments remain active without a background`() {
+        val settings = Settings(
+            displaySetting = DisplaySetting(
+                enableBlurEffect = false,
+                inputBlurRadius = 18f,
+                inputSurfaceOpacity = 0.42f,
+            ),
+        )
+
+        assertFalse(settings.hasActiveChatBackground())
+        assertEquals(18f, settings.chatInputContainerBlurRadius())
+        assertEquals(0.42f, settings.chatInputContainerOpacity())
+    }
+
+    @Test
+    fun `unified chat input adjustments clamp invalid persisted values`() {
+        val settings = Settings(
+            displaySetting = DisplaySetting(
+                inputBlurRadius = -4f,
+                inputSurfaceOpacity = 4f,
+            ),
+        )
+
+        assertEquals(0f, settings.chatInputContainerBlurRadius())
+        assertEquals(1f, settings.chatInputContainerOpacity())
+    }
+
+    @Test
     fun `sidebar input and dock glass switches are independent`() {
         val assistant = Assistant(background = "file:///backgrounds/assistant.jpg")
         val base = Settings(

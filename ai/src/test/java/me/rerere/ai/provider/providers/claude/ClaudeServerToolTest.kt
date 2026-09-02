@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
@@ -397,6 +398,97 @@ class ClaudeServerToolTest {
             listOf("text", "server_tool_use", "web_search_tool_result", "text"),
             replayedContent?.map { it.jsonObject["type"]?.jsonPrimitive?.content },
         )
+    }
+
+    @Test
+    fun `streaming client tool keeps provider id and input`() {
+        val decoder = ClaudeStreamDecoder()
+        val events = listOf(
+            sse("message_start", buildJsonObject {
+                put("type", "message_start")
+                put("message", buildJsonObject {
+                    put("id", "msg_tool")
+                    put("model", "claude-test")
+                })
+            }),
+            sse("content_block_start", buildJsonObject {
+                put("type", "content_block_start")
+                put("index", 0)
+                put("content_block", buildJsonObject {
+                    put("type", "tool_use")
+                    put("id", "toolu_provider_1")
+                    put("name", "workspace_shell")
+                    put("input", buildJsonObject {})
+                })
+            }),
+            sse("content_block_delta", buildJsonObject {
+                put("type", "content_block_delta")
+                put("index", 0)
+                put("delta", buildJsonObject {
+                    put("type", "input_json_delta")
+                    put("partial_json", "{\"command\":\"pwd\"}")
+                })
+            }),
+            sse("content_block_stop", buildJsonObject {
+                put("type", "content_block_stop")
+                put("index", 0)
+            }),
+            sse("message_delta", buildJsonObject {
+                put("type", "message_delta")
+                put("delta", buildJsonObject { put("stop_reason", "tool_use") })
+            }),
+            sse("message_stop", buildJsonObject { put("type", "message_stop") }),
+        )
+
+        val chunks = events.flatMap { decoder.accept(it).chunks }
+        val handler = StreamChunkHandler(Model(modelId = "claude-test"))
+        val message = chunks.fold(listOf(UIMessage.user("run"))) { acc, chunk ->
+            handler.handle(acc, chunk)
+        }.last()
+        val tool = message.parts.filterIsInstance<UIMessagePart.Tool>().single()
+
+        assertEquals("toolu_provider_1", tool.toolCallId)
+        assertEquals("workspace_shell", tool.toolName)
+        assertEquals("{\"command\":\"pwd\"}", tool.input)
+    }
+
+    @Test
+    fun `streaming decoder tolerates delta before start and missing SSE event field`() {
+        val decoder = ClaudeStreamDecoder()
+        val events = listOf(
+            SseEvent(data = "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_delta\",\"model\":\"claude-test\"}}"),
+            SseEvent(data = "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\\\"pwd\\\"}\"}}"),
+            SseEvent(data = "{\"type\":\"content_block_stop\",\"index\":0}"),
+            SseEvent(data = "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}"),
+            SseEvent(data = "{\"type\":\"message_stop\"}"),
+        )
+
+        val chunks = events.flatMap { decoder.accept(it).chunks }
+        val handler = StreamChunkHandler(Model(modelId = "claude-test"))
+        val message = chunks.fold(listOf(UIMessage.user("run"))) { acc, chunk ->
+            handler.handle(acc, chunk)
+        }.last()
+        val tool = message.parts.filterIsInstance<UIMessagePart.Tool>().single()
+
+        assertEquals("msg_delta:block-0", tool.toolCallId)
+        assertEquals("{\"command\":\"pwd\"}", tool.input)
+        assertTrue(chunks.any { it is StreamChunk.ToolCallStart })
+        assertTrue(chunks.any { it is StreamChunk.ToolCallEnd })
+    }
+
+    @Test
+    fun `non streaming tool input preserves non object JSON for validation`() {
+        val message = provider.parseMessage(buildJsonArray {
+            add(buildJsonObject {
+                put("type", "tool_use")
+                put("id", "toolu_invalid")
+                put("name", "workspace_shell")
+                put("input", buildJsonArray { add(JsonPrimitive("pwd")) })
+            })
+        })
+
+        val tool = message.parts.filterIsInstance<UIMessagePart.Tool>().single()
+        assertEquals("[\"pwd\"]", tool.input)
     }
 
     private fun buildRequest(

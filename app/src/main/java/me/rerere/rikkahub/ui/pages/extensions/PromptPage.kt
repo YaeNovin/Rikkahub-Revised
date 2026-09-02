@@ -90,8 +90,10 @@ import me.rerere.rikkahub.data.export.LorebookSerializer
 import me.rerere.rikkahub.data.export.ModeInjectionSerializer
 import me.rerere.rikkahub.data.export.rememberExporter
 import me.rerere.rikkahub.data.export.rememberImporter
+import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
+import me.rerere.rikkahub.data.model.LorebookOverflowStrategy
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ExportDialog
@@ -110,6 +112,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @Composable
 fun PromptPage(vm: PromptVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val entertainmentMode = settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -155,11 +158,13 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
             when (page) {
                 0 -> ModeInjectionTab(
                     modeInjections = settings.modeInjections,
+                    entertainmentMode = entertainmentMode,
                     onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
                 )
 
                 1 -> LorebookTab(
                     lorebooks = settings.lorebooks,
+                    entertainmentMode = entertainmentMode,
                     onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
                 )
             }
@@ -170,6 +175,7 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
 @Composable
 private fun ModeInjectionTab(
     modeInjections: List<PromptInjection.ModeInjection>,
+    entertainmentMode: Boolean,
     onUpdate: (List<PromptInjection.ModeInjection>) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
@@ -295,6 +301,7 @@ private fun ModeInjectionTab(
         editState.currentState?.let { state ->
             ModeInjectionEditSheet(
                 injection = state,
+                entertainmentMode = entertainmentMode,
                 onDismiss = { editState.dismiss() },
                 onConfirm = { editState.confirm() },
                 onEdit = { editState.currentState = it }
@@ -363,8 +370,9 @@ private fun ModeInjectionCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Tag(type = TagType.INFO) {
                             Text(getPositionLabel(injection.position))
@@ -400,6 +408,7 @@ private fun ModeInjectionCard(
 @Composable
 private fun ModeInjectionEditSheet(
     injection: PromptInjection.ModeInjection,
+    entertainmentMode: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onEdit: (PromptInjection.ModeInjection) -> Unit
@@ -447,6 +456,17 @@ private fun ModeInjectionEditSheet(
                     label = { Text(stringResource(R.string.prompt_page_name)) },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                if (entertainmentMode) {
+                    OutlinedTextField(
+                        value = injection.exclusiveGroup,
+                        onValueChange = { onEdit(injection.copy(exclusiveGroup = it)) },
+                        label = { Text(stringResource(R.string.prompt_page_exclusive_group)) },
+                        supportingText = { Text(stringResource(R.string.prompt_page_exclusive_group_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
 
                 FormItem(
                     label = { Text(stringResource(R.string.prompt_page_enabled)) },
@@ -586,6 +606,7 @@ private fun getRoleLabel(role: MessageRole): String = when (role) {
 @Composable
 private fun LorebookTab(
     lorebooks: List<Lorebook>,
+    entertainmentMode: Boolean,
     onUpdate: (List<Lorebook>) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
@@ -711,6 +732,7 @@ private fun LorebookTab(
         editState.currentState?.let { state ->
             LorebookEditSheet(
                 book = state,
+                entertainmentMode = entertainmentMode,
                 onDismiss = { editState.dismiss() },
                 onConfirm = { editState.confirm() },
                 onEdit = { editState.currentState = it }
@@ -804,6 +826,11 @@ private fun LorebookCard(
                                 Text(stringResource(R.string.prompt_page_disabled))
                             }
                         }
+                        if (book.tokenBudget > 0) {
+                            Tag(type = TagType.DEFAULT) {
+                                Text("${book.tokenBudget} Token")
+                            }
+                        }
                     }
                 }
                 IconButton(onClick = { showExportDialog = true }) {
@@ -827,6 +854,7 @@ private fun LorebookCard(
 @Composable
 private fun LorebookEditSheet(
     book: Lorebook,
+    entertainmentMode: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onEdit: (Lorebook) -> Unit
@@ -890,6 +918,31 @@ private fun LorebookEditSheet(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                if (entertainmentMode) {
+                    OutlinedTextField(
+                        value = book.tokenBudget.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.let { onEdit(book.copy(tokenBudget = it.coerceAtLeast(0))) }
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_token_budget)) },
+                        supportingText = { Text(stringResource(R.string.prompt_page_token_budget_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                    )
+                    Text(
+                        stringResource(R.string.prompt_page_overflow_strategy),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Select(
+                        options = LorebookOverflowStrategy.entries,
+                        selectedOption = book.overflowStrategy,
+                        onOptionSelected = { onEdit(book.copy(overflowStrategy = it)) },
+                        optionToString = { getOverflowStrategyLabel(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
                 FormItem(
                     label = { Text(stringResource(R.string.prompt_page_enabled)) },
                     tail = {
@@ -946,6 +999,7 @@ private fun LorebookEditSheet(
         entryEditState.currentState?.let { state ->
             RegexInjectionEditDialog(
                 entry = state,
+                entertainmentMode = entertainmentMode,
                 onDismiss = { entryEditState.dismiss() },
                 onConfirm = { entryEditState.confirm() },
                 onEdit = { entryEditState.currentState = it }
@@ -985,12 +1039,23 @@ private fun RegexInjectionEntryCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (!entry.enabled) {
                         Tag(type = TagType.WARNING) {
                             Text(stringResource(R.string.prompt_page_disabled))
+                        }
+                    }
+                    if (entry.triggerProbability < 100) {
+                        Tag(type = TagType.INFO) {
+                            Text("${entry.triggerProbability}%")
+                        }
+                    }
+                    if (entry.stickyTurns > 1) {
+                        Tag(type = TagType.DEFAULT) {
+                            Text(stringResource(R.string.prompt_page_sticky_turns_value, entry.stickyTurns))
                         }
                     }
                 }
@@ -1009,6 +1074,7 @@ private fun RegexInjectionEntryCard(
 @Composable
 private fun RegexInjectionEditDialog(
     entry: PromptInjection.RegexInjection,
+    entertainmentMode: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onEdit: (PromptInjection.RegexInjection) -> Unit
@@ -1122,6 +1188,70 @@ private fun RegexInjectionEditDialog(
                     }
                 }
 
+                if (entertainmentMode) {
+                    OutlinedTextField(
+                        value = entry.keywordExpression,
+                        onValueChange = { onEdit(entry.copy(keywordExpression = it)) },
+                        label = { Text(stringResource(R.string.prompt_page_keyword_expression)) },
+                        supportingText = { Text(stringResource(R.string.prompt_page_keyword_expression_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                    OutlinedTextField(
+                        value = entry.settingKeys.joinToString(", "),
+                        onValueChange = { value ->
+                            onEdit(
+                                entry.copy(
+                                    settingKeys = value.split(',', '，')
+                                        .map(String::trim)
+                                        .filter(String::isNotEmpty)
+                                        .distinctBy(String::lowercase)
+                                )
+                            )
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_setting_keys)) },
+                        supportingText = { Text(stringResource(R.string.prompt_page_setting_keys_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = entry.triggerProbability.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.let {
+                                onEdit(entry.copy(triggerProbability = it.coerceIn(0, 100)))
+                            }
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_trigger_probability)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = entry.stickyTurns.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.let {
+                                onEdit(entry.copy(stickyTurns = it.coerceAtLeast(1)))
+                            }
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_sticky_turns)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = entry.cooldownTurns.toString(),
+                        onValueChange = { value ->
+                            value.toIntOrNull()?.let {
+                                onEdit(entry.copy(cooldownTurns = it.coerceAtLeast(0)))
+                            }
+                        },
+                        label = { Text(stringResource(R.string.prompt_page_cooldown_turns)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                    )
+                }
+
                 FormItem(
                     label = { Text(stringResource(R.string.prompt_page_use_regex)) },
                     tail = {
@@ -1188,7 +1318,9 @@ private fun RegexInjectionEditDialog(
             }
         },
         confirmButton = {
-            val canSave = entry.keywords.isNotEmpty() || entry.constantActive
+            val canSave = entry.keywords.isNotEmpty() ||
+                (entertainmentMode && entry.keywordExpression.isNotBlank()) ||
+                entry.constantActive
             TextButton(
                 onClick = onConfirm,
                 enabled = canSave
@@ -1202,4 +1334,14 @@ private fun RegexInjectionEditDialog(
             }
         }
     )
+}
+
+@Composable
+private fun getOverflowStrategyLabel(strategy: LorebookOverflowStrategy): String = when (strategy) {
+    LorebookOverflowStrategy.DROP_LOW_PRIORITY ->
+        stringResource(R.string.prompt_page_overflow_drop_low_priority)
+    LorebookOverflowStrategy.TRUNCATE_LAST ->
+        stringResource(R.string.prompt_page_overflow_truncate_last)
+    LorebookOverflowStrategy.SKIP_BOOK ->
+        stringResource(R.string.prompt_page_overflow_skip_book)
 }

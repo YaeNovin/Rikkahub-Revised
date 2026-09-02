@@ -147,6 +147,38 @@ val DEFAULT_PROVIDERS = listOf(
         )
     ),
     ProviderSetting.OpenAI(
+        id = Uuid.parse("9c68d0bb-48c4-4e0a-8e2d-7a7e8d9f3f17"),
+        name = "OrcaRouter",
+        baseUrl = "https://api.orcarouter.ai/v1",
+        apiKey = "",
+        enabled = false,
+        builtIn = true,
+        description = {
+            Text(
+                text = buildAnnotatedString {
+                    append(stringResource(R.string.orca_router_provider_description))
+                    appendLine()
+                    append(stringResource(R.string.orca_router_provider_website_label))
+                    withLink(LinkAnnotation.Url("https://www.orcarouter.ai")) {
+                        withStyle(SpanStyle(MaterialTheme.colorScheme.primary)) {
+                            append("https://www.orcarouter.ai")
+                        }
+                    }
+                    appendLine()
+                    append(stringResource(R.string.orca_router_provider_docs_label))
+                    withLink(LinkAnnotation.Url("https://docs.orcarouter.ai")) {
+                        withStyle(SpanStyle(MaterialTheme.colorScheme.primary)) {
+                            append("https://docs.orcarouter.ai")
+                        }
+                    }
+                }
+            )
+        },
+        shortDescription = {
+            Text(stringResource(R.string.orca_router_provider_short_description))
+        },
+    ),
+    ProviderSetting.OpenAI(
         id = Uuid.parse("386e0f29-8228-4512-affe-8fd8add82d88"),
         name = "Vercel AI Gateway",
         baseUrl = "https://ai-gateway.vercel.sh/v1",

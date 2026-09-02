@@ -22,4 +22,19 @@ class MermaidTest {
 
         assertTrue(normalized.startsWith("requirementDiagram"))
     }
+
+    @Test
+    fun `generated page uses a mobile viewport and bounded svg`() {
+        val html = buildMermaidHtml(
+            code = "flowchart LR; A --> B",
+            colorScheme = androidx.compose.material3.lightColorScheme(),
+        )
+
+        assertTrue(html.contains("width=device-width"))
+        assertTrue(html.contains("max-width: 100%"))
+        assertTrue(html.contains("pinch-zoom"))
+        assertTrue(html.contains("background: transparent"))
+        assertTrue(html.contains("preserveAspectRatio"))
+        assertTrue(html.contains("removeAttribute('width')"))
+    }
 }

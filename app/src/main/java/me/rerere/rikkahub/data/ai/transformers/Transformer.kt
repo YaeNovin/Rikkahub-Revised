@@ -6,6 +6,9 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.LorebookEntryRuntimeState
+import me.rerere.rikkahub.data.model.PromptInjectionEvaluation
+import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
 import kotlin.uuid.Uuid
 
 class TransformerContext(
@@ -15,8 +18,13 @@ class TransformerContext(
     val settings: Settings,
     val conversationModeInjectionIds: Set<Uuid> = emptySet(),
     val conversationLorebookIds: Set<Uuid> = emptySet(),
+    val temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
+    val lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
+    val conversationUserTurn: Int? = null,
+    val onPromptInjectionEvaluation: ((PromptInjectionEvaluation) -> Unit)? = null,
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     val workspaceCwd: String? = null,
+    val workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
 )
 
 interface MessageTransformer {
@@ -69,8 +77,13 @@ suspend fun List<UIMessage>.transforms(
     settings: Settings,
     conversationModeInjectionIds: Set<Uuid> = emptySet(),
     conversationLorebookIds: Set<Uuid> = emptySet(),
+    temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
+    lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
+    conversationUserTurn: Int? = null,
+    onPromptInjectionEvaluation: ((PromptInjectionEvaluation) -> Unit)? = null,
     processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     workspaceCwd: String? = null,
+    workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
 ): List<UIMessage> {
     val ctx = TransformerContext(
         context = context,
@@ -79,8 +92,13 @@ suspend fun List<UIMessage>.transforms(
         settings = settings,
         conversationModeInjectionIds = conversationModeInjectionIds,
         conversationLorebookIds = conversationLorebookIds,
+        temporaryModeInjections = temporaryModeInjections,
+        lorebookRuntimeStates = lorebookRuntimeStates,
+        conversationUserTurn = conversationUserTurn,
+        onPromptInjectionEvaluation = onPromptInjectionEvaluation,
         processingStatus = processingStatus,
         workspaceCwd = workspaceCwd,
+        workspaceFileOperationMode = workspaceFileOperationMode,
     )
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc)

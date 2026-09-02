@@ -86,6 +86,7 @@ object MemoryToolUI : ToolUIRenderer {
     private const val ACTION_CREATE = "create"
     private const val ACTION_EDIT = "edit"
     private const val ACTION_DELETE = "delete"
+    private const val ACTION_LIST = "list"
 
     override val toolName: String = "memory_tool"
 
@@ -102,18 +103,41 @@ object MemoryToolUI : ToolUIRenderer {
         ACTION_CREATE -> stringResource(R.string.chat_message_tool_create_memory)
         ACTION_EDIT -> stringResource(R.string.chat_message_tool_edit_memory)
         ACTION_DELETE -> stringResource(R.string.chat_message_tool_delete_memory)
+        ACTION_LIST -> stringResource(R.string.chat_message_tool_list_memory)
         else -> stringResource(R.string.chat_message_tool_call_generic, toolName)
     }
 
-    override fun hasSummary(context: ToolUIContext): Boolean =
-        action(context) in listOf(ACTION_CREATE, ACTION_EDIT) &&
-            context.content.getStringContent("content") != null
+    override fun hasSummary(context: ToolUIContext): Boolean {
+        val result = parseMemoryToolResult(context.content)
+        return when (action(context)) {
+            ACTION_CREATE, ACTION_EDIT -> result.content != null
+            ACTION_LIST -> result.total != null
+            else -> false
+        }
+    }
 
     @Composable
     override fun Summary(context: ToolUIContext) {
-        context.content.getStringContent("content")?.let { memoryContent ->
+        val result = parseMemoryToolResult(context.content)
+        if (action(context) == ACTION_LIST) {
             Text(
-                text = memoryContent,
+                text = stringResource(R.string.chat_message_tool_memory_list_summary, result.total ?: 0),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.shimmer(isLoading = context.loading),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            return
+        }
+        result.content?.let { memoryContent ->
+            val typeLabel = when (result.type) {
+                "fact" -> stringResource(R.string.assistant_page_memory_filter_fact)
+                "episodic" -> stringResource(R.string.assistant_page_memory_filter_episodic)
+                else -> null
+            }
+            Text(
+                text = listOfNotNull(typeLabel, memoryContent).joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.shimmer(isLoading = context.loading),
@@ -127,7 +151,7 @@ object MemoryToolUI : ToolUIRenderer {
     override fun Preview(context: ToolUIContext, onDismissRequest: () -> Unit) {
         val memoryRepo: MemoryRepository = koinInject()
         val scope = rememberCoroutineScope()
-        val memoryId = (context.content as? JsonObject)?.get("id")?.jsonPrimitiveOrNull?.intOrNull
+        val memoryId = parseMemoryToolResult(context.content).id
         DefaultToolPreview(
             context = context,
             headerActions = if (action(context) in listOf(ACTION_CREATE, ACTION_EDIT) && memoryId != null) {
@@ -151,6 +175,24 @@ object MemoryToolUI : ToolUIRenderer {
             },
         )
     }
+}
+
+internal data class MemoryToolResult(
+    val id: Int?,
+    val content: String?,
+    val type: String?,
+    val total: Int?,
+)
+
+internal fun parseMemoryToolResult(content: JsonElement?): MemoryToolResult {
+    val root = content?.jsonObjectOrNull
+    val memory = root?.get("memory")?.jsonObjectOrNull ?: root
+    return MemoryToolResult(
+        id = memory?.get("id")?.jsonPrimitiveOrNull?.intOrNull,
+        content = memory?.get("content")?.jsonPrimitiveOrNull?.contentOrNull,
+        type = memory?.get("type")?.jsonPrimitiveOrNull?.contentOrNull,
+        total = root?.get("total")?.jsonPrimitiveOrNull?.intOrNull,
+    )
 }
 
 /**

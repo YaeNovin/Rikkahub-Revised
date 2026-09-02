@@ -24,6 +24,9 @@ interface WorkspaceDAO {
     @Query("UPDATE workspaces SET shell_status = :shellStatus, updated_at = :updatedAt WHERE id = :id")
     suspend fun updateShellStatus(id: String, shellStatus: String, updatedAt: Long): Int
 
+    @Query("UPDATE workspaces SET last_access_at = :accessedAt WHERE id = :id")
+    suspend fun updateLastAccess(id: String, accessedAt: Long): Int
+
     @Query("DELETE FROM workspaces WHERE id = :id")
     suspend fun deleteById(id: String): Int
 }

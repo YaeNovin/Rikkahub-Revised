@@ -78,6 +78,7 @@ internal fun JsonObject.claudeRequestDiagnostics(
     providerSetting: ProviderSetting.Claude,
     operation: ProviderRequestOperation,
     hasCustomBody: Boolean = false,
+    requestId: String? = null,
 ): ProviderRequestDiagnostics {
     val thinking = this["thinking"] as? JsonObject
     val toolChoice = this["tool_choice"] as? JsonObject
@@ -158,6 +159,7 @@ internal fun JsonObject.claudeRequestDiagnostics(
         channel = providerSetting.requestChannel(),
         operation = operation,
         parameters = parameters,
+        requestId = requestId,
     )
 }
 

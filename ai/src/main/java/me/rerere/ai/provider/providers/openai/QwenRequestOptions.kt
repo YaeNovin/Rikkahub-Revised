@@ -10,6 +10,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.QwenResponseFormat
 import me.rerere.ai.provider.QwenToolChoice
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.util.json
 
 internal fun JsonObjectBuilder.applyQwenChatOptions(
@@ -18,7 +19,7 @@ internal fun JsonObjectBuilder.applyQwenChatOptions(
     stream: Boolean,
     hasImageInput: Boolean,
 ) {
-    val support = resolveQwenModelParameterSupport(params.model.modelId)
+    val support = resolveQwenModelParameterSupport(params.model.parameterModelId())
     if (!support.available) return
     val options = params.qwenOptions
 
@@ -54,7 +55,7 @@ internal fun JsonObjectBuilder.applyQwenChatOptions(
 }
 
 internal fun TextGenerationParams.usesQwenStructuredOutput(): Boolean {
-    val support = resolveQwenModelParameterSupport(model.modelId)
+    val support = resolveQwenModelParameterSupport(model.parameterModelId())
     return support.available && when (qwenOptions.responseFormat) {
         QwenResponseFormat.JSON_OBJECT -> true
         QwenResponseFormat.JSON_SCHEMA -> support.supportsJsonSchema &&
@@ -68,7 +69,7 @@ internal fun JsonObjectBuilder.applyQwenResponseOptions(
     params: TextGenerationParams,
     toolCount: Int,
 ) {
-    if (!resolveQwenModelParameterSupport(params.model.modelId).available || toolCount == 0) return
+    if (!resolveQwenModelParameterSupport(params.model.parameterModelId()).available || toolCount == 0) return
     val toolChoice = params.qwenOptions.toolChoice
     if (toolChoice == QwenToolChoice.REQUIRED && toolCount != 1) return
     toolChoice.apiValue?.let { put("tool_choice", it) }

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.GrokResponseFormat
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.util.json
 
 internal fun JsonObjectBuilder.applyGrokChatOptions(
@@ -19,7 +20,7 @@ internal fun JsonObjectBuilder.applyGrokChatOptions(
     val support = resolveGrokModelParameterSupport(params.model.modelId)
     if (!support.available) return
     val options = params.grokOptions
-    val isReasoningModel = support.reasoningModel || ModelAbility.REASONING in params.model.abilities
+    val isReasoningModel = support.reasoningModel || params.model.supportsReasoningCapability()
 
     options.serviceTier.apiValue?.let { put("service_tier", it) }
     if (hasFunctionTools) {

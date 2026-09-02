@@ -47,9 +47,10 @@ import me.rerere.ai.provider.GeminiMediaResolution
 import me.rerere.ai.provider.GeminiResponseMimeType
 import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.GeminiSafetyThreshold
-import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderSetting
-import me.rerere.ai.provider.providers.google.requestChannel
+import me.rerere.ai.provider.resolveParameterFamily
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -78,14 +79,21 @@ fun AssistantGeminiPage(id: String) {
     val providers by vm.providers.collectAsStateWithLifecycle()
     val model = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val provider = model?.findProvider(providers)
-    val isGemini3 = model != null && ModelRegistry.GEMINI_3_SERIES.match(model.modelId)
-    val isGemini37Flash = model != null && ModelRegistry.GEMINI_3_7_FLASH.match(model.modelId)
-    val enabled = isGemini3 && provider is ProviderSetting.Google
-    val requestChannel = (provider as? ProviderSetting.Google)?.requestChannel()
+    val parameterModelId = model?.parameterModelId().orEmpty()
+    val isGemini3 = model != null && ModelRegistry.GEMINI_3_SERIES.match(parameterModelId)
+    val isGemini37Flash = model != null && ModelRegistry.GEMINI_3_7_FLASH.match(parameterModelId)
+    val googleProvider = provider as? ProviderSetting.Google
+    val openAIProvider = provider as? ProviderSetting.OpenAI
+    val openAIChatCompatible = openAIProvider != null && !openAIProvider.useResponseApi
+    val isGeminiFamily = model?.resolveParameterFamily(provider) == ModelParameterFamily.GEMINI
+    val enabled = isGeminiFamily && (googleProvider != null || openAIChatCompatible)
+    val nativeProtocol = googleProvider != null
+    val route = provider?.parameterRequestRoute()
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_gemini_unavailable_no_model)
-        !isGemini3 -> stringResource(R.string.assistant_gemini_unavailable_model)
-        provider !is ProviderSetting.Google -> stringResource(R.string.assistant_gemini_unavailable_protocol)
+        !isGeminiFamily -> stringResource(R.string.assistant_gemini_unavailable_model)
+        openAIProvider?.useResponseApi == true -> stringResource(R.string.assistant_compatible_requires_chat_completions)
+        googleProvider == null && openAIProvider == null -> stringResource(R.string.assistant_gemini_unavailable_protocol)
         else -> null
     }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -106,8 +114,10 @@ fun AssistantGeminiPage(id: String) {
             innerPadding = innerPadding,
             assistant = assistant,
             enabled = enabled,
+            nativeProtocol = nativeProtocol,
+            supportsMediaResolution = nativeProtocol && isGemini3,
             isGemini37Flash = isGemini37Flash,
-            requestChannel = requestChannel,
+            route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
         )
@@ -119,8 +129,10 @@ internal fun AssistantGeminiContent(
     innerPadding: PaddingValues,
     assistant: Assistant,
     enabled: Boolean,
+    nativeProtocol: Boolean,
+    supportsMediaResolution: Boolean,
     isGemini37Flash: Boolean,
-    requestChannel: ProviderRequestChannel?,
+    route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
 ) {
@@ -135,6 +147,7 @@ internal fun AssistantGeminiContent(
         GeminiOptionsDialog(
             type = type,
             initial = options,
+            nativeProtocol = nativeProtocol,
             onDismiss = { activeDialog = null },
             onConfirm = { value ->
                 onUpdate(assistant.copy(geminiOptions = value))
@@ -158,16 +171,12 @@ internal fun AssistantGeminiContent(
                 label = { Text(stringResource(R.string.assistant_gemini_experimental_title)) },
                 description = {
                     Text(unavailableMessage ?: stringResource(R.string.assistant_gemini_available_desc))
-                    requestChannel?.let { channel ->
-                        Text(
-                            stringResource(
-                                R.string.assistant_gemini_current_channel,
-                                channel.displayName(),
-                            )
-                        )
-                    }
+                    route?.DisplayText()
                     Text(stringResource(R.string.assistant_gemini_apply_and_log_desc))
-                    Text(stringResource(R.string.assistant_gemini_experimental_desc))
+                    ParameterWarningText(stringResource(R.string.assistant_gemini_experimental_desc))
+                    if (enabled && !nativeProtocol) {
+                        ParameterWarningText(stringResource(R.string.assistant_gemini_openai_mapping_desc))
+                    }
                     if (isGemini37Flash) {
                         Text(stringResource(R.string.assistant_gemini_37_thinking_desc))
                     }
@@ -185,7 +194,7 @@ internal fun AssistantGeminiContent(
                     description = stringResource(R.string.assistant_gemini_include_thoughts_desc),
                     warning = stringResource(R.string.assistant_gemini_include_thoughts_warning),
                     checked = options.includeThoughts,
-                    enabled = enabled,
+                    enabled = enabled && nativeProtocol,
                     onCheckedChange = { value -> update { it.copy(includeThoughts = value) } },
                 )
                 HorizontalDivider()
@@ -204,7 +213,7 @@ internal fun AssistantGeminiContent(
                     title = stringResource(R.string.assistant_gemini_media_resolution),
                     description = stringResource(R.string.assistant_gemini_media_resolution_desc),
                     value = options.mediaResolution.displayName(),
-                    enabled = enabled,
+                    enabled = enabled && supportsMediaResolution,
                     onClick = { activeDialog = GeminiDialogType.MEDIA_RESOLUTION },
                 )
                 HorizontalDivider()
@@ -261,7 +270,7 @@ internal fun AssistantGeminiContent(
                     } else {
                         stringResource(R.string.assistant_gemini_safety_summary, configuredSafety)
                     },
-                    enabled = enabled,
+                    enabled = enabled && nativeProtocol,
                     onClick = { activeDialog = GeminiDialogType.SAFETY },
                 )
             }
@@ -283,7 +292,7 @@ private fun GeminiSwitchItem(
         label = { Text(title) },
         description = {
             Text(description)
-            WarningText(warning)
+            ParameterWarningText(warning)
         },
         tail = {
             Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
@@ -325,10 +334,22 @@ private fun GeminiDialogItem(
 private fun GeminiOptionsDialog(
     type: GeminiDialogType,
     initial: GeminiGenerationOptions,
+    nativeProtocol: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (GeminiGenerationOptions) -> Unit,
 ) {
-    var draft by remember(type, initial) { mutableStateOf(initial) }
+    var draft by remember(type, initial, nativeProtocol) {
+        mutableStateOf(
+            if (!nativeProtocol && initial.responseMimeType == GeminiResponseMimeType.ENUM) {
+                initial.copy(
+                    responseMimeType = GeminiResponseMimeType.AUTO,
+                    responseJsonSchema = "",
+                )
+            } else {
+                initial
+            }
+        )
+    }
     var presencePenaltyValid by remember(type, initial) {
         mutableStateOf(initial.presencePenalty.isValidPenalty())
     }
@@ -363,7 +384,7 @@ private fun GeminiOptionsDialog(
                 when (type) {
                     GeminiDialogType.MEDIA_RESOLUTION -> {
                         Text(stringResource(R.string.assistant_gemini_media_resolution_detail))
-                        WarningText(stringResource(R.string.assistant_gemini_media_resolution_warning))
+                        ParameterWarningText(stringResource(R.string.assistant_gemini_media_resolution_warning))
                         GeminiSelectItem(
                             title = stringResource(R.string.assistant_gemini_media_resolution),
                             description = stringResource(R.string.assistant_gemini_media_resolution_choices),
@@ -377,7 +398,7 @@ private fun GeminiOptionsDialog(
 
                     GeminiDialogType.STOP_SEQUENCES -> {
                         Text(stringResource(R.string.assistant_gemini_stop_sequences_detail))
-                        WarningText(stringResource(R.string.assistant_gemini_stop_sequences_warning))
+                        ParameterWarningText(stringResource(R.string.assistant_gemini_stop_sequences_warning))
                         StopSequencesItem(
                             value = draft.stopSequences,
                             enabled = true,
@@ -387,11 +408,13 @@ private fun GeminiOptionsDialog(
 
                     GeminiDialogType.RESPONSE_FORMAT -> {
                         Text(stringResource(R.string.assistant_gemini_response_format_detail))
-                        WarningText(stringResource(R.string.assistant_gemini_response_format_warning))
+                        ParameterWarningText(stringResource(R.string.assistant_gemini_response_format_warning))
                         GeminiSelectItem(
                             title = stringResource(R.string.assistant_gemini_response_format),
                             description = stringResource(R.string.assistant_gemini_response_format_choices),
-                            options = GeminiResponseMimeType.entries,
+                            options = GeminiResponseMimeType.entries.filter {
+                                nativeProtocol || it != GeminiResponseMimeType.ENUM
+                            },
                             selected = draft.responseMimeType,
                             enabled = true,
                             label = { it.displayName() },
@@ -421,7 +444,7 @@ private fun GeminiOptionsDialog(
 
                     GeminiDialogType.REPETITION_PENALTIES -> {
                         Text(stringResource(R.string.assistant_gemini_penalties_detail))
-                        WarningText(stringResource(R.string.assistant_gemini_penalties_warning))
+                        ParameterWarningText(stringResource(R.string.assistant_gemini_penalties_warning))
                         OptionalFloatItem(
                             title = stringResource(R.string.assistant_gemini_presence_penalty),
                             description = stringResource(R.string.assistant_gemini_presence_penalty_desc),
@@ -443,7 +466,7 @@ private fun GeminiOptionsDialog(
 
                     GeminiDialogType.SAFETY -> {
                         Text(stringResource(R.string.assistant_gemini_safety_detail))
-                        WarningText(stringResource(R.string.assistant_gemini_safety_warning))
+                        ParameterWarningText(stringResource(R.string.assistant_gemini_safety_warning))
                         SafetySettingItems(
                             settings = draft.safetySettings,
                             enabled = true,
@@ -507,7 +530,7 @@ private fun OptionalIntItem(
         label = { Text(title) },
         description = {
             Text(description)
-            WarningText(warning)
+            ParameterWarningText(warning)
         },
         tail = {
             Switch(
@@ -701,15 +724,6 @@ private data class SafetyItem(
 )
 
 @Composable
-private fun WarningText(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.error,
-    )
-}
-
-@Composable
 private fun GeminiMediaResolution.displayName(): String = stringResource(
     when (this) {
         GeminiMediaResolution.AUTO -> R.string.assistant_gemini_option_auto
@@ -739,18 +753,6 @@ private fun GeminiSafetyThreshold.displayName(): String = stringResource(
         GeminiSafetyThreshold.BLOCK_ONLY_HIGH -> R.string.assistant_gemini_safety_block_high
         GeminiSafetyThreshold.BLOCK_MEDIUM_AND_ABOVE -> R.string.assistant_gemini_safety_block_medium
         GeminiSafetyThreshold.BLOCK_LOW_AND_ABOVE -> R.string.assistant_gemini_safety_block_low
-    }
-)
-
-@Composable
-private fun ProviderRequestChannel.displayName(): String = stringResource(
-    when (this) {
-        ProviderRequestChannel.ANTHROPIC_API -> R.string.log_page_channel_anthropic_api
-        ProviderRequestChannel.OPENAI_API -> R.string.log_page_channel_openai_api
-        ProviderRequestChannel.XAI_API -> R.string.log_page_channel_xai_api
-        ProviderRequestChannel.GOOGLE_AI_STUDIO -> R.string.log_page_channel_google_ai_studio
-        ProviderRequestChannel.VERTEX_AI -> R.string.log_page_channel_vertex_ai
-        ProviderRequestChannel.COMPATIBLE_ENDPOINT -> R.string.log_page_channel_compatible
     }
 )
 

@@ -5,15 +5,34 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -41,6 +61,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -67,12 +88,15 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
+import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
@@ -82,6 +106,11 @@ import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.ActiveMode
+import me.rerere.rikkahub.data.model.LorebookEntryStatus
+import me.rerere.rikkahub.data.model.InjectionPosition
+import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
+import me.rerere.rikkahub.data.model.resolveActiveModes
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatInput
@@ -95,6 +124,7 @@ import me.rerere.rikkahub.ui.components.ai.calculateChatContextUsage
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
+import me.rerere.rikkahub.ui.components.ai.LOCAL_WORKSPACE_CWD_PREFIX
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
@@ -119,9 +149,28 @@ import org.koin.core.parameter.parametersOf
 import java.io.File
 import kotlin.uuid.Uuid
 
+private enum class ConversationContentStage {
+    LOADING,
+    READY,
+    FAILED,
+}
+
+private data class ConversationContentKey(
+    val conversationId: Uuid,
+    val stage: ConversationContentStage,
+)
+
+private fun ConversationLoadState.contentStage(): ConversationContentStage = when (this) {
+    ConversationLoadState.Loading -> ConversationContentStage.LOADING
+    ConversationLoadState.Ready -> ConversationContentStage.READY
+    is ConversationLoadState.Failed -> ConversationContentStage.FAILED
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val vm: ChatVM = koinViewModel(
+        key = "chat:$id",
         parameters = {
             parametersOf(id.toString())
         }
@@ -134,6 +183,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
+    val conversationLoadState by vm.conversationLoadState.collectAsStateWithLifecycle()
+    val branchSourceAvailable by vm.branchSourceAvailable.collectAsStateWithLifecycle()
+    val promptInjectionDiagnostics by vm.promptInjectionDiagnostics.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
@@ -202,9 +254,19 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val chatListState = rememberLazyListState()
-    LaunchedEffect(nodeId, conversation.messageNodes.size) {
-        if (!vm.chatListInitialized && conversation.messageNodes.isNotEmpty()) {
+    val chatListState = key(id) {
+        rememberLazyListState(
+            cacheWindow = LazyLayoutCacheWindow(
+                aheadFraction = 0.5f,
+                behindFraction = 1f,
+            ),
+        )
+    }
+    LaunchedEffect(id, nodeId, conversationLoadState, conversation.messageNodes.size) {
+        if (conversationLoadState == ConversationLoadState.Ready &&
+            !vm.chatListInitialized &&
+            conversation.messageNodes.isNotEmpty()
+        ) {
             if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
@@ -260,6 +322,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     inputState = inputState,
                     loadingJob = loadingJob,
                     processingStatus = processingStatus,
+                    conversationLoadState = conversationLoadState,
+                    promptInjectionDiagnostics = promptInjectionDiagnostics,
                     setting = setting,
                     conversation = conversation,
                     drawerState = drawerState,
@@ -272,6 +336,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     currentChatModel = currentChatModel,
                     bigScreen = true,
                     errors = errors,
+                    branchSourceAvailable = branchSourceAvailable,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
                 )
@@ -317,6 +382,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     inputState = inputState,
                     loadingJob = loadingJob,
                     processingStatus = processingStatus,
+                    conversationLoadState = conversationLoadState,
+                    promptInjectionDiagnostics = promptInjectionDiagnostics,
                     setting = setting,
                     conversation = conversation,
                     drawerState = drawerState,
@@ -329,6 +396,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     currentChatModel = currentChatModel,
                     bigScreen = false,
                     errors = errors,
+                    branchSourceAvailable = branchSourceAvailable,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
                     )
@@ -348,6 +416,8 @@ private fun ChatPageContent(
     inputState: ChatInputState,
     loadingJob: Job?,
     processingStatus: String? = null,
+    conversationLoadState: ConversationLoadState,
+    promptInjectionDiagnostics: PromptInjectionDiagnostics? = null,
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
@@ -360,35 +430,52 @@ private fun ChatPageContent(
     enableWebSearch: Boolean,
     currentChatModel: Model?,
     errors: List<ChatError>,
+    branchSourceAvailable: Boolean?,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val selectModelRequired = stringResource(R.string.chat_page_select_model_required)
+    val createForkFailed = stringResource(R.string.create_fork_failed)
     val workspaceRepository: WorkspaceRepository = koinInject()
-    var previewMode by rememberSaveable { mutableStateOf(false) }
+    var previewMode by rememberSaveable(conversation.id) { mutableStateOf(false) }
     val assistant = setting.getCurrentAssistant()
+    val contextCapacityTokens = currentChatModel?.contextWindowTokens?.takeIf { it > 0 }
     val contextUsage by produceState(
-        initialValue = calculateChatContextUsage(
-            messages = conversation.currentMessages,
-            rollingContextSummary = conversation.rollingContextSummary,
-            capacityTokens = currentChatModel?.contextWindowTokens,
+        initialValue = ChatContextUsage(
+            usedTokens = 0,
+            capacityTokens = contextCapacityTokens,
+            isEstimated = true,
         ),
+        conversation.id,
         conversation.currentMessages,
         conversation.rollingContextSummary,
-        currentChatModel?.contextWindowTokens,
+        contextCapacityTokens,
     ) {
         val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(
             conversation.currentMessages,
         )
-        value = calculateChatContextUsage(
-            messages = contextMessages,
-            rollingContextSummary = conversation.rollingContextSummary,
-            capacityTokens = currentChatModel?.contextWindowTokens,
-        )
+        value = withContext(Dispatchers.Default) {
+            calculateChatContextUsage(
+                messages = contextMessages,
+                rollingContextSummary = conversation.rollingContextSummary,
+                capacityTokens = contextCapacityTokens,
+            )
+        }
     }
-    var showFilesSheet by remember { mutableStateOf(false) }
+    var showFilesSheet by remember(conversation.id) { mutableStateOf(false) }
+    var showPromptDiagnostics by remember(conversation.id) { mutableStateOf(false) }
+    var forkingMessageId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
+    val activeModes = if (setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT) {
+        resolveActiveModes(
+            modeInjections = setting.modeInjections,
+            assistantModeIds = assistant.modeInjectionIds,
+            conversationModeIds = conversation.modeInjectionIds,
+            temporaryModes = conversation.temporaryModeInjections,
+            currentUserTurn = conversation.currentMessages.count { it.role == me.rerere.ai.core.MessageRole.USER },
+        )
+    } else emptyList()
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         assistant.workspaceId?.let { workspaceId ->
@@ -396,7 +483,10 @@ private fun ChatPageContent(
                 WorkspaceCompletionProvider(
                     workspaceId = workspaceId.toString(),
                     repository = workspaceRepository,
-                    currentCwd = conversation.workspaceCwd,
+                    // SAF trees are content URIs, not Rootfs paths; local completion is provided
+                    // by the SAF tools and must not make the workspace index query an invalid path.
+                    currentCwd = conversation.workspaceCwd
+                        ?.takeUnless { it.startsWith(LOCAL_WORKSPACE_CWD_PREFIX) },
                 )
             )
         }.orEmpty()
@@ -425,26 +515,49 @@ private fun ChatPageContent(
             )
             Scaffold(
             topBar = {
-                TopBar(
-                    settings = setting,
-                    conversation = conversation,
-                    hazeState = chatChromeHazeState,
-                    bigScreen = bigScreen,
-                    drawerState = drawerState,
-                    previewMode = previewMode,
-                    onNewChat = {
-                        navigateToChatPage(navController)
-                    },
-                    onClickMenu = {
-                        previewMode = !previewMode
-                    },
-                    onUpdateTitle = {
-                        vm.updateTitle(it)
+                Column {
+                    TopBar(
+                        settings = setting,
+                        conversation = conversation,
+                        titleEditable = conversationLoadState == ConversationLoadState.Ready,
+                        hazeState = chatChromeHazeState,
+                        bigScreen = bigScreen,
+                        drawerState = drawerState,
+                        previewMode = previewMode,
+                        onNewChat = {
+                            navigateToChatPage(navController)
+                        },
+                        onClickMenu = {
+                            previewMode = !previewMode
+                        },
+                        onUpdateTitle = {
+                            vm.updateTitle(it)
+                        }
+                    )
+                    conversation.sourceConversationId?.let { sourceConversationId ->
+                        BranchSourceBar(
+                            sourceTitle = conversation.sourceConversationTitle
+                                ?.takeIf { it.isNotBlank() }
+                                ?: stringResource(R.string.chat_page_new_chat),
+                            sourceAvailable = branchSourceAvailable,
+                            settings = setting,
+                            onOpenSource = {
+                                navigateToChatPage(navController, chatId = sourceConversationId)
+                            },
+                        )
                     }
-                )
+                    if (setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT &&
+                        activeModes.isNotEmpty()
+                    ) {
+                        ActiveModesBar(
+                            activeModes = activeModes,
+                        )
+                    }
+                }
             },
             bottomBar = {
-                ChatInput(
+                if (conversationLoadState == ConversationLoadState.Ready) {
+                    ChatInput(
                     state = inputState,
                     loading = loadingJob != null,
                     settings = setting,
@@ -542,11 +655,26 @@ private fun ChatPageContent(
                     onMoreClick = {
                         showFilesSheet = true
                     },
-                )
+                    )
+                }
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
-            ChatList(
+            AnimatedContent(
+                targetState = ConversationContentKey(
+                    conversationId = conversation.id,
+                    stage = conversationLoadState.contentStage(),
+                ),
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 40)) togetherWith
+                        fadeOut(animationSpec = tween(durationMillis = 120))
+                },
+                contentKey = { it },
+                label = "ConversationContentTransition",
+                modifier = Modifier.fillMaxSize(),
+            ) { contentKey ->
+                if (contentKey.stage == ConversationContentStage.READY) {
+                    ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
                 state = chatListState,
@@ -561,16 +689,32 @@ private fun ChatPageContent(
                 onRegenerate = {
                     vm.regenerateAtMessage(it)
                 },
+                onContinue = {
+                    vm.continueAtMessage(it)
+                },
                 onEdit = {
                     inputState.editingMessage = it.id
                     inputState.setContents(it.parts)
                 },
                 onForkMessage = {
-                    scope.launch {
-                        val fork = vm.forkMessage(message = it)
-                        navigateToChatPage(navController, chatId = fork.id)
+                    if (forkingMessageId == null && loadingJob == null) {
+                        forkingMessageId = it.id
+                        scope.launch {
+                            try {
+                                val fork = vm.forkMessage(message = it)
+                                forkingMessageId = null
+                                navigateToChatPage(navController, chatId = fork.id)
+                            } catch (_: Exception) {
+                                forkingMessageId = null
+                                toaster.show(
+                                    createForkFailed,
+                                    type = ToastType.Error,
+                                )
+                            }
+                        }
                     }
                 },
+                forkingMessageId = forkingMessageId,
                 onDelete = {
                     if (loadingJob != null) {
                         vm.showDeleteBlockedWhileGeneratingError()
@@ -620,7 +764,17 @@ private fun ChatPageContent(
                     vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))
                     vm.saveConversationAsync()
                 },
-            )
+                    )
+                } else {
+                    ConversationLoadContent(
+                        state = conversationLoadState,
+                        onRetry = vm::retryConversationLoad,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
+            }
         }
 
             if (showFilesSheet) {
@@ -631,11 +785,182 @@ private fun ChatPageContent(
                     assistant = assistant,
                     vm = vm,
                     contextUsage = contextUsage,
+                    promptInjectionDiagnostics = promptInjectionDiagnostics,
+                    onShowPromptDiagnostics = {
+                        showFilesSheet = false
+                        showPromptDiagnostics = true
+                    },
                     onDismiss = { showFilesSheet = false },
+                )
+            }
+            if (showPromptDiagnostics) {
+                PromptInjectionDiagnosticsDialog(
+                    diagnostics = promptInjectionDiagnostics,
+                    onDismiss = { showPromptDiagnostics = false },
                 )
             }
         }
     }
+}
+
+@Composable
+private fun ConversationLoadContent(
+    state: ConversationLoadState,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (state == ConversationLoadState.Ready) return
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (state) {
+                ConversationLoadState.Loading -> {
+                    CircularProgressIndicator()
+                    Text(
+                        text = stringResource(R.string.chat_page_loading_conversation),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                is ConversationLoadState.Failed -> {
+                    Text(
+                        text = stringResource(R.string.chat_page_load_conversation_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onRetry) {
+                        Text(stringResource(R.string.chat_page_retry_load_conversation))
+                    }
+                }
+
+                ConversationLoadState.Ready -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveModesBar(
+    activeModes: List<ActiveMode>,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (activeModes.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.chat_active_modes),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            activeModes.forEach { active ->
+                Text(
+                    text = active.injection.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptInjectionDiagnosticsDialog(
+    diagnostics: PromptInjectionDiagnostics?,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.prompt_diagnostics_title)) },
+        text = {
+            if (diagnostics == null || diagnostics.entries.isEmpty()) {
+                Text(stringResource(R.string.prompt_diagnostics_empty))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item {
+                        Text(
+                            stringResource(
+                                R.string.prompt_diagnostics_summary,
+                                diagnostics.userTurn,
+                                diagnostics.totalEstimatedTokens,
+                            )
+                        )
+                    }
+                    items(diagnostics.entries, key = { "${it.lorebookId}:${it.entryId}" }) { entry ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "${entry.lorebookName} · ${entry.entryName}",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = stringResource(promptDiagnosticStatus(entry.status)),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (entry.status == LorebookEntryStatus.USED ||
+                                    entry.status == LorebookEntryStatus.ACTIVE_FROM_PREVIOUS_TURN
+                                ) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (entry.matchedTerms.isNotEmpty()) {
+                                Text(
+                                    stringResource(
+                                        R.string.prompt_diagnostics_matched,
+                                        entry.matchedTerms.joinToString(", "),
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Text(
+                                stringResource(
+                                    R.string.prompt_diagnostics_injection,
+                                    promptInjectionPositionLabel(entry.position),
+                                    entry.estimatedTokens,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.confirm)) }
+        },
+    )
+}
+
+private fun promptDiagnosticStatus(status: LorebookEntryStatus): Int = when (status) {
+    LorebookEntryStatus.USED -> R.string.prompt_diagnostics_used
+    LorebookEntryStatus.ACTIVE_FROM_PREVIOUS_TURN -> R.string.prompt_diagnostics_sticky
+    LorebookEntryStatus.NOT_MATCHED -> R.string.prompt_diagnostics_not_matched
+    LorebookEntryStatus.PROBABILITY_MISSED -> R.string.prompt_diagnostics_probability_missed
+    LorebookEntryStatus.COOLDOWN -> R.string.prompt_diagnostics_cooldown
+    LorebookEntryStatus.BUDGET_EXCEEDED -> R.string.prompt_diagnostics_budget_exceeded
+    LorebookEntryStatus.INVALID_EXPRESSION -> R.string.prompt_diagnostics_invalid_expression
+}
+
+@Composable
+private fun promptInjectionPositionLabel(position: InjectionPosition): String = when (position) {
+    InjectionPosition.BEFORE_SYSTEM_PROMPT -> stringResource(R.string.prompt_page_position_before_system)
+    InjectionPosition.AFTER_SYSTEM_PROMPT -> stringResource(R.string.prompt_page_position_after_system)
+    InjectionPosition.TOP_OF_CHAT -> stringResource(R.string.prompt_page_position_top_of_chat)
+    InjectionPosition.BOTTOM_OF_CHAT -> stringResource(R.string.prompt_page_position_bottom_of_chat)
+    InjectionPosition.AT_DEPTH -> stringResource(R.string.prompt_page_position_at_depth)
 }
 
 @Composable
@@ -646,6 +971,8 @@ private fun ChatFilesPickerSheet(
     assistant: Assistant,
     vm: ChatVM,
     contextUsage: ChatContextUsage,
+    promptInjectionDiagnostics: PromptInjectionDiagnostics?,
+    onShowPromptDiagnostics: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -850,6 +1177,20 @@ private fun ChatFilesPickerSheet(
             state = inputState,
             assistant = assistant,
             mcpManager = vm.mcpManager,
+            promptInjectionDiagnostics = if (
+                setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT
+            ) {
+                promptInjectionDiagnostics
+            } else {
+                null
+            },
+            onShowPromptDiagnostics = if (
+                setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT
+            ) {
+                onShowPromptDiagnostics
+            } else {
+                null
+            },
             onRefreshRollingContext = { additionalPrompt, targetTokens ->
                 vm.handleRefreshRollingContext(additionalPrompt, targetTokens)
             },
@@ -885,9 +1226,70 @@ private fun ChatFilesPickerSheet(
 }
 
 @Composable
+private fun BranchSourceBar(
+    sourceTitle: String,
+    sourceAvailable: Boolean?,
+    settings: Settings,
+    onOpenSource: () -> Unit,
+) {
+    val contentColor = if (settings.hasActiveChatBackground()) {
+        LocalChatBackgroundForeground.current
+            .takeUnless { it == Color.Unspecified }
+            ?: MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = HugeIcons.Link01,
+            contentDescription = null,
+            tint = contentColor,
+            modifier = Modifier.size(14.dp),
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.branch_source_label, sourceTitle),
+            modifier = Modifier.weight(1f),
+            color = contentColor,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(
+            onClick = onOpenSource,
+            enabled = sourceAvailable == true,
+        ) {
+            Icon(
+                imageVector = HugeIcons.ArrowTurnBackward,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.width(4.dp))
+            Text(
+                text = stringResource(
+                    if (sourceAvailable == false) {
+                        R.string.branch_source_unavailable
+                    } else {
+                        R.string.branch_source_open
+                    }
+                ),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
 private fun TopBar(
     settings: Settings,
     conversation: Conversation,
+    titleEditable: Boolean,
     hazeState: HazeState,
     drawerState: DrawerState,
     bigScreen: Boolean,
@@ -898,8 +1300,10 @@ private fun TopBar(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
-    val titleState = useEditState<String> {
-        onUpdateTitle(it)
+    val titleState = key(conversation.id) {
+        useEditState<String> {
+            onUpdateTitle(it)
+        }
     }
     val displaySetting = settings.displaySetting
     val appearanceCapabilities = LocalAdvancedAppearanceCapabilities.current
@@ -966,6 +1370,7 @@ private fun TopBar(
                         toaster.show(editTitleWarning, type = ToastType.Warning)
                     }
                 },
+                enabled = titleEditable,
                 color = Color.Transparent,
             ) {
                 Column {

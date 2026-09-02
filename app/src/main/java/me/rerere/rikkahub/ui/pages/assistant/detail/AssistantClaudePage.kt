@@ -37,11 +37,13 @@ import me.rerere.ai.provider.ClaudeServiceTier
 import me.rerere.ai.provider.ClaudeThinkingDisplay
 import me.rerere.ai.provider.ClaudeToolChoice
 import me.rerere.ai.provider.ModelAbility
-import me.rerere.ai.provider.ProviderRequestChannel
+import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.claude.isValidClaudeJsonSchema
-import me.rerere.ai.provider.providers.claude.requestChannel
 import me.rerere.ai.provider.providers.claude.resolveClaudeModelParameterSupport
+import me.rerere.ai.provider.resolveParameterFamily
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -60,16 +62,23 @@ fun AssistantClaudePage(id: String) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val providers by vm.providers.collectAsStateWithLifecycle()
     val model = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
-    val provider = model?.findProvider(providers) as? ProviderSetting.Claude
-    val support = resolveClaudeModelParameterSupport(model?.modelId.orEmpty())
-    val enabled = provider != null && support.available
+    val selectedProvider = model?.findProvider(providers)
+    val provider = selectedProvider as? ProviderSetting.Claude
+    val openAIProvider = selectedProvider as? ProviderSetting.OpenAI
+    val support = resolveClaudeModelParameterSupport(model?.parameterModelId().orEmpty())
+    val openAIChatCompatible = openAIProvider != null && !openAIProvider.useResponseApi
+    val isClaudeFamily = model?.resolveParameterFamily(selectedProvider) == ModelParameterFamily.CLAUDE
+    val enabled = isClaudeFamily && (provider != null || openAIChatCompatible)
+    val nativeProtocol = provider != null
+    val route = selectedProvider?.parameterRequestRoute()
     val isReasoningModel = support.supportsAdaptiveThinking ||
         support.supportsManualThinking ||
-        model?.abilities?.contains(ModelAbility.REASONING) == true
+        model?.supportsReasoningCapability() == true
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_claude_unavailable_no_model)
-        provider == null -> stringResource(R.string.assistant_claude_unavailable_protocol)
-        !support.available -> stringResource(R.string.assistant_claude_unavailable_model)
+        !isClaudeFamily -> stringResource(R.string.assistant_claude_unavailable_model)
+        openAIProvider?.useResponseApi == true -> stringResource(R.string.assistant_compatible_requires_chat_completions)
+        provider == null && openAIProvider == null -> stringResource(R.string.assistant_claude_unavailable_protocol)
         else -> null
     }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -91,12 +100,14 @@ fun AssistantClaudePage(id: String) {
             assistant = assistant,
             enabled = enabled,
             isReasoningModel = isReasoningModel,
-            supportsThinkingDisplay = support.supportsAdaptiveThinking || support.supportsManualThinking,
-            supportsServiceTier = support.supportsServiceTier,
-            supportsInferenceGeo = support.supportsInferenceGeo,
-            supportsSampling = support.supportsSamplingParameters,
-            supportsStructuredOutput = support.supportsStructuredOutput,
-            channel = provider?.requestChannel(),
+            supportsThinkingDisplay = nativeProtocol &&
+                (support.supportsAdaptiveThinking || support.supportsManualThinking),
+            supportsServiceTier = nativeProtocol && support.supportsServiceTier,
+            supportsInferenceGeo = nativeProtocol && support.supportsInferenceGeo,
+            supportsSampling = nativeProtocol && support.supportsSamplingParameters,
+            supportsStructuredOutput = if (nativeProtocol) support.supportsStructuredOutput else enabled,
+            route = route,
+            openAICompatible = openAIChatCompatible,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
         )
@@ -114,7 +125,8 @@ private fun AssistantClaudeContent(
     supportsInferenceGeo: Boolean,
     supportsSampling: Boolean,
     supportsStructuredOutput: Boolean,
-    channel: ProviderRequestChannel?,
+    route: ParameterRequestRoute?,
+    openAICompatible: Boolean,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
 ) {
@@ -140,13 +152,15 @@ private fun AssistantClaudeContent(
                 label = { Text(stringResource(R.string.assistant_claude_experimental_title)) },
                 description = {
                     Text(unavailableMessage ?: stringResource(R.string.assistant_claude_available_desc))
-                    channel?.let {
-                        Text(stringResource(R.string.assistant_claude_current_channel, it.displayName()))
-                    }
+                    route?.DisplayText()
                     Text(stringResource(R.string.assistant_claude_common_parameters_desc))
                     Text(stringResource(R.string.assistant_claude_logging_desc))
-                    if (channel == ProviderRequestChannel.COMPATIBLE_ENDPOINT) {
-                        Text(stringResource(R.string.assistant_claude_compatible_warning))
+                    ParameterWarningText(stringResource(R.string.assistant_parameter_experimental_warning))
+                    if (openAICompatible) {
+                        ParameterWarningText(stringResource(R.string.assistant_claude_openai_mapping_desc))
+                    }
+                    if (route?.endpoint == ParameterEndpoint.THIRD_PARTY) {
+                        ParameterWarningText(stringResource(R.string.assistant_claude_compatible_warning))
                     }
                 },
             )
@@ -296,7 +310,7 @@ private fun <T> ClaudeSelectItem(
     FormItem(
         modifier = Modifier.padding(12.dp),
         label = { Text(title) },
-        description = { Text(description); Text(warning) },
+        description = { Text(description); ParameterWarningText(warning) },
     ) {
         Select(
             options = options,
@@ -320,7 +334,7 @@ private fun ClaudeStopSequencesItem(
         label = { Text(stringResource(R.string.assistant_claude_stop_sequences)) },
         description = {
             Text(stringResource(R.string.assistant_claude_stop_sequences_desc))
-            Text(stringResource(R.string.assistant_claude_stop_sequences_warning))
+            ParameterWarningText(stringResource(R.string.assistant_claude_stop_sequences_warning))
         },
     ) {
         OutlinedTextField(
@@ -347,7 +361,7 @@ private fun ClaudeIntegerItem(
     FormItem(
         modifier = Modifier.padding(12.dp),
         label = { Text(title) },
-        description = { Text(description); Text(warning) },
+        description = { Text(description); ParameterWarningText(warning) },
     ) {
         OutlinedTextField(
             value = rawValue,
@@ -378,7 +392,9 @@ private fun ClaudeSchemaItem(
         label = { Text(stringResource(R.string.assistant_claude_json_schema)) },
         description = {
             Text(stringResource(R.string.assistant_claude_json_schema_desc))
-            if (!validSchema) Text(stringResource(R.string.assistant_claude_json_schema_invalid))
+            if (!validSchema) {
+                ParameterWarningText(stringResource(R.string.assistant_claude_json_schema_invalid))
+            }
         },
     ) {
         OutlinedTextField(
@@ -391,18 +407,6 @@ private fun ClaudeSchemaItem(
         )
     }
 }
-
-@Composable
-private fun ProviderRequestChannel.displayName(): String = stringResource(
-    when (this) {
-        ProviderRequestChannel.ANTHROPIC_API -> R.string.log_page_channel_anthropic_api
-        ProviderRequestChannel.OPENAI_API -> R.string.log_page_channel_openai_api
-        ProviderRequestChannel.XAI_API -> R.string.log_page_channel_xai_api
-        ProviderRequestChannel.GOOGLE_AI_STUDIO -> R.string.log_page_channel_google_ai_studio
-        ProviderRequestChannel.VERTEX_AI -> R.string.log_page_channel_vertex_ai
-        ProviderRequestChannel.COMPATIBLE_ENDPOINT -> R.string.log_page_channel_compatible
-    }
-)
 
 @Composable
 private fun ClaudeServiceTier.displayName(): String = stringResource(

@@ -250,87 +250,54 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         headlineContent = {
-                            Text(stringResource(R.string.setting_display_page_enable_blur_effect_title))
+                            Text(stringResource(R.string.setting_display_page_input_blur_radius_title))
                         },
                         supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    if (chatBackgroundActive) {
-                                        stringResource(R.string.setting_display_page_enable_blur_effect_desc)
-                                    } else {
-                                        stringResource(R.string.setting_advanced_appearance_requires_background)
-                                    }
-                                )
-                                AppearanceCompatibilityWarning(
-                                    blurSupported = blurSupported,
-                                    reducedEffects = reducedEffects,
-                                )
-                            }
-                        },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.displaySetting.enableBlurEffect,
+                            AdvancedAppearanceSlider(
+                                description = stringResource(
+                                    R.string.setting_display_page_input_blur_radius_desc
+                                ),
+                                value = settings.displaySetting.inputBlurRadius.coerceIn(
+                                    MIN_LIQUID_GLASS_BLUR_RADIUS,
+                                    liveBlurMax,
+                                ),
+                                valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..liveBlurMax,
+                                steps = if (reducedEffects) 5 else 11,
                                 enabled = blurSupported,
-                                onCheckedChange = { enabled ->
-                                    updateDisplayAppearance { copy(enableBlurEffect = enabled) }
+                                valueLabel = { value ->
+                                    stringResource(
+                                        R.string.setting_display_page_blur_radius_value,
+                                        value.roundToInt(),
+                                    )
+                                },
+                                onValueChange = { value ->
+                                    updateDisplayAppearance { copy(inputBlurRadius = value) }
                                 },
                             )
                         },
                     )
-                    if (settings.displaySetting.enableBlurEffect) {
-                        item(
-                            headlineContent = {
-                                Text(stringResource(R.string.setting_display_page_input_blur_radius_title))
-                            },
-                            supportingContent = {
-                                AdvancedAppearanceSlider(
-                                    description = stringResource(
-                                        R.string.setting_display_page_input_blur_radius_desc
-                                    ),
-                                    value = settings.displaySetting.inputBlurRadius.coerceIn(
-                                        MIN_LIQUID_GLASS_BLUR_RADIUS,
-                                        liveBlurMax,
-                                    ),
-                                    valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..
-                                        liveBlurMax,
-                                    steps = if (reducedEffects) 5 else 11,
-                                    enabled = blurSupported,
-                                    valueLabel = { value ->
-                                        stringResource(
-                                            R.string.setting_display_page_blur_radius_value,
-                                            value.roundToInt(),
-                                        )
-                                    },
-                                    onValueChange = { value ->
-                                        updateDisplayAppearance { copy(inputBlurRadius = value) }
-                                    },
-                                )
-                            },
-                        )
-                        item(
-                            headlineContent = {
-                                Text(stringResource(R.string.setting_display_page_input_tint_title))
-                            },
-                            supportingContent = {
-                                AdvancedAppearanceSlider(
-                                    description = stringResource(R.string.setting_display_page_input_tint_desc),
-                                    value = settings.displaySetting.inputSurfaceOpacity.coerceIn(0f, 1f),
-                                    valueRange = 0f..1f,
-                                    steps = 19,
-                                    enabled = blurSupported,
-                                    valueLabel = { value ->
-                                        stringResource(
-                                            R.string.setting_display_page_tint_value,
-                                            (value * 100).roundToInt(),
-                                        )
-                                    },
-                                    onValueChange = { value ->
-                                        updateDisplayAppearance { copy(inputSurfaceOpacity = value) }
-                                    },
-                                )
-                            },
-                        )
-                    }
+                    item(
+                        headlineContent = {
+                            Text(stringResource(R.string.setting_display_page_input_tint_title))
+                        },
+                        supportingContent = {
+                            AdvancedAppearanceSlider(
+                                description = stringResource(R.string.setting_display_page_input_tint_desc),
+                                value = settings.displaySetting.inputSurfaceOpacity.coerceIn(0f, 1f),
+                                valueRange = 0f..1f,
+                                steps = 19,
+                                valueLabel = { value ->
+                                    stringResource(
+                                        R.string.setting_display_page_tint_value,
+                                        (value * 100).roundToInt(),
+                                    )
+                                },
+                                onValueChange = { value ->
+                                    updateDisplayAppearance { copy(inputSurfaceOpacity = value) }
+                                },
+                            )
+                        },
+                    )
                 }
             }
 
@@ -763,94 +730,6 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                     },
                                     onValueChange = { value ->
                                         updateAppearance { copy(overlayLiquidGlassBlurRadius = value) }
-                                    },
-                                )
-                            },
-                        )
-                    }
-                }
-            }
-
-            item {
-                CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_advanced_appearance_chat_dock_section)) },
-                ) {
-                    item(
-                        headlineContent = {
-                            Text(stringResource(R.string.setting_advanced_appearance_chat_dock_enabled))
-                        },
-                        supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    if (chatBackgroundActive) {
-                                        stringResource(R.string.setting_advanced_appearance_chat_dock_enabled_desc)
-                                    } else {
-                                        stringResource(R.string.setting_advanced_appearance_requires_background)
-                                    }
-                                )
-                                AppearanceCompatibilityWarning(
-                                    blurSupported = blurSupported,
-                                    reducedEffects = reducedEffects,
-                                )
-                            }
-                        },
-                        trailingContent = {
-                            Switch(
-                                checked = appearance.enableChatDockGlass,
-                                enabled = blurSupported,
-                                onCheckedChange = { enabled ->
-                                    updateAppearance { copy(enableChatDockGlass = enabled) }
-                                },
-                            )
-                        },
-                    )
-                    if (appearance.enableChatDockGlass) {
-                        item(
-                            headlineContent = {
-                                Text(stringResource(R.string.setting_advanced_appearance_chat_dock_opacity))
-                            },
-                            supportingContent = {
-                                AdvancedAppearanceSlider(
-                                    description = stringResource(R.string.setting_advanced_appearance_chat_dock_opacity_desc),
-                                    value = appearance.chatDockGlassOpacity.coerceIn(0.2f, 0.95f),
-                                    valueRange = 0.2f..0.95f,
-                                    steps = 14,
-                                    enabled = blurSupported,
-                                    valueLabel = { value ->
-                                        stringResource(
-                                            R.string.setting_advanced_appearance_background_opacity_value,
-                                            (value * 100).roundToInt(),
-                                        )
-                                    },
-                                    onValueChange = { value ->
-                                        updateAppearance { copy(chatDockGlassOpacity = value) }
-                                    },
-                                )
-                            },
-                        )
-                        item(
-                            headlineContent = {
-                                Text(stringResource(R.string.setting_advanced_appearance_liquid_blur))
-                            },
-                            supportingContent = {
-                                AdvancedAppearanceSlider(
-                                    description = stringResource(R.string.setting_advanced_appearance_liquid_blur_desc),
-                                    value = appearance.chatDockGlassBlurRadius.coerceIn(
-                                        MIN_LIQUID_GLASS_BLUR_RADIUS,
-                                        liveBlurMax,
-                                    ),
-                                    valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..liveBlurMax,
-                                    steps = if (reducedEffects) 5 else 11,
-                                    enabled = blurSupported,
-                                    valueLabel = { value ->
-                                        stringResource(
-                                            R.string.setting_advanced_appearance_background_blur_value,
-                                            value.roundToInt(),
-                                        )
-                                    },
-                                    onValueChange = { value ->
-                                        updateAppearance { copy(chatDockGlassBlurRadius = value) }
                                     },
                                 )
                             },

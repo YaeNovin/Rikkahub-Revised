@@ -62,6 +62,7 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.GrokOptions -> GrokSearchService
                 is SearchServiceOptions.TinyfishOptions -> TinyfishSearchService
                 is SearchServiceOptions.SerperOptions -> SerperSearchService
+                is SearchServiceOptions.AnySearchOptions -> AnySearchService
                 is SearchServiceOptions.CustomJsOptions -> CustomJsSearchService
             } as SearchService<T>
         }
@@ -72,13 +73,18 @@ interface SearchService<T : SearchServiceOptions> {
             .followRedirects(true)
             .followSslRedirects(true)
             .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
             .build()
 
         @Volatile
         internal var keyRoulette: KeyRoulette = KeyRoulette.default()
 
         fun init(client: OkHttpClient, context: Context? = null) {
-            httpClient = client
+            // Search tools must not inherit the AI streaming client's 10-minute read timeout.
+            httpClient = client.newBuilder()
+                .readTimeout(45, TimeUnit.SECONDS)
+                .callTimeout(60, TimeUnit.SECONDS)
+                .build()
             keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
         }
 
@@ -157,6 +163,7 @@ sealed class SearchServiceOptions {
             GrokOptions::class to "Grok",
             TinyfishOptions::class to "Tinyfish",
             SerperOptions::class to "Serper",
+            AnySearchOptions::class to "AnySearch",
             CustomJsOptions::class to "Custom JS",
         )
     }
@@ -292,6 +299,15 @@ sealed class SearchServiceOptions {
     data class SerperOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
+    ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("anysearch")
+    data class AnySearchOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+        val zone: String = "",
+        val language: String = "",
     ) : SearchServiceOptions()
 
     @Serializable

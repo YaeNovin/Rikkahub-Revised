@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -19,6 +22,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import coil3.compose.rememberAsyncImagePainter
+import coil3.compose.AsyncImagePainter
 import com.dokar.sonner.ToastType
 import com.jvziyaoyao.scale.image.pager.ImagePager
 import com.jvziyaoyao.scale.zoomable.pager.rememberZoomablePagerState
@@ -34,6 +38,7 @@ import org.koin.compose.koinInject
 @Composable
 fun ImagePreviewDialog(
     images: List<String>,
+    initialSizes: List<Size> = emptyList(),
     topEndAction: (@Composable () -> Unit)? = null,
     onDismissRequest: () -> Unit,
 ) {
@@ -55,7 +60,15 @@ fun ImagePreviewDialog(
                 pagerState = state,
                 imageLoader = { index ->
                     val painter = rememberAsyncImagePainter(images[index])
-                    return@ImagePager Pair(painter, painter.intrinsicSize)
+                    val painterState by painter.state.collectAsState()
+                    val loadedSize = (painterState as? AsyncImagePainter.State.Success)
+                        ?.painter
+                        ?.intrinsicSize
+                        ?: painter.intrinsicSize
+                    val knownSize = initialSizes.getOrNull(index)
+                        ?.takeIf(Size::isUsableImageSize)
+                        ?: loadedSize
+                    return@ImagePager Pair(painter, previewCanvasSize(knownSize))
                 },
             )
 
@@ -104,3 +117,19 @@ fun ImagePreviewDialog(
         }
     }
 }
+
+internal fun previewCanvasSize(
+    intrinsicSize: Size,
+    targetLongEdge: Float = 1080f,
+): Size {
+    val width = intrinsicSize.width
+    val height = intrinsicSize.height
+    if (!width.isFinite() || !height.isFinite() || width <= 0f || height <= 0f) {
+        return Size(targetLongEdge, targetLongEdge)
+    }
+    val scale = (targetLongEdge / maxOf(width, height)).coerceAtLeast(1f)
+    return Size(width * scale, height * scale)
+}
+
+private fun Size.isUsableImageSize(): Boolean =
+    width.isFinite() && height.isFinite() && width > 0f && height > 0f

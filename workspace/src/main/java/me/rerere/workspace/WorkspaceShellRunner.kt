@@ -24,15 +24,38 @@ data class WorkspaceShellContext(
 
 class HostShellRunner : WorkspaceShellRunner {
     override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult {
-        val process = ProcessBuilder(defaultShell(), "-c", context.command)
+        // Android's inherited environment differs by release and may contain a
+        // caller-controlled PATH. Use a deterministic Toybox path for host
+        // commands so Android 9-17 behave consistently.
+        val shell = defaultShell()
+        val process = ProcessBuilder(shell, "-c", context.command)
             .directory(context.workingDir)
             .redirectErrorStream(false)
+            .apply {
+                environment()["PATH"] = "/system/bin:/system/xbin:/vendor/bin:/bin:/usr/bin"
+                environment()["SHELL"] = shell
+                environment()["HOME"] = context.workingDir.absolutePath
+                environment()["TMPDIR"] = context.tempDir.absolutePath
+                environment()["LANG"] = "C"
+                environment()["LC_ALL"] = "C"
+                environment()["TERM"] = "dumb"
+            }
             .start()
         return process.readResult(context.timeoutMillis, context.stdin)
     }
 
     private fun defaultShell(): String =
-        if (File("/system/bin/sh").exists()) "/system/bin/sh" else "/bin/sh"
+        SHELL_CANDIDATES.firstOrNull { File(it).isFile && File(it).canExecute() }
+            ?: SHELL_CANDIDATES.firstOrNull { File(it).isFile }
+            ?: "sh"
+
+    private companion object {
+        private val SHELL_CANDIDATES = listOf(
+            "/system/bin/sh",
+            "/vendor/bin/sh",
+            "/bin/sh",
+        )
+    }
 }
 
 // 单个流保留的最大字符数, 防止命令疯狂输出导致 OOM 或撑爆 LLM 上下文
@@ -43,9 +66,15 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
     val stderr = StreamCollector(errorStream)
     val stdinWriter = stdin?.let { bytes -> StreamWriter(outputStream, bytes) }
     try {
-        val finished = waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+        val finished = waitFor(timeoutMillis.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
         if (!finished) {
-            destroyForcibly()
+            // Android may leave descendants holding stdout/stderr after a direct forcible kill.
+            // Give the process a graceful stop first, then force-kill and reap it briefly.
+            destroy()
+            if (!waitFor(PROCESS_TERMINATION_GRACE_MILLIS, TimeUnit.MILLISECONDS)) {
+                destroyForcibly()
+                runCatching { waitFor(PROCESS_TERMINATION_GRACE_MILLIS, TimeUnit.MILLISECONDS) }
+            }
         }
         stdinWriter?.join(1_000)
         stdout.join(1_000)
@@ -67,6 +96,8 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
         throw e
     }
 }
+
+private const val PROCESS_TERMINATION_GRACE_MILLIS = 250L
 
 private class StreamWriter(
     private val stream: java.io.OutputStream,

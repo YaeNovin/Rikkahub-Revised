@@ -12,6 +12,27 @@ This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
 
+## Current Upload Scope / 本次上传内容
+
+- English: Added OrcaRouter as an OpenAI-compatible provider, including its
+  endpoint, website, documentation links, and localized provider descriptions.
+  中文：新增 OrcaRouter OpenAI 兼容供应商，包含接口地址、官网、文档链接及本地化供应商说明。
+- English: Added model- and protocol-aware parameter routing for OpenAI,
+  Google, Anthropic, Claude, Gemini, Qwen, DeepSeek, and compatible endpoints,
+  with safer tool-argument JSON handling and diagnostics.
+  中文：增加面向 OpenAI、Google、Anthropic、Claude、Gemini、Qwen、DeepSeek 及兼容接口的模型与协议参数路由，并改进工具参数 JSON 处理和诊断安全性。
+- English: Improved prompt templates, placeholder variables, entertainment
+  extensions, memory and world-book diagnostics, request statistics, and
+  workspace SAF/local-file operations.
+  中文：优化提示词模板、占位符变量、娱乐模式扩展、记忆与世界书诊断、请求统计，以及工作区 SAF/本地文件操作。
+- English: Hardened chat loading and streaming recovery, rich-content rendering,
+  WebView previews, image-generation settings, and Android compatibility paths;
+  focused regression tests were added alongside the fixes.
+  中文：修复聊天加载与流式恢复、富内容渲染、WebView 预览、生图设置及 Android 兼容性路径问题，并同步增加针对性回归测试。
+- English: QA compilation completed successfully; device installation remains
+  pending USB-debugging authorization on the test device.
+  中文：QA 编译已成功；测试设备仍需完成 USB 调试授权后才能覆盖安装。
+
 ## 2.4.8-revised.6 Maintenance Changes / 维护变更
 
 - English: Added advanced appearance controls for global and assistant
@@ -154,9 +175,10 @@ are maintained separately from user-facing release descriptions.
 - Split backup scopes for databases, settings/credentials, attachments, and
   workspaces; excluded rootfs; and added archive path validation for S3 and
   WebDAV restore flows.
-- Added interactive ECharts, ABC notation, Leaflet, and railroad-diagram
-  renderers; improved Mermaid, LaTeX, Markdown, and animated-background
-  behavior; and hardened local WebView settings.
+- Added interactive ECharts, ABC staff notation, offline Jianpu numbered
+  notation, Leaflet, and railroad-diagram renderers; improved Mermaid, LaTeX,
+  Markdown, and animated-background behavior; and hardened local WebView
+  settings.
 - Added database migrations and Room schemas through version 28, knowledge-base
   navigation, provider configuration UI, multilingual resources, focused tests,
   and architecture documentation.

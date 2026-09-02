@@ -124,8 +124,12 @@ fun ChatMessage(
     assistant: Assistant? = null,
     hazeState: HazeState? = null,
     lastMessage: Boolean = false,
+    showActions: Boolean = true,
     onFork: () -> Unit,
+    forkEnabled: Boolean = true,
+    forkInProgress: Boolean = false,
     onRegenerate: () -> Unit,
+    onContinue: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
@@ -212,14 +216,14 @@ fun ChatMessage(
             }
         }
 
-        val showActions = if (lastMessage) {
+        val actionsVisible = showActions && if (lastMessage) {
             !loading
         } else {
             message.parts.isEmptyUIMessage().not()
         }
 
         AnimatedVisibility(
-            visible = showActions,
+            visible = actionsVisible,
             enter = slideInVertically { it / 2 } + fadeIn(),
             exit = slideOutVertically { it / 2 } + fadeOut()
         ) {
@@ -229,6 +233,7 @@ fun ChatMessage(
                 ChatMessageActionButtons(
                     message = message,
                     onRegenerate = onRegenerate,
+                    onContinue = onContinue,
                     node = node,
                     onUpdate = onUpdate,
                     onOpenActionSheet = {
@@ -264,6 +269,8 @@ fun ChatMessage(
             onDelete = onDelete,
             onShare = onShare,
             onFork = onFork,
+            forkEnabled = forkEnabled,
+            forkInProgress = forkInProgress,
             model = model,
             onSelectAndCopy = {
                 showSelectCopySheet = true

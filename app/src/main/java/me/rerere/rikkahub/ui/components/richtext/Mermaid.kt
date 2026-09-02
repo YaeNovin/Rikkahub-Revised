@@ -35,6 +35,7 @@ import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
+import me.rerere.rikkahub.ui.components.ui.LocalExportContext
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -121,15 +122,23 @@ fun Mermaid(
             loadWithOverviewMode = true
         }
     )
+    val previewHeight = richPreviewHeight(
+        minHeightDp = 220,
+        maxHeightDp = 380,
+        widthFraction = 0.75f,
+    )
 
     Column(
         modifier = modifier
     ) {
         WebView(
             state = webViewState,
+            deferUntilVisible = !LocalExportContext.current,
+            preferParentVerticalScroll = true,
+            transparentBackground = true,
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .height(200.dp),
+                .height(previewHeight),
         )
 
         if (activity != null) {
@@ -211,23 +220,34 @@ internal fun buildMermaidHtml(
         <html>
         <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=1024">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes">
             <script src="${WEB_VIEW_ASSET_URL}/html/mermaid.min.js"></script>
             <style>
-                body {
+                html, body {
+                    width: 100%;
+                    min-height: 100%;
                     margin: 0;
                     padding: 0;
-                    min-width: 100%;
-                    background-color: ${background};
+                    overflow: auto;
+                    background: transparent;
                 }
-                #diagram-container { width: 100%; overflow: auto; }
+                #diagram-container { width: 100%; min-height: 100%; overflow: auto; touch-action: pan-x pan-y pinch-zoom; display: flex; align-items: center; justify-content: center; }
                 .mermaid {
+                    box-sizing: border-box;
+                    margin: 0;
                     padding: 8px;
-                    width: fit-content;
-                    min-width: 100%;
+                    width: 100%;
+                    min-width: 0;
+                    display: flex;
+                    justify-content: center;
                 }
                 .mermaid svg {
                     background: transparent !important;
+                    display: block;
+                    width: 100%;
+                    max-width: 100%;
+                    height: auto;
+                    overflow: visible;
                 }
             </style>
         </head>
@@ -290,7 +310,18 @@ internal fun buildMermaidHtml(
                         errorTextColor: '${onErrorColor}'
                     }
               });
-              mermaid.run({ nodes: [mermaidNode] }).catch(showRenderError);
+              function fitRenderedDiagram() {
+                  const svgElement = document.querySelector('.mermaid svg');
+                  if (!svgElement) return;
+                  svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                  svgElement.removeAttribute('width');
+                  svgElement.removeAttribute('height');
+                  svgElement.style.width = '100%';
+                  svgElement.style.height = 'auto';
+              }
+              mermaid.run({ nodes: [mermaidNode] })
+                  .then(fitRenderedDiagram)
+                  .catch(showRenderError);
 
               window.exportSvgToPng = function() {
                 try {

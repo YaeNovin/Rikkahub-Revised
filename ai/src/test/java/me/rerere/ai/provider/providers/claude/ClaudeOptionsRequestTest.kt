@@ -52,12 +52,6 @@ class ClaudeOptionsRequestTest {
             "claude-fable-5",
             "anthropic/claude-sonnet-4-6",
             "anthropic.claude-opus-4-6-v1:0",
-        ).forEach { assertTrue("model=$it", resolveClaudeModelParameterSupport(it).available) }
-        listOf(
-            "gpt-5.6",
-            "grok-4.6",
-            "claudeish-model",
-            "claude-3-5-sonnet-20241022",
             "claude-3-7-sonnet-20250219",
             "claude-sonnet-4-20250514",
             "claude-opus-4-20250514",
@@ -66,6 +60,13 @@ class ClaudeOptionsRequestTest {
             "claude-haiku-4-5-20251001",
             "claude-mythos-5",
             "claude-mythos-preview",
+        ).forEach { assertTrue("model=$it", resolveClaudeModelParameterSupport(it).available) }
+        listOf(
+            "gpt-5.6",
+            "grok-4.6",
+            "claudeish-model",
+            "claude-3-5-sonnet-20241022",
+            "claude-sonnet-4-4",
         ).forEach {
             assertFalse("model=$it", resolveClaudeModelParameterSupport(it).available)
         }

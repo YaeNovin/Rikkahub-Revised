@@ -84,6 +84,13 @@ class BackupPolicyTest {
         )
         assertNull(BackupPolicy.safeRelativePath("upload\\escape.txt", "upload"))
         assertNull(BackupPolicy.workspaceRestoreRelativePath("workspaces/demo/tmp/cache.txt"))
+        assertEquals(
+            "demo/${BackupPolicy.WORKSPACE_POLICY_RELATIVE_PATH}",
+            BackupPolicy.workspaceRestoreRelativePath(
+                "workspaces/demo/${BackupPolicy.WORKSPACE_POLICY_RELATIVE_PATH}"
+            ),
+        )
+        assertNull(BackupPolicy.workspaceRestoreRelativePath("workspaces/demo/.rikkahub/audit.tsv"))
         assertNull(BackupPolicy.workspaceRestoreRelativePath("workspaces/../files/escape.txt"))
     }
 

@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
@@ -23,6 +25,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.model.withPromptSettingsFrom
 import me.rerere.rikkahub.data.memory.MemoryEmbeddingService
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
@@ -42,6 +45,7 @@ class AssistantDetailVM(
     private val knowledgeBaseRepository: KnowledgeBaseRepository,
 ) : ViewModel() {
     private val assistantId = Uuid.parse(id)
+    private val promptUpdateMutex = Mutex()
 
     private val _skills = MutableStateFlow<List<SkillMetadata>>(emptyList())
     val skills = _skills.asStateFlow()
@@ -186,6 +190,25 @@ class AssistantDetailVM(
         }
     }
 
+    fun updatePromptSettings(draft: Assistant) {
+        if (draft.id != assistantId) return
+        viewModelScope.launch {
+            promptUpdateMutex.withLock {
+                settingsStore.update { currentSettings ->
+                    currentSettings.copy(
+                        assistants = currentSettings.assistants.map { currentAssistant ->
+                            if (currentAssistant.id == assistantId) {
+                                currentAssistant.withPromptSettingsFrom(draft)
+                            } else {
+                                currentAssistant
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+
     fun addMemory(memory: AssistantMemory) {
         viewModelScope.launch {
             val memoryAssistantId = if (assistant.value.useGlobalMemory) {
@@ -215,6 +238,7 @@ class AssistantDetailVM(
                 id = memory.id,
                 content = memory.content,
                 settings = settings.value,
+                type = memory.type,
             )
         }
     }

@@ -1,5 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.provider.normalizeCompactVendorModelId
+
 data class QwenModelParameterSupport(
     val available: Boolean,
     val supportsJsonSchema: Boolean,
@@ -31,7 +33,10 @@ fun isAlibabaModelStudioHost(host: String): Boolean {
 }
 
 internal fun String.normalizedQwenModelId(): String =
-    substringAfterLast('/').substringAfterLast(':').trim().lowercase().replace('_', '-')
+    substringAfterLast('/').substringAfterLast(':').trim().lowercase()
+        .replace(Regex("[\\s_]+"), "-")
+        .replace(Regex("^(qwq|qvq)(?=\\d)"), "$1-")
+        .normalizeCompactVendorModelId()
 
 private fun String.isQwenFamily(): Boolean =
     startsWith("qwen") || startsWith("qwq") || startsWith("qvq")

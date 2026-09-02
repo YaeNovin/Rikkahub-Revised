@@ -7,6 +7,8 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
@@ -514,6 +516,299 @@ class OpenAIImageRequestTest {
             assertNull(body["background"])
             assertNull(body["output_compression"])
         }
+    }
+
+    @Test
+    fun `Qwen Image sends only documented optional generation parameters`() {
+        val model = Model(modelId = "qwen-image-3.0-pro")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                seed = 42L,
+                negativePrompt = "blur, extra fingers",
+                promptEnhancement = false,
+                watermark = true,
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(0L..Int.MAX_VALUE.toLong(), constraints.seedRange)
+        assertEquals("42", body["seed"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("blur, extra fingers", body["negative_prompt"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("false", body["prompt_extend"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("true", body["watermark"]?.jsonPrimitive?.contentOrNull)
+        assertNull(body["steps"])
+    }
+
+    @Test
+    fun `Qwen Image 3 sends enhancement mode and thinking only when enabled`() {
+        val model = Model(modelId = "qwen-image-3.0-pro")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                promptEnhancement = true,
+                promptEnhancementMode = "direct",
+                imageThinking = true,
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(setOf("direct", "agent"), constraints.supportedPromptEnhancementModes)
+        assertEquals(6, constraints.maxOutputImages)
+        assertTrue(constraints.supportsImageThinking)
+        assertEquals(3, constraints.maxReferenceImages)
+        assertEquals("true", body["prompt_extend"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("direct", body["prompt_extend_mode"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("true", body["enable_thinking"]?.jsonPrimitive?.contentOrNull)
+
+        val disabled = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                promptEnhancement = false,
+                promptEnhancementMode = "agent",
+                imageThinking = true,
+            ),
+            constraints = constraints,
+        )
+        assertEquals("false", disabled["prompt_extend"]?.jsonPrimitive?.contentOrNull)
+        assertNull(disabled["prompt_extend_mode"])
+        assertNull(disabled["enable_thinking"])
+    }
+
+    @Test
+    fun `Qwen Image 3 edit suppresses unsupported agent enhancement mode`() = runBlocking {
+        var capturedRequest: Request? = null
+        val capturingProvider = OpenAIProvider(
+            OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    capturedRequest = chain.request()
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body("{\"data\":[]}".toResponseBody("application/json".toMediaType()))
+                        .build()
+                }
+                .build()
+        )
+        val imageFile = File.createTempFile("qwen-edit", ".png")
+        try {
+            imageFile.writeBytes(byteArrayOf(1, 2, 3))
+            capturingProvider.editImage(
+                ProviderSetting.OpenAI(baseUrl = "https://example.com/v1"),
+                ImageEditParams(
+                    model = Model(modelId = "qwen-image-3.0-pro"),
+                    prompt = "edit",
+                    images = listOf(imageFile.absolutePath),
+                    promptEnhancement = true,
+                    promptEnhancementMode = "agent",
+                    imageThinking = true,
+                ),
+            ).toList()
+            val request = requireNotNull(capturedRequest)
+            val buffer = Buffer()
+            request.body?.writeTo(buffer)
+            val body = buffer.readUtf8()
+            assertFalse(body.contains("prompt_extend_mode"))
+            assertFalse(body.contains("agent"))
+            assertTrue(body.contains("enable_thinking"))
+        } finally {
+            imageFile.delete()
+        }
+    }
+
+    @Test
+    fun `GPT Image moderation is emitted and input fidelity stays edit only`() {
+        val model = Model(modelId = "gpt-image-1")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                moderation = "low",
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(setOf("auto", "low"), constraints.supportedModerationValues)
+        assertEquals(setOf("low", "high"), constraints.supportedInputFidelityValues)
+        assertEquals("low", body["moderation"]?.jsonPrimitive?.contentOrNull)
+        assertNull(body["input_fidelity"])
+    }
+
+    @Test
+    fun `FLUX dev bounds steps guidance and seed before sending`() {
+        val model = Model(modelId = "flux-dev")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val valid = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                seed = 7L,
+                steps = 28,
+                guidanceScale = 3f,
+                promptEnhancement = true,
+            ),
+            constraints = constraints,
+        )
+        val invalid = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                seed = -1L,
+                steps = 51,
+                guidanceScale = 5.1f,
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(1..50, constraints.stepsRange)
+        assertEquals("7", valid["seed"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("28", valid["steps"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("3.0", valid["guidance"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("true", valid["prompt_upsampling"]?.jsonPrimitive?.contentOrNull)
+        assertNull(invalid["seed"])
+        assertNull(invalid["steps"])
+        assertNull(invalid["guidance"])
+    }
+
+    @Test
+    fun `FLUX dev emits the documented safety tolerance range`() {
+        val model = Model(modelId = "flux-dev")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                safetyTolerance = 6,
+            ),
+            constraints = constraints,
+        )
+        val invalid = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                safetyTolerance = 7,
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(0..6, constraints.safetyToleranceRange)
+        assertEquals("6", body["safety_tolerance"]?.jsonPrimitive?.contentOrNull)
+        assertNull(invalid["safety_tolerance"])
+    }
+
+    @Test
+    fun `OpenAI image models ignore unsupported sampling parameters`() {
+        val model = Model(modelId = "gpt-image-1")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                seed = 42L,
+                steps = 30,
+                guidanceScale = 4f,
+                negativePrompt = "blur",
+                promptEnhancement = true,
+                watermark = true,
+            ),
+            constraints = constraints,
+        )
+
+        assertNull(body["seed"])
+        assertNull(body["steps"])
+        assertNull(body["guidance"])
+        assertNull(body["cfg_scale"])
+        assertNull(body["negative_prompt"])
+        assertNull(body["prompt_extend"])
+        assertNull(body["watermark"])
+    }
+
+    @Test
+    fun `Stable Diffusion uses official legacy sampling ranges`() {
+        val model = Model(modelId = "stable-diffusion-xl-1024-v1-0")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                seed = Int.MAX_VALUE.toLong(),
+                steps = 150,
+                guidanceScale = 35f,
+                negativePrompt = "blur",
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(0L..Int.MAX_VALUE.toLong(), constraints.seedRange)
+        assertEquals(10..150, constraints.stepsRange)
+        assertEquals(30, constraints.defaultSteps)
+        assertEquals(1f..35f, constraints.guidanceScaleRange)
+        assertEquals(Int.MAX_VALUE.toString(), body["seed"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("150", body["steps"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("35.0", body["cfg_scale"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("blur", body["negative_prompt"]?.jsonPrimitive?.contentOrNull)
+    }
+
+    @Test
+    fun `Stable Diffusion emits supported sampler and style preset values`() {
+        val model = Model(modelId = "stable-diffusion-xl-1024-v1-0")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                sampler = "K_EULER",
+                stylePreset = "cinematic",
+            ),
+            constraints = constraints,
+        )
+        val invalid = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                sampler = "unsupported",
+                stylePreset = "unsupported",
+            ),
+            constraints = constraints,
+        )
+
+        assertTrue(constraints.supportedSamplerValues.contains("K_EULER"))
+        assertTrue(constraints.supportedStylePresetValues.contains("cinematic"))
+        assertEquals("K_EULER", body["sampler"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("cinematic", body["style_preset"]?.jsonPrimitive?.contentOrNull)
+        assertNull(invalid["sampler"])
+        assertNull(invalid["style_preset"])
+    }
+
+    @Test
+    fun `Seedream emits sequential options and prompt optimization as nested objects`() {
+        val model = Model(modelId = "doubao-seedream-5-0-lite")
+        val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), model)
+        val body = buildOpenAIImageGenerationRequestBody(
+            params = ImageGenerationParams(
+                model = model,
+                prompt = "prompt",
+                sequentialImageGeneration = true,
+                sequentialMaxImages = 99,
+                promptOptimizationMode = "fast",
+                watermark = false,
+            ),
+            constraints = constraints,
+        )
+
+        assertEquals(15, constraints.sequentialImageMax)
+        assertEquals("auto", body["sequential_image_generation"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(15, body["sequential_image_generation_options"]?.jsonObject?.get("max_images")?.jsonPrimitive?.int)
+        assertEquals("fast", body["optimize_prompt_options"]?.jsonObject?.get("mode")?.jsonPrimitive?.contentOrNull)
+        assertEquals("false", body["watermark"]?.jsonPrimitive?.contentOrNull)
     }
 
     private tailrec fun greatestCommonDivisor(left: Int, right: Int): Int =

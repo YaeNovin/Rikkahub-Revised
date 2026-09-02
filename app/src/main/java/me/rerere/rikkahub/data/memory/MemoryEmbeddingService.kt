@@ -40,11 +40,13 @@ class MemoryEmbeddingService(
         id: Int,
         content: String,
         settings: Settings,
+        type: MemoryType? = null,
     ): AssistantMemory? {
-        val memory = repository.updateContent(
+        val memory = repository.updateMemory(
             assistantId = assistantId,
             id = id,
             content = content,
+            type = type,
         ) ?: return null
         index(memory, settings)
         return memory

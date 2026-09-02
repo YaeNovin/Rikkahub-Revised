@@ -34,14 +34,12 @@ class StreamRecoveryPolicyTest {
         val continuation = buildInterruptedStreamContinuation(
             requestMessages = request,
             currentMessages = current,
-            hasClientTools = false,
-            hasServerTools = false,
         )!!
 
-        assertEquals(request.size + 2, continuation.size)
-        assertEquals("The result is 42", continuation[continuation.lastIndex - 1].toText())
-        assertEquals(1, continuation[continuation.lastIndex - 1].parts.size)
-        assertTrue(continuation.last().toText().contains("Do not repeat"))
+        assertEquals(request.size + 1, continuation.size)
+        assertEquals(MessageRole.ASSISTANT, continuation.last().role)
+        assertEquals("The result is 42", continuation.last().toText())
+        assertEquals(1, continuation.last().parts.size)
         assertSame(partial, current.last())
         assertEquals(request.size + 1, current.size)
     }
@@ -90,16 +88,13 @@ class StreamRecoveryPolicyTest {
         val continuation = buildInterruptedStreamContinuation(
             requestMessages = current,
             currentMessages = current,
-            hasClientTools = true,
-            hasServerTools = true,
         )!!
-        val safeAssistant = continuation[continuation.lastIndex - 1]
+        val safeAssistant = continuation.last()
 
         assertEquals("partial", safeAssistant.parts.filterIsInstance<UIMessagePart.Text>().first().text)
         assertTrue(safeAssistant.parts.any { it == completedTool })
         assertTrue(safeAssistant.parts.any { it == completedServerTool })
-        assertTrue(safeAssistant.toText().contains("interrupted"))
-        assertTrue(continuation.last().toText().contains("normal approval process"))
+        assertTrue(safeAssistant.toText().contains("partial"))
         assertTrue(safeAssistant.parts.none { it == interruptedTool })
         assertTrue(safeAssistant.parts.none { it == interruptedServerTool })
     }
@@ -131,6 +126,45 @@ class StreamRecoveryPolicyTest {
         assertEquals(ServerToolStatus.FAILED, server.status)
         assertTrue(server.output.toString().contains("interrupted"))
         assertTrue(marked.isInterruptedAssistantResponse())
+    }
+
+    @Test
+    fun `pending approval survives generation cancellation`() {
+        val pending = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Text("before approval"),
+                UIMessagePart.Tool(
+                    toolCallId = "pending-call",
+                    toolName = "workspace_list_local_files",
+                    input = "{\"grant_id\":\"grant\"}",
+                    approvalState = ToolApprovalState.Pending,
+                ),
+            ),
+        )
+
+        assertEquals(pending, pending.markInterruptedToolsForContinuation())
+        val stopped = pending.markInterruptedToolsForContinuation(forcePendingApprovals = true)
+        val tool = stopped.parts.filterIsInstance<UIMessagePart.Tool>().single()
+        assertTrue(tool.isExecuted)
+        assertTrue(tool.approvalState is ToolApprovalState.Denied)
+    }
+
+    @Test
+    fun `explicit approval is never rewritten as an interruption`() {
+        val approved = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "approved-call",
+                    toolName = "workspace_list_local_files",
+                    input = "{}",
+                    approvalState = ToolApprovalState.Approved,
+                ),
+            ),
+        )
+
+        assertEquals(approved, approved.markInterruptedToolsForContinuation())
     }
 
     @Test
@@ -183,30 +217,25 @@ class StreamRecoveryPolicyTest {
         val continuation = buildInterruptedStreamContinuation(
             requestMessages = current,
             currentMessages = current,
-            hasClientTools = false,
-            hasServerTools = false,
         )!!
 
-        assertEquals(request.size + 2, continuation.size)
-        assertEquals("The result is 42", continuation[continuation.lastIndex - 1].toText())
-        assertEquals(1, continuation[continuation.lastIndex - 1].parts.size)
-        assertTrue(continuation.last().toText().contains("Do not repeat"))
+        assertEquals(request.size + 1, continuation.size)
+        assertEquals(MessageRole.ASSISTANT, continuation.last().role)
+        assertEquals("The result is 42", continuation.last().toText())
+        assertEquals(1, continuation.last().parts.size)
         assertSame(current.last(), current.last())
-        assertTrue(current.none { it.toText().contains("Continue the assistant response") })
+        assertEquals(request.count { it.role == MessageRole.USER }, continuation.count { it.role == MessageRole.USER })
     }
 
     @Test
-    fun `media-only interruption still produces a continuation note`() {
+    fun `media-only interruption is not offered as a native continuation`() {
         val request = listOf(UIMessage.user("continue"))
         val current = request + UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Image("data:image/png;base64,AA==")),
         )
 
-        val continuation = buildInterruptedStreamContinuation(request, current, false, false)
-
-        assertTrue(continuation != null)
-        assertTrue(continuation!![continuation.lastIndex - 1].toText().contains("image output"))
+        assertNull(buildInterruptedStreamContinuation(request, current))
     }
 
     @Test
@@ -217,10 +246,7 @@ class StreamRecoveryPolicyTest {
             parts = listOf(UIMessagePart.ToolCall("call", "lookup", "{\"q\":")),
         )
 
-        val continuation = buildInterruptedStreamContinuation(request, current, true, false)
-
-        assertTrue(continuation != null)
-        assertTrue(continuation!![continuation.lastIndex - 1].toText().contains("partial arguments"))
+        assertNull(buildInterruptedStreamContinuation(request, current))
     }
 
     @Test
@@ -237,10 +263,7 @@ class StreamRecoveryPolicyTest {
             ),
         )
 
-        val continuation = buildInterruptedStreamContinuation(request, current, false, true)!!
-        val safeAssistant = continuation[continuation.lastIndex - 1]
-        assertTrue(safeAssistant.parts.none { it is UIMessagePart.ServerTool })
-        assertTrue(safeAssistant.toText().contains("search tool call was interrupted"))
+        assertNull(buildInterruptedStreamContinuation(request, current))
     }
 
     @Test

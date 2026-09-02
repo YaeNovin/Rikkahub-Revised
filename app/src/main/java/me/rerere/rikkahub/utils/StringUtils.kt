@@ -3,6 +3,7 @@ package me.rerere.rikkahub.utils
 import org.apache.commons.text.StringEscapeUtils
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.Locale
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -37,11 +38,31 @@ fun Number.toFixed(digits: Int = 0) = "%.${digits}f".format(this)
 fun String.applyPlaceholders(
     vararg placeholders: Pair<String, String>,
 ): String {
-    var result = this
-    for ((placeholder, replacement) in placeholders) {
-        result = result.replace("{$placeholder}", replacement)
+    if (isEmpty() || placeholders.isEmpty() || '{' !in this) return this
+
+    // Prompt settings have historically used single braces while assistant
+    // templates use double braces. Accept both forms, including the spaces
+    // people commonly add while editing (for example `{{ locale }}`).
+    val entries = placeholders
+        .map { (placeholder, replacement) -> placeholder.trim() to replacement }
+        .filter { it.first.isNotEmpty() }
+        .distinctBy { it.first.lowercase(Locale.ROOT) }
+    if (entries.isEmpty()) return this
+
+    val patterns = entries.map { (key, _) ->
+        Regex(
+            "\\{\\{\\s*${Regex.escape(key)}\\s*\\}\\}|\\{\\s*${Regex.escape(key)}\\s*\\}",
+            setOf(RegexOption.IGNORE_CASE),
+        )
     }
-    return result
+    val combined = Regex(
+        patterns.joinToString("|") { "(?:${it.pattern})" },
+        setOf(RegexOption.IGNORE_CASE),
+    )
+    return combined.replace(this) { match ->
+        val index = patterns.indexOfFirst { it.matches(match.value) }
+        if (index >= 0) entries[index].second else match.value
+    }
 }
 
 fun Long.fileSizeToString(): String {

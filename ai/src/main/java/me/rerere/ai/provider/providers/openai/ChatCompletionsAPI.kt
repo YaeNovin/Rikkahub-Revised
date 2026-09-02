@@ -34,12 +34,17 @@ import me.rerere.ai.core.cappedEffort
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.inferParameterFamily
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.resolveReasoningLevelSupport
+import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
@@ -81,6 +86,9 @@ private fun isVolcengineArkHost(host: String): Boolean =
 
 private fun String.normalizedReasoningModelId(): String =
     substringAfterLast('/').trim().lowercase().replace(REASONING_MODEL_SEPARATOR, "-")
+        .replace(Regex("^(gemini|claude|gpt|chatgpt|grok)(?=\\d)"), "$1-")
+        .replace(Regex("^(qwq|qvq)(?=\\d)"), "$1-")
+        .replace(Regex("^deepseek(?=[rv]?\\d)"), "deepseek-")
 
 private fun String.isQwenFamily(): Boolean =
     startsWith("qwen") || startsWith("qwq") || startsWith("qvq")
@@ -105,6 +113,7 @@ private fun String.supportsVolcengineReasoningEffort(): Boolean =
     startsWith("doubao-seed-1-6") && contains("lite")
 
 private fun ReasoningLevel.deepSeekReasoningEffort(): String = when (this) {
+    ReasoningLevel.MINIMAL,
     ReasoningLevel.LOW -> "low"
     ReasoningLevel.MAX -> "max"
     ReasoningLevel.MEDIUM,
@@ -115,6 +124,7 @@ private fun ReasoningLevel.deepSeekReasoningEffort(): String = when (this) {
 }
 
 private fun ReasoningLevel.volcengineReasoningEffort(): String = when (this) {
+    ReasoningLevel.MINIMAL,
     ReasoningLevel.LOW -> "low"
     ReasoningLevel.MEDIUM -> "medium"
     ReasoningLevel.HIGH,
@@ -124,7 +134,7 @@ private fun ReasoningLevel.volcengineReasoningEffort(): String = when (this) {
     ReasoningLevel.AUTO -> error("Reasoning effort requires an explicit enabled level")
 }
 
-private val REASONING_MODEL_SEPARATOR = Regex("[._]+")
+private val REASONING_MODEL_SEPARATOR = Regex("[\\s._]+")
 
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
@@ -150,6 +160,7 @@ class ChatCompletionsAPI(
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.TEXT_GENERATION,
                     api = "chat_completions",
+                    requestId = params.requestId,
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -214,6 +225,7 @@ class ChatCompletionsAPI(
                     providerSetting = providerSetting,
                     operation = ProviderRequestOperation.STREAM_TEXT,
                     api = "chat_completions",
+                    requestId = params.requestId,
                 ),
             )
             .headers(params.customHeaders.toHeaders())
@@ -304,8 +316,10 @@ class ChatCompletionsAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
-        val modelSupport = resolveOpenAIModelParameterSupport(params.model.modelId)
-        val grokSupport = resolveGrokModelParameterSupport(params.model.modelId)
+        val parameterModelId = params.model.parameterModelId()
+        val modelSupport = resolveOpenAIModelParameterSupport(parameterModelId)
+        val parameterFamily = params.model.inferParameterFamily() ?: ModelParameterFamily.OPENAI
+        val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
         val useFunctionTools =
             params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
         return buildJsonObject {
@@ -338,7 +352,7 @@ class ChatCompletionsAPI(
                 put(tokenLimitKey, params.maxTokens)
             }
 
-            if (modelSupport.available) {
+            if (modelSupport.available || parameterFamily == ModelParameterFamily.OPENAI) {
                 params.openAIOptions.verbosity.apiValue
                     ?.takeIf { modelSupport.supportsVerbosity }
                     ?.let { put("verbosity", it) }
@@ -365,6 +379,11 @@ class ChatCompletionsAPI(
                 },
             )
             applyDeepSeekChatOptions(params = params, hasFunctionTools = useFunctionTools)
+            applyCompatibleGeminiChatOptions(params = params)
+            applyCompatibleClaudeChatOptions(
+                params = params,
+                hasFunctionTools = useFunctionTools,
+            )
 
             put("stream", stream)
             if (stream) {
@@ -385,8 +404,9 @@ class ChatCompletionsAPI(
                 }
             }
 
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                val level = params.reasoningLevel
+            if (params.model.supportsReasoningCapability()) {
+                val level = resolveReasoningLevelSupport(params.model, providerSetting)
+                    .coerce(params.reasoningLevel)
                 when {
                     host == "openrouter.ai" -> {
                         // https://openrouter.ai/docs/use-cases/reasoning-tokens
@@ -406,7 +426,7 @@ class ChatCompletionsAPI(
                     isAlibabaModelStudioHost(host) -> {
                         // Chat Completions uses enable_thinking/thinking_budget for Qwen.
                         // Alibaba-hosted DeepSeek V4 uses reasoning_effort instead of a token budget.
-                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        val modelId = parameterModelId.normalizedReasoningModelId()
                         when {
                             modelId.isDeepSeekThinkingOnlyModel() -> Unit
                             modelId.isDeepSeekFamily() -> {
@@ -437,7 +457,7 @@ class ChatCompletionsAPI(
                         put("thinking", buildJsonObject {
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
-                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        val modelId = parameterModelId.normalizedReasoningModelId()
                         if (
                             level.isEnabled &&
                             level != ReasoningLevel.AUTO &&
@@ -452,7 +472,7 @@ class ChatCompletionsAPI(
                             put(
                                 "reasoning_effort",
                                 level.cappedEffort(
-                                    resolveOpenAIMaximumReasoningEffort(params.model.modelId)
+                                    resolveOpenAIMaximumReasoningEffort(parameterModelId)
                                 )!!,
                             )
                         }
@@ -525,7 +545,7 @@ class ChatCompletionsAPI(
                     }
 
                     host == DEEPSEEK_API_HOST -> {
-                        val modelId = params.model.modelId.normalizedReasoningModelId()
+                        val modelId = parameterModelId.normalizedReasoningModelId()
                         if (!modelId.isDeepSeekThinkingOnlyModel()) {
                             put("thinking", buildJsonObject {
                                 put("type", if (!level.isEnabled) "disabled" else "enabled")
@@ -541,7 +561,7 @@ class ChatCompletionsAPI(
                     }
 
                     host == "integrate.api.nvidia.com" -> {
-                        if ("deepseek-v4" in params.model.modelId.lowercase()) {
+                        if (parameterModelId.normalizedReasoningModelId().isDeepSeekV4Model()) {
                             if (level != ReasoningLevel.AUTO) {
                                 val effort = when (level) {
                                     ReasoningLevel.XHIGH,
@@ -572,23 +592,32 @@ class ChatCompletionsAPI(
                     }
 
                     else -> {
-                        val modelId = params.model.modelId.normalizedReasoningModelId()
-                        // Unknown compatible hosts may reject provider-specific fields. Only use
-                        // OpenAI's reasoning_effort for model families that follow that contract.
-                        if (
-                            level != ReasoningLevel.AUTO &&
-                            !modelId.isQwenFamily() &&
-                            !modelId.isDeepSeekFamily() &&
-                            !modelId.isDoubaoFamily()
-                        ) {
-                            put(
-                                "reasoning_effort",
-                                if (level == ReasoningLevel.OFF) {
-                                    "low"
-                                } else {
-                                    level.cappedEffort(ReasoningLevel.HIGH)!!
+                        val modelId = parameterModelId.normalizedReasoningModelId()
+                        when {
+                            modelId.startsWith("qwen3-8") -> {
+                                if (level != ReasoningLevel.AUTO) {
+                                    put("reasoning_effort", level.effort)
                                 }
-                            )
+                            }
+
+                            modelId.isQwenFamily() -> {
+                                put("enable_thinking", level.isEnabled)
+                                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                                    put("thinking_budget", level.cappedBudget(ReasoningLevel.MAX.budgetTokens)!!)
+                                }
+                            }
+
+                            modelId.isDeepSeekV4Model() -> {
+                                put("thinking", buildJsonObject {
+                                    put("type", if (level.isEnabled) "enabled" else "disabled")
+                                })
+                                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                                    put("reasoning_effort", level.deepSeekReasoningEffort())
+                                }
+                            }
+
+                            modelId.isDeepSeekFamily() || modelId.isDoubaoFamily() -> Unit
+                            level != ReasoningLevel.AUTO -> put("reasoning_effort", level.effort)
                         }
                     }
                 }
@@ -952,7 +981,8 @@ class ChatCompletionsAPI(
                     val toolName =
                         toolCalls.jsonObject["function"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
                     val arguments =
-                        toolCalls.jsonObject["function"]?.jsonObject?.get("arguments")?.jsonPrimitive?.contentOrNull
+                        toolCalls.jsonObject["function"]?.jsonObject?.get("arguments")
+                            ?.toToolArgumentString()
                     add(
                         UIMessagePart.Tool(
                             toolCallId = toolCallId ?: "",

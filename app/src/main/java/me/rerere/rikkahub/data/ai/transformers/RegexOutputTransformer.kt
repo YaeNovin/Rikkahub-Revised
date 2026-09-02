@@ -11,29 +11,41 @@ object RegexOutputTransformer : OutputMessageTransformer, KoinComponent {
     override suspend fun visualTransform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
-    ): List<UIMessage> {
-        val assistant = ctx.assistant
-        if (assistant.regexes.isEmpty()) return messages // No regexes, return original messages
-        return messages.map { message ->
-            val scope = when (message.role) {
-                MessageRole.ASSISTANT -> AssistantAffectScope.ASSISTANT
-                else -> return@map message // Skip non-assistant messages
-            }
-            message.copy(
-                parts = message.parts.map { part ->
-                    when (part) {
-                        is UIMessagePart.Text -> {
-                            part.copy(text = part.text.replaceRegexes(assistant, scope, visual = false))
-                        }
+    ): List<UIMessage> = transformActualAssistantContent(ctx.assistant, messages)
 
-                        is UIMessagePart.Reasoning -> {
-                            part.copy(reasoning = part.reasoning.replaceRegexes(assistant, scope, visual = false))
-                        }
+    override suspend fun onGenerationFinish(
+        ctx: TransformerContext,
+        messages: List<UIMessage>,
+    ): List<UIMessage> = transformActualAssistantContent(ctx.assistant, messages)
+}
 
-                        else -> part
-                    }
-                }
-            )
+internal fun transformActualAssistantContent(
+    assistant: me.rerere.rikkahub.data.model.Assistant,
+    messages: List<UIMessage>,
+): List<UIMessage> {
+    if (assistant.regexes.isEmpty()) return messages
+    val targetIndex = messages.indexOfLast { it.role == MessageRole.ASSISTANT }
+    if (targetIndex < 0) return messages
+    return messages.mapIndexed { index, message ->
+        if (index != targetIndex) return@mapIndexed message
+        val scope = when (message.role) {
+            MessageRole.ASSISTANT -> AssistantAffectScope.ASSISTANT
+            else -> return@mapIndexed message
         }
+        message.copy(
+            parts = message.parts.map { part ->
+                when (part) {
+                    is UIMessagePart.Text -> {
+                        part.copy(text = part.text.replaceRegexes(assistant, scope, visual = false))
+                    }
+
+                    is UIMessagePart.Reasoning -> {
+                        part.copy(reasoning = part.reasoning.replaceRegexes(assistant, scope, visual = false))
+                    }
+
+                    else -> part
+                }
+            }
+        )
     }
 }

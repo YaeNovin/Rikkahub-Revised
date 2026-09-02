@@ -5,8 +5,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.GoogleThoughtMetadata
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.toMetadata
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -430,6 +432,56 @@ class GoogleRequestMessageTest {
             response?.containsKey("result") == true)
         assertTrue("Result should contain expected output",
             response?.get("result")?.jsonPrimitive?.content?.contains("Expected output value") == true)
+    }
+
+    @Test
+    fun `Gemini provider function ID is echoed only when supplied by the model`() {
+        val providerId = "gijqjkbj"
+        val withProviderId = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = providerId,
+                    toolName = "workspace_shell",
+                    input = "{\"command\":\"pwd\"}",
+                    output = listOf(UIMessagePart.Text("{\"exitCode\":0}")),
+                    metadata = GoogleThoughtMetadata(functionCallId = providerId).toMetadata(),
+                )
+            ),
+        )
+        val withoutProviderId = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "local-only-id",
+                    toolName = "workspace_shell",
+                    input = "{\"command\":\"pwd\"}",
+                    output = listOf(UIMessagePart.Text("{\"exitCode\":0}")),
+                )
+            ),
+        )
+
+        fun functionParts(message: UIMessage): Pair<kotlinx.serialization.json.JsonObject, kotlinx.serialization.json.JsonObject> {
+            val contents = invokeBuildContents(listOf(UIMessage.user("run"), message))
+            val modelParts = contents.first { it.jsonObject["role"]?.jsonPrimitive?.content == "model" }
+                .jsonObject["parts"]!!.jsonArray
+            val responseParts = contents.first {
+                it.jsonObject["role"]?.jsonPrimitive?.content == "user" &&
+                    it.jsonObject["parts"]?.jsonArray?.any { part ->
+                        part.jsonObject.containsKey("functionResponse")
+                    } == true
+            }.jsonObject["parts"]!!.jsonArray
+            return modelParts.first { it.jsonObject.containsKey("functionCall") }.jsonObject["functionCall"]!!.jsonObject to
+                responseParts.first { it.jsonObject.containsKey("functionResponse") }.jsonObject["functionResponse"]!!.jsonObject
+        }
+
+        val (call, response) = functionParts(withProviderId)
+        assertEquals(providerId, call["id"]?.jsonPrimitive?.content)
+        assertEquals(providerId, response["id"]?.jsonPrimitive?.content)
+
+        val (legacyCall, legacyResponse) = functionParts(withoutProviderId)
+        assertTrue("Legacy Gemini calls must omit a synthetic protocol id", !legacyCall.containsKey("id"))
+        assertTrue("Legacy Gemini responses must omit a synthetic protocol id", !legacyResponse.containsKey("id"))
     }
 
     // ==================== Helper Functions ====================

@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.text.format.DateUtils
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
@@ -53,6 +54,7 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
+import me.rerere.rikkahub.utils.fileSizeToString
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -92,9 +94,10 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
                 }
             }
 
-            items(workspaces, key = { it.id }) { workspace ->
+            items(workspaces, key = { it.workspace.id }) { item ->
+                val workspace = item.workspace
                 WorkspaceCard(
-                    workspace = workspace,
+                    item = item,
                     onRename = { editTarget = workspace },
                     onDelete = { deleteTarget = workspace },
                     onOpen = { navController.navigate(Screen.WorkspaceDetail(workspace.id)) },
@@ -107,7 +110,7 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
         EditWorkspaceDialog(
             title = stringResource(R.string.workspace_page_create),
             initialName = "",
-            existingNames = workspaces.map { it.name.trim() }.toSet(),
+            existingNames = workspaces.map { it.workspace.name.trim() }.toSet(),
             onDismiss = { showAddDialog = false },
             onConfirm = { name ->
                 vm.create(name)
@@ -120,7 +123,10 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
         EditWorkspaceDialog(
             title = stringResource(R.string.workspace_page_rename),
             initialName = workspace.name,
-            existingNames = workspaces.filter { it.id != workspace.id }.map { it.name.trim() }.toSet(),
+            existingNames = workspaces
+                .filter { it.workspace.id != workspace.id }
+                .map { it.workspace.name.trim() }
+                .toSet(),
             onDismiss = { editTarget = null },
             onConfirm = { name ->
                 vm.rename(workspace, name)
@@ -174,12 +180,25 @@ private fun EmptyWorkspaceState() {
 
 @Composable
 private fun WorkspaceCard(
-    workspace: WorkspaceEntity,
+    item: WorkspaceListItem,
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onOpen: () -> Unit,
 ) {
+    val workspace = item.workspace
     var menuExpanded by remember { mutableStateOf(false) }
+    val policyLabel = when {
+        item.accessPolicy.readOnly -> stringResource(R.string.workspace_policy_read_only)
+        item.accessPolicy.effectiveShellEnabled -> stringResource(R.string.workspace_policy_full_access)
+        else -> stringResource(R.string.workspace_policy_safe_write)
+    }
+    val lastUsed = workspace.lastAccessAt?.let { timestamp ->
+        DateUtils.getRelativeTimeSpanString(
+            timestamp,
+            System.currentTimeMillis(),
+            DateUtils.MINUTE_IN_MILLIS,
+        ).toString()
+    } ?: stringResource(R.string.workspace_page_never_used)
 
     Card(
         modifier = Modifier
@@ -215,8 +234,35 @@ private fun WorkspaceCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = workspace.shellStatus.toShellStatusLabel(),
+                        text = stringResource(
+                            R.string.workspace_page_status_line,
+                            workspace.shellStatus.toShellStatusLabel(),
+                            policyLabel,
+                        ),
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.workspace_page_usage_line,
+                            item.filesBytes.fileSizeToString(),
+                            item.fileCount,
+                            item.assistantCount,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (item.integrity?.healthy == false) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = stringResource(R.string.workspace_page_last_used, lastUsed),
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

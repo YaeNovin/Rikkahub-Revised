@@ -2,6 +2,7 @@ package me.rerere.workspace
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -49,22 +50,44 @@ class RootfsInstallerTest {
         assertEquals("content", File(target, "dir/file.txt").readText())
     }
 
+    @Test
+    fun `extract rejects invalid tar header checksum`() {
+        val archive = tmp.newFile("invalid.tar.gz")
+        GZIPOutputStream(archive.outputStream()).use { out ->
+            out.writeTarEntry("file.txt", '0', "content".toByteArray(), corruptChecksum = true)
+            out.write(ByteArray(TAR_BLOCK * 2))
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            createInstaller().extractTar(archive, tmp.newFolder("invalid-out")) {}
+        }
+    }
+
     private fun createInstaller() = RootfsInstaller(WorkspaceManager(tmp.newFolder()))
 
-    private fun OutputStream.writeTarEntry(name: String, type: Char, data: ByteArray) {
+    private fun OutputStream.writeTarEntry(
+        name: String,
+        type: Char,
+        data: ByteArray,
+        corruptChecksum: Boolean = false,
+    ) {
         val header = ByteArray(TAR_BLOCK)
         name.toByteArray(Charsets.UTF_8).copyInto(header, 0)
         "0000755".toByteArray().copyInto(header, 100)
         data.size.toLong().toOctalField().copyInto(header, 124)
         header[156] = type.code.toByte()
+        header.fill(' '.code.toByte(), 148, 156)
+        val checksum = header.sumOf { it.toUByte().toInt() }
+        checksum.toLong().toOctalField(8).copyInto(header, 148)
+        if (corruptChecksum) header[0] = (header[0] + 1).toByte()
         write(header)
         write(data)
         val padding = (TAR_BLOCK - data.size % TAR_BLOCK) % TAR_BLOCK
         write(ByteArray(padding))
     }
 
-    private fun Long.toOctalField(): ByteArray =
-        toString(8).padStart(11, '0').toByteArray(Charsets.UTF_8)
+    private fun Long.toOctalField(length: Int = 12): ByteArray =
+        toString(8).padStart(length - 1, '0').toByteArray(Charsets.UTF_8) + byteArrayOf(0)
 
     companion object {
         private const val TAR_BLOCK = 512
