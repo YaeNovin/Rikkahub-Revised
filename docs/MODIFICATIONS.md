@@ -6,7 +6,7 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.6`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.7`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
@@ -32,6 +32,30 @@ are maintained separately from user-facing release descriptions.
 - English: QA compilation completed successfully; device installation remains
   pending USB-debugging authorization on the test device.
   中文：QA 编译已成功；测试设备仍需完成 USB 调试授权后才能覆盖安装。
+
+## 2.4.8-revised.7 Release Notes / 发布说明
+
+更新内容:
+
+- 新增 OrcaRouter 供应商，并提供官网、文档和兼容接口说明。
+- 优化不同模型与协议的参数、思考深度及工具调用适配。
+- 改进工作区本地文件访问、SAF 授权和命令执行安全性。
+- 增强提示词模板、占位符、世界书、记忆和娱乐模式扩展。
+- 增加请求统计、耗时记录、诊断信息和回归测试。
+- 修复聊天加载、流式恢复、分支对话及复杂内容渲染问题。
+- 改进图片生成设置、WebView 预览、Diff、LaTeX 和 Mermaid 显示。
+- 补充多语言资源与 Android 版本兼容性处理。
+
+Updates:
+
+- Added the OrcaRouter provider with official website, documentation, and compatibility details.
+- Improved model and protocol parameter, reasoning-depth, and tool-call handling.
+- Hardened workspace local-file access, SAF grants, and command execution.
+- Expanded prompt templates, placeholders, world books, memories, and entertainment extensions.
+- Added request statistics, timing diagnostics, and focused regression tests.
+- Fixed chat loading, stream recovery, conversation branches, and complex-content rendering.
+- Improved image-generation settings, WebView previews, Diff, LaTeX, and Mermaid rendering.
+- Added localized resources and Android-version compatibility handling.
 
 ## 2.4.8-revised.6 Maintenance Changes / 维护变更
 
