@@ -9,6 +9,7 @@
   [![最新版本](https://img.shields.io/github/v/release/YaeNovin/Rikkahub-Revised?display_name=tag&sort=semver)](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)
   [![许可证：AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
   [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg)](https://developer.android.com/about/versions/oreo)
+  [![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a)
 </div>
 
 > [!IMPORTANT]
@@ -57,6 +58,14 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 后续 Revised 正式版本必须继续使用同一签名证书。使用其他密钥签名的构建无法覆盖
 安装现有的 Rikkahub Revised。公开证书信息与签名连续性要求见
 [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md)。私有签名材料不会存放在本仓库中。
+
+## 供应商推广
+
+> **注意：** 以下供应商为顺便推广，属于第三方供应商，与本项目无关，请注意。
+
+| 供应商名称 | 供应商概述 |
+| --- | --- |
+| [OrcaRouter](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a) | 亚洲最大的大模型 API 网关，安全的零加价推理，按量付费或订阅皆可，除了付费模型，还长期提供免费模型供调用。智能路由、安全上线、更省成本。 |
 
 ## Revised 的主要改动
 

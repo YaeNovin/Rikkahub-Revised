@@ -9,6 +9,7 @@
   [![Latest release](https://img.shields.io/github/v/release/YaeNovin/Rikkahub-Revised?display_name=tag&sort=semver)](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)
   [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
   [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg)](https://developer.android.com/about/versions/oreo)
+  [![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a)
 </div>
 
 > [!IMPORTANT]
@@ -64,6 +65,15 @@ signed with another key cannot update an existing Rikkahub Revised installation.
 See [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for the public certificate record
 and signing continuity policy. Private signing material is never stored in this
 repository.
+
+## Provider Promotion
+
+> **Notice:** The providers below are listed for promotion only. They are
+> third-party providers and are not affiliated with this project.
+
+| Provider | Overview |
+| --- | --- |
+| [OrcaRouter](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a) | Asia's largest large-model API gateway, offering secure inference with zero markup. Pay-as-you-go and subscription plans are available, and free models are provided for long-term use alongside paid models. Intelligent routing, secure deployment, and lower costs. |
 
 ## What Revised Changes
 
