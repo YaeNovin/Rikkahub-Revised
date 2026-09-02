@@ -1,6 +1,6 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-08-21
+Notice date: 2026-09-03
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
@@ -29,9 +29,11 @@ are maintained separately from user-facing release descriptions.
   WebView previews, image-generation settings, and Android compatibility paths;
   focused regression tests were added alongside the fixes.
   中文：修复聊天加载与流式恢复、富内容渲染、WebView 预览、生图设置及 Android 兼容性路径问题，并同步增加针对性回归测试。
-- English: QA compilation completed successfully; device installation remains
-  pending USB-debugging authorization on the test device.
-  中文：QA 编译已成功；测试设备仍需完成 USB 调试授权后才能覆盖安装。
+- English: Built and published the signed `2.4.8-revised.7` release from
+  commit `33caebdd`; the public release includes the ARM64 APK and bilingual
+  release notes.
+  中文：已基于提交 `33caebdd` 构建并发布签名正式版 `2.4.8-revised.7`；公开
+  Release 包含 ARM64 安装包和双语发布说明。
 
 ## 2.4.8-revised.7 Release Notes / 发布说明
 
@@ -246,7 +248,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.6` and signing values
+- `release` uses `2.4.8-revised.7` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.
@@ -272,18 +274,18 @@ The restored in-app updater checks only:
 https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest
 ```
 
-GitHub `404` is treated as no published update. Release tags use
-`v2.4.8-revised.N`; each distributed update must increment both `N` and Android
-`versionCode`. The release must be a non-draft, non-prerelease GitHub Release so
-it is returned by `/releases/latest`.
+GitHub `404` is treated as no published update. Release tags accept an optional
+leading `v`; historical Revised releases use the `v2.4.8-revised.N` form, while
+the current `2.4.8-revised.7` release omits the prefix. Each distributed update
+must increment both `N` and Android `versionCode`. The release must be a
+non-draft, non-prerelease GitHub Release so it is returned by `/releases/latest`.
 
 The updater accepts APK assets only from this repository. It offers the first
 matching ABI from `Build.SUPPORTED_ABIS` plus the Universal fallback and filters
-out incompatible architectures. Official release assets must use these names:
+out incompatible architectures. Asset names may include a version suffix; the
+updater identifies the ABI from the filename. The current ARM64 asset is:
 
-- `app-arm64-v8a-release.apk`
-- `app-x86_64-release.apk`
-- `app-universal-release.apk`
+- `app-arm64-v8a-release-2.4.8-revised.7.apk`
 
 Android still enforces signing continuity during installation. Every public APK
 must use the certificate recorded in `RELEASE_SIGNING.md`. Release descriptions

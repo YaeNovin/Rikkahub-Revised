@@ -29,7 +29,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`v2.4.8-revised.6`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.6) |
+| Current release | [`2.4.8-revised.7`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.7) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -49,6 +49,11 @@ Official Rikkahub Revised APKs are published only through this repository's
 | `app-x86_64-release.apk` | x86_64 emulators and compatible devices |
 | `app-universal-release.apk` | Universal fallback containing ARM64 and x86_64 native libraries |
 
+Release asset filenames may include the release version suffix. For example,
+the current `.7` release publishes
+`app-arm64-v8a-release-2.4.8-revised.7.apk`; the updater detects the device ABI
+from the asset name.
+
 The in-app updater reads the latest public release from this repository and
 offers an APK compatible with the device ABI. Release descriptions contain only
 user-facing updates and fixes; package integrity and signing continuity are
@@ -65,7 +70,19 @@ repository.
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
 
-### Current Formal Release: v2.4.8-revised.6
+### Current Formal Release: 2.4.8-revised.7
+
+- Added the OrcaRouter provider with official website and documentation links.
+- Improved model- and protocol-aware parameters, reasoning depth, tool calls,
+  and third-party compatible endpoints.
+- Expanded workspace SAF/local-file operations, shell execution safeguards,
+  prompt templates, placeholders, world books, memories, and entertainment mode.
+- Added request statistics, high-precision timing diagnostics, and focused
+  regression coverage.
+- Fixed chat loading, stream recovery, conversation branches, and complex
+  Markdown, Diff, LaTeX, Mermaid, and WebView rendering.
+- Improved image-generation settings and full-screen previews, plus localized
+  resources and Android compatibility handling.
 
 - Added model-aware request parameters for OpenAI, Claude, Gemini, Grok, Qwen,
   and DeepSeek, plus sanitized diagnostics that omit credentials, prompts,

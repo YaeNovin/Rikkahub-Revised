@@ -27,7 +27,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`v2.4.8-revised.6`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/v2.4.8-revised.6) |
+| 当前版本 | [`2.4.8-revised.7`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.7) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -47,6 +47,9 @@ Rikkahub Revised 的正式 APK 仅通过本仓库的
 | `app-x86_64-release.apk` | x86_64 模拟器及兼容设备 |
 | `app-universal-release.apk` | 同时包含 ARM64 与 x86_64 原生库的通用备用包 |
 
+Release 资产文件名可能包含版本后缀。例如当前 `.7` 版本发布的 ARM64 安装包为
+`app-arm64-v8a-release-2.4.8-revised.7.apk`；应用内更新功能会根据文件名识别设备 ABI。
+
 应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
 APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
 流程中单独核验。
@@ -59,7 +62,16 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-### 当前正式版：v2.4.8-revised.6
+### 当前正式版：2.4.8-revised.7
+
+- 新增 OrcaRouter 供应商，并提供官网和文档链接。
+- 优化按模型与协议适配的参数、思考深度、工具调用及第三方兼容接口。
+- 扩展工作区 SAF/本地文件操作和命令执行安全性，并完善提示词模板、占位符、世界书、
+  记忆与娱乐模式。
+- 增加请求统计、高精度耗时诊断和针对性回归测试。
+- 修复聊天加载、流式恢复、分支对话，以及 Markdown、Diff、LaTeX、Mermaid 和 WebView
+  等复杂内容的渲染问题。
+- 改进图片生成设置和全屏预览，并补充多语言资源与 Android 版本兼容性处理。
 
 - 为 OpenAI、Claude、Gemini、Grok、Qwen 和 DeepSeek 增加按模型能力适配的请求
   参数，并新增不记录凭据、提示词、Schema 与二进制内容的脱敏诊断。

@@ -68,12 +68,14 @@ Before publishing an APK or AAB:
 - Repository: `https://github.com/YaeNovin/Rikkahub-Revised`
 - API: `https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest`
 - First tag/version: `v2.4.8-revised.1` / `2.4.8-revised.1`
-- Current tag/version: `v2.4.8-revised.6` / `2.4.8-revised.6`
-- APK assets: `app-arm64-v8a-release.apk`, `app-x86_64-release.apk`, and
-  `app-universal-release.apk`
+- Current tag/version: `2.4.8-revised.7`
+- Current APK asset: `app-arm64-v8a-release-2.4.8-revised.7.apk`
+- Historical tags may use the optional `v` prefix; the updater accepts both
+  forms and compares the normalized version.
 
 Publish each user-facing update as a full GitHub Release, not a draft and not a
 GitHub prerelease. The app treats a `404` from `/releases/latest` as no update,
 compares tags after accepting an optional leading `v`, and offers only the
-device's preferred ABI plus the Universal fallback. The updater never downloads
+device's preferred ABI plus the Universal fallback. Versioned APK asset names
+are supported as long as they retain the ABI token. The updater never downloads
 an upstream RikkaHub APK.
