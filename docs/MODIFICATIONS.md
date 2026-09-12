@@ -1,6 +1,6 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-09-03
+Notice date: 2026-09-12
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
@@ -11,6 +11,46 @@ upstream `2.4.8` tag at commit
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2026-09-12 Grouped Upload Scope / 分组上传范围
+
+The pending source changes are being prepared as grouped commits so provider,
+application, rendering, shared-platform, and documentation changes can be
+reviewed independently. Generated APKs, local Gradle caches, IDE metadata,
+signing files, local properties, logs, and verification-only scripts are not
+part of the upload scope.
+
+本次待上传源码按 Provider/AI、应用核心、聊天与渲染 UI、公共模块与 Web UI、文档
+分组提交。APK、Gradle 缓存、IDE 文件、签名材料、local.properties、日志以及仅用于
+本地验证的脚本均不上传。
+
+### Latest provider and interaction additions / 最新 Provider 与交互新增
+
+- DeepSeek V4.1-Flash uses the documented `deepseek-flash` model name and keeps
+  legacy aliases compatible. The implementation covers the 1M context window,
+  384K maximum output, vision input, reasoning effort, JSON output, tool choice,
+  and OpenAI/Responses/Anthropic request differences.
+  中文：DeepSeek V4.1-Flash 使用官方 `deepseek-flash` 名称并兼容旧别名，补齐
+  1M 上下文、384K 最大输出、视觉输入、思考强度、JSON 输出、工具选择，以及
+  OpenAI/Responses/Anthropic 协议差异。
+- `ask_user` supports richer choices, numeric controls, date/time input,
+  confirmation countdowns, conditional fields, and protocol-safe schemas.
+  中文：`ask_user` 支持富选项、数值控件、日期/时间、带倒计时确认、条件字段联动
+  和协议安全的工具 Schema。
+- Media/video generation keeps tasks alive in the background and records output
+  safely before writing it back to conversations.
+  中文：图片/视频生成支持后台保活，并在写回对话前安全保存生成结果。
+
+### Latest UI and rendering additions / 最新 UI 与渲染新增
+
+- Added offline renderer assets and licenses for diagrams, maps, music notation,
+  chemistry, Markdown extensions, SVG, and KaTeX.
+- Added full-screen preview positioning, source/render switching, GitHub repository
+  cards, request-log formatting, memory diagnostics, inspiration cards, and
+  adaptive appearance/text-color controls.
+- 增加图表、地图、乐谱、化学式、Markdown 扩展、SVG 与 KaTeX 的离线渲染资源及
+  许可证；完善全屏预览定位、源码/渲染切换、GitHub 仓库卡片、请求日志格式化、
+  记忆诊断、灵感卡片和自适应外观/文字配色。
 
 ## Current Upload Scope / 本次上传内容
 

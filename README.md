@@ -125,6 +125,24 @@ or changes the following areas:
 - A separate application ID, isolated URI schemes and authorities, and
   opt-in Firebase integration.
 
+### Unreleased changes prepared after 2.4.8-revised.7
+
+- Added DeepSeek V4.1-Flash model recognition through the canonical
+  `deepseek-flash` name and legacy aliases, including 1M context, 384K output
+  limits, vision input, reasoning-effort mapping, and tool-call safeguards.
+- Added richer `ask_user` interactions, safer cross-protocol tool schemas,
+  background media generation, video-provider support, and generation keepalive
+  handling.
+- Added offline rendering assets and regression coverage for KaTeX, SVG,
+  Mermaid, Graphviz, charts, maps, music notation, GitHub cards, and WebView
+  full-screen previews.
+- Added conversation-scoped memory controls, memory lifecycle handling,
+  context accounting, inspiration cards, chat suggestions, request-log
+  formatting, and appearance/text-color improvements.
+
+These changes are included in the current source branch and are not a numbered
+release until a new APK is built, tested, signed, and published.
+
 For the auditable modification record, upstream comparison, and release
 requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).
 

@@ -8,6 +8,22 @@ in Android application packages.
 
 ## Bundled Assets
 
+### Offline ECharts map data (2026-09-09)
+
+`html/maps/china.json` and `html/maps/world.json` are unchanged data files from
+the Apache ECharts 4.9.0 npm distribution, under its Apache-2.0 license (packaged
+as `html/licenses/echarts-maps-4.9.0-Apache-2.0.txt`). The China file uses ECharts'
+UTF8Encoding format; ECharts decodes it when registering the map. These are the
+historical visualization boundaries supplied with that version, not a current
+administrative boundary database. Explicit user-supplied geometry takes priority.
+
+| Asset | Fixed source | SHA-256 |
+| --- | --- | --- |
+| `maps/china.json` | `https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/json/china.json` | `d392f651a48e6213c9bfc83f406711069de296c17f426cffc0ad1148078ee226` |
+| `maps/world.json` | `https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/json/world.json` | `049b334579e5a42d5d16c72d014d380e048e39fc1504049f212acb589484d2fa` |
+
+### Rendering libraries
+
 | Local asset | Component/version | License | Immutable source | SHA-256 |
 | --- | --- | --- | --- | --- |
 | `mermaid.min.js` | Mermaid 10.9.8 | MIT | `https://cdn.jsdelivr.net/npm/mermaid@10.9.8/dist/mermaid.min.js` | `be7ad45eafe33b6753d65e0b020dbcf041dd7d54264053bd3f942d2ce01c823d` |
@@ -52,3 +68,62 @@ The Gradle dependency graph is not enumerated in this static-asset notice.
 Before distributing an APK/AAB, generate and review a dependency-license report
 for the exact release variant and preserve any additional notices required by
 those dependencies.
+
+## Additional renderer assets (2026-09-09)
+
+The user-supplied files below are copied without changes; `index.min.js` is
+renamed to `graphviz.min.js` to identify its module. Versions were checked from
+bundle exports/headers. `SmilesDrawer.Version` is 2.4.1; its bundled chroma code
+also contains a separate 2.4.2 version string.
+
+| Local asset under `html/renderers` | Component | License | SHA-256 |
+| --- | --- | --- | --- |
+| `graphviz.min.js` | @hpcc-js/wasm-graphviz 1.29.0, embedded Graphviz 16.1.0 | Apache-2.0 wrapper; EPL-2.0 Graphviz | `ba9b08b9a8c96613075c7b4f6c49512e04ddc6ce2e9cc20675837b976fe6caab` |
+| `wavedrom.min.js` | WaveDrom 3.1.0 | MIT | `eba17f2bd0e72ba737c65f5488a75657d3592f6b0a59aff2a43870439ae6fee5` |
+| `vega-embed.js` | Vega Embed 7.2.0 | BSD-3-Clause | `b69eac2846a0061683b7e03501790fb0bcbdb851c797c6baf3417c9d8852819e` |
+| `smiles-drawer.js` | SmilesDrawer 2.4.1 | MIT; embedded chroma notices preserved in bundle | `6b0397cd52a708eeafb995f191d6d972449377e5603ae603cb210f537666fddc` |
+| `opensheetmusicdisplay.js` | OpenSheetMusicDisplay 2.1.2 | BSD-3-Clause; dependencies retain their licenses | `888b744196665ab10dba7ee311784deea9e1c545cf60b6089d455afec6b50a3f` |
+| `jquery.min.js` | jQuery 3.6.4, supplied utility, not loaded by renderers | MIT | `a0fe8723dcf55da64d06b25446d0a8513e52527c45afcb37073465f9c6f352af` |
+
+Required fixed-version dependencies fetched from official npm distributions:
+
+| Asset | Source | SHA-256 |
+| --- | --- | --- |
+| `wavedrom-skin.js` | `https://cdn.jsdelivr.net/npm/wavedrom@3.1.0/skins/default.js` | `7ddb9cfd9b339397b35b0b36b889d8fc02d656622b995e954e05dbb184917852` |
+| `vega.min.js` | `https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js` | `8f6a3587cf8d4f42c7e08120e3eb05d067e746d554e39d2dcf52acc0bd5ba28f` |
+| `vega-lite.min.js` | `https://cdn.jsdelivr.net/npm/vega-lite@6.4.3/build/vega-lite.min.js` | `35a9821df838825b05a6a73e9414b58747a1b18321583858ed903c66393a5c7e` |
+
+License texts are packaged in `html/licenses`: `wavedrom-3.1.0.txt`,
+`graphviz-wasm-1.29.0.txt`, `graphviz-16.1.0-EPL-2.0.txt`, `vega-6.4.0.txt`,
+`vega-lite-6.4.3.txt`, `vega-embed-7.2.0.txt`, `smiles-drawer-2.4.1.txt`,
+`opensheetmusicdisplay-2.1.2.txt`, `jquery-3.6.4.txt`, `jszip-3.10.1.txt`,
+`vexflow-1.2.93.txt`, `loglevel.txt` and `typescript-collections-1.3.3.txt`.
+Graphviz's corresponding source is available at
+`https://gitlab.com/graphviz/graphviz/-/tree/16.1.0`; the wrapper source is
+`https://github.com/hpcc-systems/hpcc-js-wasm` and npm package
+`@hpcc-js/wasm-graphviz@1.29.0`. The repository's small `graphviz-worker.js`
+adapter is separate from these unmodified vendor assets.
+
+## Offline whole-message HTML preview
+
+All URLs in this table are fixed npm package distributions under
+`https://cdn.jsdelivr.net/npm/`. Scripts/styles live in `html/renderers`.
+
+| Asset | Source suffix | License | SHA-256 |
+| --- | --- | --- | --- |
+| `markdown-it.min.js` | `markdown-it@14.0.0/dist/markdown-it.min.js` | MIT | `bcdac8ec17bb3afb710adf35a50162c28b8f7d6ebfd5d7e59b808002a1391995` |
+| `markdown-it-task-lists.min.js` | `markdown-it-task-lists@2.1.1/dist/markdown-it-task-lists.min.js` | ISC | `4f3b23f41bb3787957da2602fbccc4df0d017928c1fce62583159e096b832a81` |
+| `katex.min.js` | `katex@0.16.8/dist/katex.min.js` | MIT | `d4f0ea25c4ccb7986b229d6427794b7063cf3209b0376cf5a64bfc4dd7918c95` |
+| `mhchem.min.js` | `katex@0.16.8/dist/contrib/mhchem.min.js` | bundled notices retained | `f0ca03df194b8c3d6017ff455db6a0ef98857905663fa311a6cded788b15340b` |
+| `markdown-it-katex.source.js` | `@vscode/markdown-it-katex@1.1.2/dist/index.js` | MIT | `27f34d152f9773e5f7200effaab9157bbd2669409e85a0a5faa86ff85c05f1f9` |
+
+`katex.min.css` and all 60 referenced files under `fonts/` come from the same
+KaTeX 0.16.8 distribution. License files are packaged under `html/licenses`:
+`markdown-it-14.0.0.txt`, `markdown-it-task-lists-2.1.1.txt`, `katex-0.16.8.txt`
+and `markdown-it-katex-1.1.2.txt`.
+
+`markdown-it-katex.js` is generated from the preserved source with esbuild
+0.25.12, `--bundle --format=iife --global-name=markdownItKatex --target=chrome74`
+and `--alias:katex=./scripts/katex-browser-global.cjs`. The adapter shares the
+page's KaTeX instance so the mhchem extension remains available. Its SHA-256 is
+`a3beaaf7c426689b8d600f266ef6bb70591a38e8a2cbdd0a14573955eacf653e`.

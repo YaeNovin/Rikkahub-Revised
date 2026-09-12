@@ -103,6 +103,20 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - 独立应用 ID、隔离的 URI Scheme 与 Provider Authority，以及默认关闭的
   Firebase 集成。
 
+### 2.4.8-revised.7 之后准备合入的未发布修改
+
+- 增加 DeepSeek V4.1-Flash 模型识别，支持规范名称 `deepseek-flash` 与旧别名，
+  并补齐 1M 上下文、384K 输出上限、视觉输入、思考强度映射和工具调用保护。
+- 增强 `ask_user` 交互、跨协议工具 Schema、后台媒体生成、视频供应商接入和后台
+  生成保活处理。
+- 增加 KaTeX、SVG、Mermaid、Graphviz、图表、地图、乐谱、GitHub 卡片和 WebView
+  全屏预览的离线资源与回归测试。
+- 增加按对话记忆控制、记忆生命周期、上下文统计、灵感卡片、聊天建议、请求日志
+  格式化及外观/文字配色优化。
+
+这些修改已包含在当前源码分支中，但在完成新的 APK 构建、测试、签名和发布前，
+不会标记为新的正式版本。
+
 完整的修改记录、上游对比和发行要求见
 [MODIFICATIONS.md](docs/MODIFICATIONS.md)。
 
