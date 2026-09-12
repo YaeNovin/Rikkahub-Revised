@@ -135,6 +135,21 @@ flowchart LR
 
 ## 7. 常见改动定位表
 
+2026-09-12 新增与重组的实现入口：
+
+| 功能 | 主要实现 | 配套内容 |
+| --- | --- | --- |
+| 后台记忆与对话索引 | `app/.../data/memory/MemoryExtractionService.kt`、`ConversationMemoryIndexService.kt` | 记忆状态、身份、范围、DAO 与 `Migration_42_43.kt`；Room 当前版本 43，保留 35～43 的增量 schema |
+| ask_user | `ai/.../ui/AskUserProtocol.kt`、`AskUserContract.kt`、`AskUserInteraction.kt` | Android 问答组件、Web `tool-part.tsx`、协议 Schema 兼容和草稿持久化 |
+| 聊天生图与视频 | `ChatImageGenerationService`、`ImageGenerationRequestState`、`VideoGenerationCoordinator`、`VideoGenerationWorker` | 共享图片参数、独立视频页、`InlineVideo`、任务/输出表、`GenerationKeepAliveService` |
+| 世界书导入与诊断 | `TavernLorebookCodec`、`NativeLorebookCodec`、`LorebookRules` | 条目编辑、批量处理、导入预览与触发模拟器 |
+| 预览与滚动 | `ChatPreviewReturn`、`ChatWebPreviewHost`、`StreamingScrollGate` | `assets/html/fullscreen-pan.js`、离线渲染依赖、就绪跟踪与设备回归 |
+| 外观与配色 | `ThemeColorSource`、`TextColorPalette`、`ChatComposerSurface`、`AgslGradientBackground` | HCT/HEX、统一表面、液态玻璃、页面性能开关；不与文字取色混用组件强调色 |
+| 建议与灵感卡片 | `ChatSuggestionContract`、`SuggestionGenerationGate`、`InspirationCards` | 全局/助手配置、变量草稿、单一滚动面板与自定义卡片 |
+| 日志与 GitHub 卡片 | `LogBodyCapture`、`LogExport`、`LogAnalysisStore`、`GitHubRepository` | Gzip 读取、请求参数、分析保存与导出、Room 缓存和限流回退 |
+
+完整功能文档见[索引](../README.md)。审核记录中的测试结论属于对应日期，不能替代当前提交的验证。
+
 | 开发目标 | 首要修改位置 | 通常还需检查 |
 | --- | --- | --- |
 | 新增模型供应商或修复流式协议 | `ai/.../provider/providers/` | `ProviderManager`、`ModelRegistry`、`app` 的 Provider 设置与生成编排 |
@@ -163,6 +178,12 @@ flowchart LR
 ```
 
 `web` 模块的 `preBuild` 会执行 `web-ui` 的 `pnpm run build`，因此 Android 构建前需要先在 `web-ui/` 安装依赖。Firebase 与 Crashlytics 默认关闭，普通构建不需要 `app/google-services.json`；只有显式启用 Firebase 时才需要提供与 Revised 应用 ID 匹配的维护者配置。
+
+默认使用根目录的 Gradle 9.5.0 Wrapper。JVM 定向测试使用模块的
+`testDebugUnitTest --tests '完整测试类名'`；`test` 聚合任务不接受 `--tests`。
+QA 用 `:app:assembleQa`，设备测试用独立 Debug 测试包。QA 保留旧包名
+`me.rerere.rikkahub`，Release 使用 `.revised`，不能跨包名覆盖安装。
+通用脚本的运行前提见 [scripts/README.md](../scripts/README.md)，生成报告和截图不上传。
 
 ## 9. 维护规则
 

@@ -360,7 +360,7 @@ class ChatCompletionsAPI(
                     deepSeekSupport.available && params.reasoningLevel.isEnabled ->
                         put("top_p", topP.coerceIn(0.95f, 1f))
                     deepSeekSupport.available -> Unit // ignored by DeepSeek in non-thinking mode
-                    else -> put("top_p", topP)
+                    isModelAllowTemperature(params) -> put("top_p", topP)
                 }
             }
             val deepSeekMaxTokens = params.deepSeekMaxOutputTokens()

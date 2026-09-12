@@ -62,7 +62,7 @@ class AssistantImporterTest {
         ).jsonObject
 
         val lorebook = parseEmbeddedTavernLorebook(data, "Mage")
-        assertEquals("Mage World Book", lorebook?.name)
+        assertEquals("Mage 世界书", lorebook?.name)
         assertEquals(listOf("magic"), lorebook?.entries?.single()?.keywords)
     }
 }

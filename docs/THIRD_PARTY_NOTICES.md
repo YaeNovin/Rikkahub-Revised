@@ -34,11 +34,15 @@ administrative boundary database. Explicit user-supplied geometry takes priority
 | `renderers/leaflet.css` | Leaflet 1.9.4 | BSD-2-Clause | `https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css` | `a7837102824184820dfa198d1ebcd109ff6d0ff9a2672a074b9a1b4d147d04c6` |
 | `renderers/leaflet.js` | Leaflet 1.9.4 | BSD-2-Clause | `https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js` | `db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a` |
 | `renderers/railroad-diagrams.css` | Railroad Diagrams 1.0.0 | CC0-1.0 | `https://cdn.jsdelivr.net/npm/railroad-diagrams@1.0.0/railroad-diagrams.css` | `cbffdbb716d877d9cb2353dd57c95f47770fd6a770f827e1b999f2e9b81e9fb1` |
-| `renderers/railroad-diagrams.js` | Railroad Diagrams 1.0.0 | CC0-1.0 | `https://cdn.jsdelivr.net/npm/railroad-diagrams@1.0.0/railroad-diagrams.js` | `5d6a6210c57aa24965edd5f9e4f02415e624f922d107246de9639244b9d16c47` |
+| `renderers/railroad-diagrams.js` | Railroad Diagrams commit 736dec7 | CC0-1.0 | `https://github.com/tabatkins/railroad-diagrams/blob/736dec7cc847530ab7d498b1a3331e61b1752ada/railroad.js` | `6fe4cf84a9bd9ca56edd1316923ff8b711a21d2c7d6d174d72fa345d95b977ec` |
 
 The Mermaid file is derived from the official 10.9.8 distribution and differs
-only in 18 whitespace bytes; all non-whitespace content is identical. The other
-eight files are byte-for-byte identical to the fixed-version sources above.
+only in 18 whitespace bytes; all non-whitespace content is identical. The seven
+other original assets retain the recorded fixed-version bytes. Railroad JS now
+uses the pinned source commit above with a browser wrapper: ESM exports are
+removed and public constructor factories are exposed globally, including Stack.
+The stylesheet remains at 1.0.0 and the CC0 license continues to apply. The hash
+in its row identifies the packaged wrapper, not the upstream source file.
 
 ## Copyright and Attribution
 

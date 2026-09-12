@@ -114,7 +114,9 @@ uses the same planner with a forced target and optional user instructions.
 5. Enabled skill tools.
 6. Connected MCP tools, renamed as `mcp__{serverName}__{toolName}`.
 
-`GenerationHandler` then prepends enabled memory tools and knowledge-base tools.
+`GenerationHandler` adds enabled knowledge-base tools. Memory extraction tools
+are no longer mounted on the foreground chat model: extraction runs separately
+after a completed answer, subject to the conversation's effective memory policy.
 For a model with tool-calling support, it also adds
 `get_session_capabilities`, which reports the tools and retrieval modes
 available in the current request.
@@ -167,9 +169,29 @@ Knowledge tool results can contribute citations through the same normalized
 annotation path.
 
 Memory RAG follows a similar query flow. It selects the assistant-specific or
-global memory scope, prefers compatible stored embeddings, falls back to
-lexical matching, and adds up to six memories as context. Memory context is
-explicitly informational rather than instructional.
+global scope for facts; episodic records and conversation fragments are isolated
+by conversation. It merges compatible vector and lexical matches, selects up to
+six active memories and four eligible fragments within separate text budgets,
+and excludes fragments already present in the outgoing request. Memory context
+is explicitly informational rather than instructional.
+
+New conversations default to a blank-slate memory policy. A branch inherits its
+source mode while subsequent indexing belongs to the new conversation. Users can
+select inherited, enabled, disabled, RAG-only, or extraction-only behavior from
+More → Recent memories. Extraction-only uses saved active memories as basic
+context and never calls the vector model. An embedding model builds fragment
+indexes; it does not generate fact/episode summaries.
+
+After a completed answer, `ChatService` schedules `MemoryExtractionService`
+separately from foreground generation. Batching, fingerprints, checkpoints and
+cooldowns avoid processing every regeneration. Empty output creates no record;
+failures remain visible and may be retried manually. Before saving to Room, the
+extractor rechecks the conversation policy and task identity. Episodic records
+move between Active, Completed and Superseded states; only active records are
+eligible for everyday recall. Stable memory/revision IDs, content hashes and
+embedding keys keep records, versions and indexes distinct. See
+[memory controls](../memory-extraction-only.md) and
+[memory identity](../memory-identity-and-readability.md).
 
 ## 6. Provider Invocation and Streaming
 

@@ -9,12 +9,20 @@ password.
 - Display name: `Rikkahub Revised`
 - Release application ID: `me.rerere.rikkahub.revised`
 - Debug application ID: `me.rerere.rikkahub.revised.debug`
-- QA application ID: `me.rerere.rikkahub.revised.qa`
+- QA application ID: `me.rerere.rikkahub` (legacy test installation)
 - Custom URI scheme: `rikkahub-revised://`
 
 Changing the release application ID again creates another independent Android
 application. The revised ID deliberately installs alongside upstream RikkaHub;
 the two applications do not share or automatically migrate app data.
+
+QA deliberately retains the legacy test package ID in `app/build.gradle.kts`.
+It is separate from the Revised release and Debug IDs, but collides with an
+upstream installation using `me.rerere.rikkahub`. An in-place update requires
+the same package ID and signing certificate; `adb install -r` preserves data
+only for that matching application. Never uninstall or clear data to work
+around a signing mismatch. QA uses the configured local debug certificate and
+must not be distributed as a signed Revised release.
 
 ## Release Certificate
 

@@ -4,6 +4,12 @@
 
 Chat suggestions use one local contract. A model can call `get_session_capabilities` to inspect the active display mode, limits, categories, actions, and draft-form rules. The tool returns a compact result by default; pass `include_suggestion_details: true` to receive the response schema and example.
 
+「更多 → 聊天建议」面板使用一个纵向滚动容器，标题、操作、建议卡片及运行摘要随面板整体滚动，取消内层 320dp 列表限制。聊天页底部的紧凑建议栏仍横向滚动，并服从外观设置中的高度限制。
+
+The More → Chat suggestions panel uses one vertical scroll container for its
+heading, actions, cards, and run summary. The compact chat dock keeps horizontal
+scrolling and its configurable height limit.
+
 建议始终作为草稿处理：点击建议只会预览或插入输入框，不会自动发送消息、执行工具、搜索或修改工作区。需要用户输入的建议可以使用 `text`、`single`、`multi`、`slider`、`rating`、`date` 和 `time` 字段，并通过 `{{question_id}}` 插值；确认、危险操作和倒计时字段不属于建议表单。
 
 Suggestions are drafts. Selecting one previews or inserts text into the composer and never sends a message, executes a tool, searches, or changes a workspace automatically. A suggestion may use `text`, `single`, `multi`, `slider`, `rating`, `date`, or `time` fields and reference them with `{{question_id}}`; confirmation, dangerous-operation, and countdown fields are intentionally excluded.

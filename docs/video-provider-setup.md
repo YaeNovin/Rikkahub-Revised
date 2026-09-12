@@ -1,5 +1,20 @@
 # Video provider setup
 
+## Ark / Seedance (Jimeng)
+
+Use an OpenAI-compatible provider on an Ark host such as
+`https://ark.cn-beijing.volces.com/api/v3`, with an authorized Seedance model
+or endpoint ID configured as VIDEO. The native task API uses
+`POST /contents/generations/tasks` and `GET /contents/generations/tasks/{id}`
+relative to that base URL. The app displays supported inputs, duration,
+resolution, ratio and advanced options according to `seedanceVideoGenerationConstraints`.
+Opaque endpoint IDs cannot prove model capabilities: confirm the actual model
+behind the endpoint before relying on its controls.
+
+The independent page stores tasks and polls their status. Download retries reuse
+the existing remote task. Reusing parameters submits a new task and may incur
+another charge. A task that lost its remote ID is not automatically resubmitted.
+
 ## MiniMax Hailuo
 
 The existing MiniMax Anthropic configuration and OpenAI configurations on official
@@ -61,7 +76,8 @@ integration and revision-specific capability testing are still required.
 
 This is an adapter for the existing configuration, not a new provider entry.
 Host: sui-xiang.com. Models: as-sd2.0-fast, video-ds-2.0, video-ds-2.0-fast.
-Source: user-supplied screenshot D:/Photos/屏幕截图(73).png.
+Source: provider configuration supplied during development. This route is a
+compatibility implementation and has not been verified against a paid live request.
 
 POST /v1/videos sends exactly model, prompt, seconds (string "15"), aspect_ratio.
 Ratios: 9:16 and 16:9. Fixed 720p; resolution and other custom fields are omitted.

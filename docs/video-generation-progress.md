@@ -1,6 +1,16 @@
 # Video generation implementation status
 
-Source: the plan screenshot in D:/Photos, reviewed on 2026-09-07.
+Current source status: 2026-09-12. The original implementation notes below refer
+to the 2026-09-07 milestone; they are not a claim of live provider verification.
+
+## Current provider scope
+
+Ark/Seedance, xAI/Grok, Kling and MiniMax/Hailuo adapters are present, along with
+the specific Sui Xiang compatible route. Setup, accepted model IDs, supported
+parameters and remaining limits are documented in [video-provider-setup.md](video-provider-setup.md).
+User-configurable arbitrary field mapping is still pending.
+Generation keepalive and foreground notifications reduce interruptions but do
+not guarantee that Android or a vendor ROM will keep the process alive.
 
 ## Implemented
 
@@ -51,9 +61,10 @@ Source: the plan screenshot in D:/Photos, reviewed on 2026-09-07.
 - Result download retries re-query the existing remote task and preserve already downloaded files.
 - Submission cancellation records intent while allowing the task ID response to finish; recovery without an ID reports an unknown result.
 - Startup removes stale partial downloads older than 24 hours, preserving completed files.
-- Third-party provider mapping is deferred together with additional official provider integrations by user direction.
+- The original milestone deferred additional providers. The adapters listed at
+  the top of this document have since been added; arbitrary field mapping remains deferred.
 
-- Normal :app:compileQaKotlin passed without skipping Javac tasks.
+- The original milestone passed `:app:compileQaKotlin` (Kotlin compilation).
 - Nine selected app unit tests passed (request state, task state, filename, historical media policy).
 - No real paid API request, APK assembly, or device installation was performed in this iteration.
 - Compilation does not establish runtime WorkManager dependency injection or end-to-end generation correctness.

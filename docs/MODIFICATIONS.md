@@ -14,15 +14,19 @@ are maintained separately from user-facing release descriptions.
 
 ## 2026-09-12 Grouped Upload Scope / 分组上传范围
 
-The pending source changes are being prepared as grouped commits so provider,
+The source changes are organized as grouped commits so provider,
 application, rendering, shared-platform, and documentation changes can be
 reviewed independently. Generated APKs, local Gradle caches, IDE metadata,
-signing files, local properties, logs, and verification-only scripts are not
-part of the upload scope.
+signing files, local properties, and logs are not part of the upload scope.
+Reusable regression scripts and the KaTeX build adapter are included so the
+documented checks and bundled asset build can be reproduced.
 
 本次待上传源码按 Provider/AI、应用核心、聊天与渲染 UI、公共模块与 Web UI、文档
-分组提交。APK、Gradle 缓存、IDE 文件、签名材料、local.properties、日志以及仅用于
-本地验证的脚本均不上传。
+分组提交。APK、Gradle 缓存、IDE 文件、签名材料、local.properties 和日志不上传。
+通用回归脚本与 KaTeX 构建适配器随源码保留，便于复现文档中的检查。
+
+逐条双语更新记录见 [2026-09-12 源码更新](changes-2026-09-12.md)，完整文档入口见
+[文档索引](../README.md)。这些源码更新尚未发布为新的正式 APK。
 
 ### Latest provider and interaction additions / 最新 Provider 与交互新增
 
@@ -52,7 +56,7 @@ part of the upload scope.
   许可证；完善全屏预览定位、源码/渲染切换、GitHub 仓库卡片、请求日志格式化、
   记忆诊断、灵感卡片和自适应外观/文字配色。
 
-## Current Upload Scope / 本次上传内容
+## Previous 2.4.8-revised.7 Upload / 之前的 .7 版本上传
 
 - English: Added OrcaRouter as an OpenAI-compatible provider, including its
   endpoint, website, documentation links, and localized provider descriptions.
@@ -231,7 +235,8 @@ Updates:
   lexical retrieval, assistant bindings, RAG, source citations, and read-only
   knowledge tools.
 - Extended memories with types, timestamps, source conversations, embeddings,
-  semantic retrieval, lexical fallback, and scoped list/edit/delete tools.
+  semantic retrieval, lexical fallback, and scoped management. The current
+  pipeline uses background extraction instead of foreground memory tools.
 - Added provider capability metadata, embedding support, connection and stream
   diagnostics, sanitized protocol traces, and secret-safe custom-provider
   import/export behavior.
@@ -245,7 +250,7 @@ Updates:
   notation, Leaflet, and railroad-diagram renderers; improved Mermaid, LaTeX,
   Markdown, and animated-background behavior; and hardened local WebView
   settings.
-- Added database migrations and Room schemas through version 28, knowledge-base
+- Added database migrations and Room schemas through version 43, knowledge-base
   navigation, provider configuration UI, multilingual resources, focused tests,
   and architecture documentation.
 - Added timestamped Debug/QA versions and an optional QA keystore override.
@@ -254,8 +259,9 @@ Updates:
   selection.
 - Renamed the distribution to `Rikkahub Revised`, changed the release
   application ID to `me.rerere.rikkahub.revised`, isolated custom URI schemes,
-  app-internal actions, Provider authorities, Debug/QA package IDs, and made
+  app-internal actions, Provider authorities and the Debug package ID, and made
   Firebase integration opt-in for a future fork-owned configuration.
+  QA retains the legacy test package ID; see `docs/RELEASE_SIGNING.md`.
 
 Implementation details are preserved in the source and Git history.
 

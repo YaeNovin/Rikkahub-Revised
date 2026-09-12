@@ -266,7 +266,7 @@ class ResponseAPI(
                     deepSeekSupport.available && params.reasoningLevel.isEnabled ->
                         put("top_p", topP.coerceIn(0.95f, 1f))
                     deepSeekSupport.available -> Unit
-                    else -> put("top_p", topP)
+                    isModelAllowTemperature(params) -> put("top_p", topP)
                 }
             }
             params.deepSeekMaxOutputTokens()?.let { put("max_output_tokens", it) }
