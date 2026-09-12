@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -82,7 +82,7 @@ fun SettingAboutPage() {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         EmojiBurstHost(
             modifier = Modifier.fillMaxSize(),

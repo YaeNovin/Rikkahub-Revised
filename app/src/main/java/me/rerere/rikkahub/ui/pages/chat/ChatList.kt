@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.chat
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Idea01
+import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -31,6 +32,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -83,6 +87,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -108,6 +113,11 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.ChatSuggestionItem
+import me.rerere.rikkahub.data.model.currentChatSuggestions
+import me.rerere.rikkahub.data.model.suggestionSourceMessage
+import me.rerere.rikkahub.data.model.suggestionConfig
+import me.rerere.rikkahub.data.model.SuggestionTrigger
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
@@ -121,6 +131,7 @@ import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
+import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.utils.plus
 import kotlin.math.roundToInt
@@ -129,6 +140,7 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
+private const val ImageGenerationLoadingKey = "ImageGenerationLoading"
 private const val ScrollBottomKey = "ScrollBottomKey"
 private const val HISTORY_PRELOAD_BEFORE_COUNT = 3
 private const val HISTORY_PRELOAD_AFTER_COUNT = 1
@@ -220,6 +232,7 @@ fun ChatList(
     conversation: Conversation,
     state: LazyListState,
     loading: Boolean,
+    imageGenerationLoading: Boolean = false,
     processingStatus: String? = null,
     previewMode: Boolean,
     settings: Settings,
@@ -234,12 +247,18 @@ fun ChatList(
     forkingMessageId: Uuid? = null,
     onDelete: (UIMessage) -> Unit = {},
     onUpdateMessage: (MessageNode) -> Unit = {},
-    onClickSuggestion: (String) -> Unit = {},
+    onSuggestionAction: (ChatSuggestionItem) -> Unit = {},
+    onInspirationSelected: (me.rerere.rikkahub.data.model.InspirationCard) -> Unit = {},
+    suggestionGenerationState: me.rerere.rikkahub.service.SuggestionGenerationState = me.rerere.rikkahub.service.SuggestionGenerationState.IDLE,
+    suggestionActions: SuggestionUiActions = SuggestionUiActions(),
+    onRefreshSuggestions: () -> Unit = {},
+    onDismissSuggestions: () -> Unit = {},
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onJumpToMessage: (Int) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onToolCancel: ((toolCallId: String, reason: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
 ) {
@@ -247,7 +266,7 @@ fun ChatList(
         targetState = previewMode,
         label = "ChatListMode",
         transitionSpec = {
-            (fadeIn() + scaleIn(initialScale = 0.8f) togetherWith fadeOut() + scaleOut(targetScale = 0.8f))
+            fadeIn() togetherWith fadeOut()
         }
     ) { target ->
         if (target) {
@@ -265,6 +284,7 @@ fun ChatList(
                 conversation = conversation,
                 state = state,
                 loading = loading,
+                imageGenerationLoading = imageGenerationLoading,
                 processingStatus = processingStatus,
                 settings = settings,
                 hazeState = hazeState,
@@ -278,12 +298,18 @@ fun ChatList(
                 forkingMessageId = forkingMessageId,
                 onDelete = onDelete,
                 onUpdateMessage = onUpdateMessage,
-                onClickSuggestion = onClickSuggestion,
+                onSuggestionAction = onSuggestionAction,
+                onInspirationSelected = onInspirationSelected,
+                suggestionGenerationState = suggestionGenerationState,
+                suggestionActions = suggestionActions,
+                onRefreshSuggestions = onRefreshSuggestions,
+                onDismissSuggestions = onDismissSuggestions,
                 onTranslate = onTranslate,
                 onClearTranslation = onClearTranslation,
                 animatedVisibilityScope = this@AnimatedContent,
                 onToolApproval = onToolApproval,
                 onToolAnswer = onToolAnswer,
+                onToolCancel = onToolCancel,
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
             )
@@ -297,6 +323,7 @@ private fun ChatListNormal(
     conversation: Conversation,
     state: LazyListState,
     loading: Boolean,
+    imageGenerationLoading: Boolean,
     processingStatus: String? = null,
     settings: Settings,
     hazeState: HazeState,
@@ -310,12 +337,18 @@ private fun ChatListNormal(
     forkingMessageId: Uuid?,
     onDelete: (UIMessage) -> Unit,
     onUpdateMessage: (MessageNode) -> Unit,
-    onClickSuggestion: (String) -> Unit,
+    onSuggestionAction: (ChatSuggestionItem) -> Unit,
+    onInspirationSelected: (me.rerere.rikkahub.data.model.InspirationCard) -> Unit,
+    suggestionGenerationState: me.rerere.rikkahub.service.SuggestionGenerationState,
+    suggestionActions: SuggestionUiActions,
+    onRefreshSuggestions: () -> Unit,
+    onDismissSuggestions: () -> Unit,
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)?,
     onClearTranslation: (UIMessage) -> Unit,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onToolCancel: ((toolCallId: String, reason: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
 ) {
@@ -325,14 +358,30 @@ private fun ChatListNormal(
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val previewReturn = LocalChatPreviewReturn.current
+    val allowAutomaticScroll = previewReturn?.anchor == null && previewReturn?.restoring != true &&
+        !me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible.current
+    val allowAutomaticScrollUpdated by rememberUpdatedState(allowAutomaticScroll)
+    val streamingScrollGate = remember(state, conversation.id) { StreamingScrollGate() }
+    LaunchedEffect(state, streamingScrollGate) {
+        state.interactionSource.interactions.collect { interaction ->
+            if (interaction is androidx.compose.foundation.interaction.DragInteraction.Start) {
+                streamingScrollGate.onUserScroll()
+            }
+        }
+    }
+    LaunchedEffect(state, streamingScrollGate) {
+        snapshotFlow { state.isScrollInProgress to state.canScrollForward }
+            .collect { (scrolling, canScrollForward) ->
+                if (!scrolling) streamingScrollGate.onScrollSettled(atBottom = !canScrollForward)
+            }
+    }
 
     DisposableEffect(Unit) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
             if (settings.displaySetting.enableVolumeKeyScroll) {
-                val bottomPaddingPx = with(density) {
-                    (32.dp + innerPadding.calculateBottomPadding()).toPx()
-                }
-                val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
+                val layout = state.layoutInfo
+                val scrollAmount = (layout.viewportSize.height - layout.afterContentPadding).coerceAtLeast(0) *
                     settings.displaySetting.volumeKeyScrollRatio
                 scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
@@ -350,7 +399,7 @@ private fun ChatListNormal(
     var showExportSheet by remember { mutableStateOf(false) }
 
     // 自动跟随键盘滚动
-    ImeLazyListAutoScroller(lazyListState = state)
+    ImeLazyListAutoScroller(lazyListState = state, enabled = allowAutomaticScroll)
 
     // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(conversation)
@@ -373,6 +422,22 @@ private fun ChatListNormal(
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
     val captureProgress = LocalScrollCaptureInProgress.current
+    val hasCurrentSuggestions = remember(conversation.id, conversation.messageNodes, conversation.chatSuggestionItems, conversation.chatSuggestions, conversation.suggestionSession.target, conversation.memoryMode) {
+        conversation.currentChatSuggestions().isNotEmpty()
+    }
+    val showSuggestions = conversation.suggestionConfig(settings).options.trigger != SuggestionTrigger.DISABLED &&
+        !conversation.suggestionSession.paused && !conversation.suggestionSession.collapsed && !loading && !imageGenerationLoading && !captureProgress && !selecting &&
+        conversation.suggestionSourceMessage() != null &&
+        (hasCurrentSuggestions || conversation.suggestionSession.info?.error != null || suggestionGenerationState != me.rerere.rikkahub.service.SuggestionGenerationState.IDLE)
+    val layoutDirection = LocalLayoutDirection.current
+    // The suggestion footer now reserves the composer inset itself. Do not count it twice.
+    val messageBottomInset = if (showSuggestions) 0.dp else innerPadding.calculateBottomPadding()
+    val messageOverlayPadding = PaddingValues(
+        start = innerPadding.calculateStartPadding(layoutDirection),
+        top = innerPadding.calculateTopPadding(),
+        end = innerPadding.calculateEndPadding(layoutDirection),
+        bottom = messageBottomInset,
+    )
 
     LaunchedEffect(state, conversation.id) {
         snapshotFlow {
@@ -415,9 +480,20 @@ private fun ChatListNormal(
             }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize(),
+    ChatSuggestionLayout(
+        showSuggestions = showSuggestions,
+        bottomInset = innerPadding.calculateBottomPadding(),
+        suggestions = {
+            ChatSuggestions(
+                conversation = conversation,
+                settings = settings,
+                generationState = suggestionGenerationState,
+                actions = suggestionActions,
+                onSuggestionAction = onSuggestionAction,
+                onRefreshSuggestions = onRefreshSuggestions,
+                onDismissSuggestions = onDismissSuggestions,
+            )
+        },
     ) {
         // 自动滚动到底部
         if (settings.displaySetting.enableAutoScroll) {
@@ -435,6 +511,7 @@ private fun ChatListNormal(
                     .distinctUntilChanged()
                     .conflate()
                     .collect {
+                        if (!allowAutomaticScrollUpdated || streamingScrollGate.browsing) return@collect
                         val layout = state.layoutInfo
                         val lastVisibleItem = layout.visibleItemsInfo.lastOrNull() ?: return@collect
                         val bottomInsetPx = with(density) {
@@ -451,15 +528,19 @@ private fun ChatListNormal(
                             tolerancePx = with(density) { 96.dp.roundToPx() },
                         )
                         if (!followOutput) return@collect
-
+                        val interactionVersion = streamingScrollGate.interactionVersion
+                        val originalIndex = state.firstVisibleItemIndex
+                        val originalOffset = state.firstVisibleItemScrollOffset
                         delay(STREAMING_SCROLL_INTERVAL_MS)
-                        if (!loadingState || state.isScrollInProgress) return@collect
+                        if (!loadingState || state.isScrollInProgress || !allowAutomaticScrollUpdated) return@collect
+                        if (!streamingScrollGate.allowsPending(interactionVersion, originalIndex, originalOffset,
+                                state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)) return@collect
                         val updatedLayout = state.layoutInfo
                         val updatedLastItem = updatedLayout.visibleItemsInfo.lastOrNull() ?: return@collect
-                        if (updatedLastItem.index != updatedLayout.totalItemsCount - 1) {
-                            state.scrollToItem((updatedLayout.totalItemsCount - 1).coerceAtLeast(0))
-                            return@collect
-                        }
+                        if (!shouldFollowStreamingOutput(loadingState, state.isScrollInProgress,
+                                updatedLastItem.index, updatedLayout.totalItemsCount,
+                                updatedLastItem.offset + updatedLastItem.size, updatedLayout.viewportEndOffset,
+                                bottomInsetPx, with(density) { 96.dp.roundToPx() })) return@collect
                         val overflowPx = streamingBottomOverflowPx(
                             lastVisibleItemEndPx = updatedLastItem.offset + updatedLastItem.size,
                             viewportEndPx = updatedLayout.viewportEndOffset,
@@ -485,7 +566,7 @@ private fun ChatListNormal(
         ChatFontProvider(displaySetting = settings.displaySetting) {
             LazyColumn(
                 state = state,
-                contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
+                contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + messageBottomInset),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
@@ -496,16 +577,18 @@ private fun ChatListNormal(
             if (
                 conversation.messageNodes.isEmpty() &&
                 !loading &&
+                !imageGenerationLoading &&
                 !captureProgress &&
                 settings.displaySetting.showInspirationCards
             ) {
                 item(key = "InspirationStarterCards") {
                     InspirationStarterCards(
                         modifier = Modifier
-                            .fillParentMaxWidth()
-                            .fillParentMaxHeight(0.78f),
-                        onClickSuggestion = onClickSuggestion,
+                            .fillParentMaxWidth(),
+                        onSelect = onInspirationSelected,
                         conversationId = conversation.id,
+                        assistantId = conversation.assistantId,
+                        settings = settings,
                     )
                 }
             }
@@ -528,6 +611,10 @@ private fun ChatListNormal(
                         selectedKeys = selectedItems,
                         enabled = selecting,
                     ) {
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            me.rerere.rikkahub.ui.components.richtext.LocalRichTextLayoutReadiness provides
+                                previewReturn?.takeIf { it.anchor?.key == node.id.toString() }?.layoutReadiness,
+                        ) {
                         ChatMessage(
                             node = node,
                             model = node.currentMessage.modelId?.let(modelById::get),
@@ -573,13 +660,24 @@ private fun ChatListNormal(
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,
                             onToolAnswer = onToolAnswer,
+                            onToolCancel = onToolCancel,
                             lastMessage = index == lastMessageIndex,
                         )
+                        }
                     }
                 }
             }
 
-            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
+            if (imageGenerationLoading) {
+                item(ImageGenerationLoadingKey, contentType = "ImageGenerationSkeleton") {
+                    ImageGenerationSkeleton()
+                }
+            }
+
+            if (!loading && !imageGenerationLoading &&
+                assistant?.allowConversationSystemPrompt == true &&
+                onConversationSystemPromptChange != null
+            ) {
                 item(key = "ConversationSystemPrompt") {
                     ConversationSystemPromptButton(
                         customSystemPrompt = conversation.customSystemPrompt,
@@ -638,7 +736,7 @@ private fun ChatListNormal(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(messageOverlayPadding),
         ) {
             // 错误消息卡片
             ErrorCardsDisplay(
@@ -737,147 +835,38 @@ private fun ChatListNormal(
                 state = state
             )
 
-            // Suggestion
-            if (conversation.chatSuggestions.isNotEmpty() && !captureProgress) {
-                ChatSuggestionsRow(
-                    conversation = conversation,
-                    onClickSuggestion = onClickSuggestion,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
-            }
         }
     }
 }
 
-private data class InspirationStarter(
-    val title: String,
-    val prompt: String,
-    val icon: ImageVector,
-)
-
 @Composable
-private fun InspirationStarterCards(
-    modifier: Modifier = Modifier,
-    onClickSuggestion: (String) -> Unit,
-    conversationId: Uuid,
-) {
-    val starters = listOf(
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_explain_title),
-            prompt = stringResource(R.string.chat_inspiration_explain_prompt),
-            icon = HugeIcons.Search01,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_plan_title),
-            prompt = stringResource(R.string.chat_inspiration_plan_prompt),
-            icon = HugeIcons.Idea01,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_write_title),
-            prompt = stringResource(R.string.chat_inspiration_write_prompt),
-            icon = HugeIcons.Edit01,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_brainstorm_title),
-            prompt = stringResource(R.string.chat_inspiration_brainstorm_prompt),
-            icon = HugeIcons.Sparkles,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_summarize_title),
-            prompt = stringResource(R.string.chat_inspiration_summarize_prompt),
-            icon = HugeIcons.Files02,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_compare_title),
-            prompt = stringResource(R.string.chat_inspiration_compare_prompt),
-            icon = HugeIcons.ChartColumn,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_learn_title),
-            prompt = stringResource(R.string.chat_inspiration_learn_prompt),
-            icon = HugeIcons.BookOpen01,
-        ),
-        InspirationStarter(
-            title = stringResource(R.string.chat_inspiration_code_title),
-            prompt = stringResource(R.string.chat_inspiration_code_prompt),
-            icon = HugeIcons.Code,
-        ),
-    )
-    val visibleStarters = remember(conversationId, starters) {
-        starters.shuffled(Random(conversationId.hashCode())).take(4)
-    }
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
+private fun ImageGenerationSkeleton() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.Start,
     ) {
-        Column(
+        Text(
+            text = stringResource(R.string.chat_image_generating),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box(
             modifier = Modifier
-                .widthIn(max = 720.dp)
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = stringResource(R.string.chat_inspiration_title),
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(20.dp))
-            val starterRows = visibleStarters.chunked(2)
-            starterRows.forEachIndexed { index, rowItems ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    rowItems.forEach { starter ->
-                        Surface(
-                            onClick = { onClickSuggestion(starter.prompt) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 112.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color.Transparent,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
-                            ),
-                            shadowElevation = 0.dp,
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = starter.icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                                Text(
-                                    text = starter.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    text = starter.prompt,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                    if (rowItems.size == 1) {
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
-                if (index < starterRows.lastIndex) {
-                    Spacer(Modifier.height(10.dp))
-                }
-            }
-        }
+                .fillMaxWidth(0.82f)
+                .widthIn(max = 320.dp)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+                .shimmer(
+                    isLoading = true,
+                    // Keep the base surface visible and overlay a clearly visible
+                    // highlight band while the image request is running.
+                    shimmerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                    backgroundColor = Color.Transparent,
+                    durationMillis = 1_100,
+                ),
+        )
     }
 }
 
@@ -1061,38 +1050,6 @@ private fun ChatListPreview(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChatSuggestionsRow(
-    modifier: Modifier = Modifier,
-    conversation: Conversation,
-    onClickSuggestion: (String) -> Unit
-) {
-    LazyRow(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(conversation.chatSuggestions) { suggestion ->
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .clickable {
-                        onClickSuggestion(suggestion)
-                    }
-                    .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
-                    .padding(vertical = 4.dp, horizontal = 8.dp),
-            ) {
-                Text(
-                    text = suggestion,
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
         }
     }

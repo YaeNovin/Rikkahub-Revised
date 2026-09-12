@@ -12,7 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -65,6 +65,9 @@ fun AssistantOpenAIPage(id: String) {
     val isResponses = provider?.useResponseApi == true
     val route = provider?.parameterRequestRoute()
     val isOfficial = route?.endpoint == ParameterEndpoint.OPENAI
+    val supportsToolCalling = !(
+        isOfficial && !isResponses && support.requiresResponsesForToolCalling
+    )
     val unavailableMessage = when {
         model == null -> stringResource(R.string.assistant_openai_unavailable_no_model)
         provider == null -> stringResource(R.string.assistant_openai_unavailable_protocol)
@@ -90,7 +93,7 @@ fun AssistantOpenAIPage(id: String) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         AssistantOpenAIContent(
             innerPadding = innerPadding,
@@ -103,6 +106,7 @@ fun AssistantOpenAIPage(id: String) {
             supportsReasoningContext = support.supportsReasoningContext,
             supportsReasoningMode = support.supportsReasoningMode,
             supportsUltrafast = support.supportsUltrafast && isOfficial,
+            supportsToolCalling = supportsToolCalling,
             route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
@@ -122,6 +126,7 @@ private fun AssistantOpenAIContent(
     supportsReasoningContext: Boolean,
     supportsReasoningMode: Boolean,
     supportsUltrafast: Boolean,
+    supportsToolCalling: Boolean,
     route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
@@ -203,10 +208,16 @@ private fun AssistantOpenAIContent(
                 OpenAISelectItem(
                     title = stringResource(R.string.assistant_openai_parallel_tools),
                     description = stringResource(R.string.assistant_openai_parallel_tools_desc),
-                    warning = stringResource(R.string.assistant_openai_parallel_tools_warning),
+                    warning = stringResource(
+                        if (supportsToolCalling) {
+                            R.string.assistant_openai_parallel_tools_warning
+                        } else {
+                            R.string.assistant_openai_astra_tools_require_responses
+                        }
+                    ),
                     options = OpenAIParallelToolCalls.entries,
                     selected = options.parallelToolCalls,
-                    enabled = enabled,
+                    enabled = enabled && supportsToolCalling,
                     label = { it.displayName() },
                     onSelected = { value -> update { it.copy(parallelToolCalls = value) } },
                 )
@@ -214,10 +225,16 @@ private fun AssistantOpenAIContent(
                 OpenAISelectItem(
                     title = stringResource(R.string.assistant_openai_tool_choice),
                     description = stringResource(R.string.assistant_openai_tool_choice_desc),
-                    warning = stringResource(R.string.assistant_openai_tool_choice_warning),
+                    warning = stringResource(
+                        if (supportsToolCalling) {
+                            R.string.assistant_openai_tool_choice_warning
+                        } else {
+                            R.string.assistant_openai_astra_tools_require_responses
+                        }
+                    ),
                     options = OpenAIToolChoice.entries,
                     selected = options.toolChoice,
-                    enabled = enabled,
+                    enabled = enabled && supportsToolCalling,
                     label = { it.displayName() },
                     onSelected = { value -> update { it.copy(toolChoice = value) } },
                 )

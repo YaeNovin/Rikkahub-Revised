@@ -12,4 +12,8 @@ val LocalGlobalBackgroundActive = staticCompositionLocalOf { false }
 
 val LocalGlobalGlassSurfaceOpacity = staticCompositionLocalOf { 1f }
 
+val LocalAppearanceSurfaceOpacityPolicy = staticCompositionLocalOf {
+    AppearanceSurfaceOpacityPolicy()
+}
+
 val LocalPageSurfaceStyle = staticCompositionLocalOf { BackgroundSurfaceStyle.OPAQUE }

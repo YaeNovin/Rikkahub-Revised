@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -133,7 +133,7 @@ fun AssistantDetailPage(id: String) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = CustomColors.scaffoldContainerColor
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),

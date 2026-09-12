@@ -5,17 +5,15 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import kotlinx.coroutines.CancellationException
+import me.rerere.rikkahub.data.model.GradientBackgroundPreset
+import me.rerere.rikkahub.data.model.GradientBackgroundCustomColors
 
-private const val CHAT_BACKGROUND_OVERLAY_TOP_ALPHA = 0.32f
 private const val READABILITY_HALO_ALPHA = 1f
 private const val READABILITY_HALO_BLUR_RADIUS = 4.5f
 
@@ -28,40 +26,21 @@ fun rememberChatBackgroundForeground(
     background: String?,
     backgroundOpacity: Float,
     useGradientBackground: Boolean,
-): Color {
-    val context = LocalContext.current
-    val darkMode = LocalDarkMode.current
-    val baseColor = MaterialTheme.colorScheme.background
-    val fallback = MaterialTheme.colorScheme.onSurface
-    val foreground by produceState(
-        initialValue = fallback,
-        background,
-        backgroundOpacity,
-        useGradientBackground,
-        darkMode,
-        baseColor,
-        fallback,
-    ) {
-        value = when {
-            useGradientBackground -> readableForegroundColor(
-                if (darkMode) Color(0xFF1B2A45) else Color(0xFFAFD0F2)
-            )
-
-            !background.isNullOrBlank() -> safeBackgroundForegroundExtraction(fallback) {
-                extractBackgroundForeground(
-                    context = context,
-                    source = background,
-                    imageOpacity = backgroundOpacity,
-                    overlayColor = baseColor,
-                    overlayAlpha = CHAT_BACKGROUND_OVERLAY_TOP_ALPHA,
-                )
-            }
-
-            else -> fallback
-        }
-    }
-    return foreground
-}
+    gradientFollowTheme: Boolean = false,
+    gradientPreset: GradientBackgroundPreset = GradientBackgroundPreset.CLASSIC,
+    gradientCustomColors: GradientBackgroundCustomColors = GradientBackgroundCustomColors(),
+    gradientIntensity: Float = 1f,
+    gradientVignette: Float = 0f,
+): Color = rememberBackgroundReadability(
+    background = background,
+    backgroundOpacity = backgroundOpacity,
+    useGradientBackground = useGradientBackground,
+    gradientFollowTheme = gradientFollowTheme,
+    gradientPreset = gradientPreset,
+    gradientCustomColors = gradientCustomColors,
+    gradientIntensity = gradientIntensity,
+    gradientVignette = gradientVignette,
+).foreground
 
 internal suspend fun safeBackgroundForegroundExtraction(
     fallback: Color,
@@ -92,8 +71,7 @@ internal fun ColorScheme.withReadableForeground(foreground: Color): ColorScheme 
         onBackground = opaqueForeground,
         onSurface = opaqueForeground,
         onSurfaceVariant = opaqueForeground,
-        outline = opaqueForeground.copy(alpha = 0.82f),
-        outlineVariant = opaqueForeground.copy(alpha = 0.62f),
+        // Outlines and component accents belong to the selected application theme.
     )
 }
 
@@ -103,16 +81,19 @@ fun BackgroundReadabilityTheme(
     foreground: Color,
     content: @Composable () -> Unit,
 ) {
-    if (!active || foreground == Color.Unspecified) {
+    if (!active || foreground == Color.Unspecified ||
+        LocalTextColorMode.current == me.rerere.rikkahub.data.datastore.TextColorMode.THEME) {
         content()
         return
     }
 
-    val baseScheme = LocalBackgroundBaseColorScheme.current ?: MaterialTheme.colorScheme
+    val baseScheme = MaterialTheme.colorScheme
     val readableScheme = remember(baseScheme, foreground) {
         baseScheme.withReadableForeground(foreground)
     }
-    CompositionLocalProvider(LocalBackgroundBaseColorScheme provides baseScheme) {
+    CompositionLocalProvider(LocalBackgroundBaseColorScheme provides (LocalBaseThemeColorScheme.current ?: baseScheme),
+        androidx.compose.material3.LocalContentColor provides foreground,
+        LocalChatBackgroundForeground provides foreground) {
         MaterialTheme(
             colorScheme = readableScheme,
             typography = MaterialTheme.typography,

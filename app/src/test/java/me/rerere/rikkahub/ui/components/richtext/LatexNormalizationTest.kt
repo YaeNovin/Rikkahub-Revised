@@ -61,4 +61,12 @@ class LatexNormalizationTest {
 
         assertEquals("(α)/(β) ≤ √(x)", readable)
     }
+
+    @Test
+    fun `layout fallback handles word and punctuation commands without stripping prefixes`() {
+        assertEquals("( x ) y z", latexReadableFallback("\\left( x \\right)\\,y\\;z\\!\\quad\\qquad"))
+        assertEquals("leftover rightward quadric", latexReadableFallback("\\leftover \\rightward \\quadric"))
+        assertEquals("← x →", latexReadableFallback("\\leftarrow x \\rightarrow"))
+        assertEquals("a b c", latexReadableFallback("a\\,b\\;c"))
+    }
 }

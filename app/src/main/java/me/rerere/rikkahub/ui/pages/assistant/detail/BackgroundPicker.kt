@@ -37,6 +37,8 @@ import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.context.LocalToaster
 import org.koin.compose.koinInject
 import kotlinx.coroutines.launch
+import androidx.core.net.toUri
+import me.rerere.rikkahub.data.files.FileFolders
 
 @Composable
 fun BackgroundPicker(
@@ -56,23 +58,28 @@ fun BackgroundPicker(
     var showPickOption by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
+    var importing by remember { mutableStateOf(false) }
+    var previewError by remember(background) { mutableStateOf(false) }
+    val currentEnabled by rememberUpdatedState(enabled)
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             scope.launch {
-                runCatching {
-                    filesManager.createChatFilesByContents(listOf(it)).firstOrNull()
-                        ?: error("Failed to save selected background image")
-                }.onSuccess { localBackground ->
-                    currentOnUpdate(localBackground.toString())
-                }.onFailure { error ->
+                importing = true
+                try {
+                    val saved = filesManager.saveManagedFromUri(FileFolders.BACKGROUNDS, it)
+                    val localBackground = filesManager.getFile(saved).toUri()
+                    if (currentEnabled) currentOnUpdate(localBackground.toString())
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
                     toaster.show(
                         message = context.formatUserFacingError(error),
                         type = ToastType.Error,
                     )
-                }
+                } finally { importing = false }
             }
         }
     }
@@ -92,11 +99,13 @@ fun BackgroundPicker(
             onClick = {
                 showPickOption = true
             },
-            enabled = enabled,
+            enabled = enabled && !importing,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = if (!background.isNullOrBlank()) {
+                text = if (importing) {
+                    "正在保存背景…"
+                } else if (!background.isNullOrBlank()) {
                     stringResource(R.string.assistant_page_change_background)
                 } else {
                     stringResource(R.string.assistant_page_select_background)
@@ -128,11 +137,14 @@ fun BackgroundPicker(
 
             AsyncImage(
                 model = background,
+                onError = { previewError = true },
+                onSuccess = { previewError = false },
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .alpha(previewOpacity)
             )
+            if (previewError) Text("背景图片读取失败，请检查链接或重新选择图片。", color = MaterialTheme.colorScheme.error)
         }
     }
 
@@ -213,11 +225,12 @@ fun BackgroundPicker(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (urlInput.isNotBlank()) {
+                        if (isBackgroundImageUrlValid(urlInput)) {
                             onUpdate(urlInput.trim())
                             showUrlInput = false
                         }
-                    }
+                    },
+                    enabled = isBackgroundImageUrlValid(urlInput),
                 ) {
                     Text(stringResource(R.string.assistant_page_confirm))
                 }
@@ -234,3 +247,8 @@ fun BackgroundPicker(
         )
     }
 }
+
+internal fun isBackgroundImageUrlValid(value: String): Boolean = runCatching {
+    val uri = java.net.URI(value.trim())
+    uri.scheme?.lowercase() in setOf("https", "http") && !uri.host.isNullOrBlank()
+}.getOrDefault(false)

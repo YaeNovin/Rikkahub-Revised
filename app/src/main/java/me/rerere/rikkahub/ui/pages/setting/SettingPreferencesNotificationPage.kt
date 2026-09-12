@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -49,6 +49,23 @@ private const val MILLIS_PER_DAY = 24 * 60 * 60 * 1_000L
 
 @Composable
 fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val protection: me.rerere.rikkahub.service.GenerationKeepAlive = org.koin.compose.koinInject()
+    val protectionProblem by protection.statusProblem.collectAsStateWithLifecycle()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var batteryUnrestricted by remember { mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        fun refresh() {
+            batteryUnrestricted = context.getSystemService(android.os.PowerManager::class.java)
+                .isIgnoringBatteryOptimizations(context.packageName)
+        }
+        refresh()
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     var showUpdatePauseDialog by remember { mutableStateOf(false) }
@@ -83,13 +100,29 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = CustomColors.scaffoldContainerColor
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = contentPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("后台生成", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+                    Text(if (batteryUnrestricted) "电池优化：已豁免" else "电池优化：仍受系统限制")
+                    Text("生成期间显示后台任务通知，全部结束后自动停止。省电模式、厂商后台限制或强制结束应用仍可能中断连接。",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+                    protectionProblem?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                            .onFailure {
+                                runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.parse("package:${context.packageName}"))) }
+                            }
+                    }) { Text("电池与后台限制设置") }
+                }
+            }
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
@@ -137,6 +170,26 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
                     )
                     if (displaySetting.enableNotificationOnMessageGeneration) {
                         item(
+                            headlineContent = { Text("实时通知刷新间隔") },
+                            supportingContent = {
+                                Column {
+                                    Text("${displaySetting.liveUpdateIntervalSeconds.coerceIn(1, 10)} 秒")
+                                    androidx.compose.material3.Slider(
+                                        value = displaySetting.liveUpdateIntervalSeconds.coerceIn(1, 10).toFloat(),
+                                        onValueChange = { updateDisplaySetting(displaySetting.copy(liveUpdateIntervalSeconds = it.toInt())) },
+                                        valueRange = 1f..10f, steps = 8,
+                                        enabled = displaySetting.enableLiveUpdateNotification,
+                                    )
+                                }
+                            },
+                        )
+                        item(
+                            headlineContent = { Text("显示生成内容预览") },
+                            supportingContent = { Text("关闭后通知仅显示状态，不展示模型输出文本") },
+                            trailingContent = { Switch(checked = displaySetting.notificationContentPreview,
+                                onCheckedChange = { updateDisplaySetting(displaySetting.copy(notificationContentPreview = it)) }) },
+                        )
+                        item(
                             headlineContent = { Text(stringResource(R.string.setting_display_page_live_update_notification)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_live_update_notification_desc)) },
                             trailingContent = {
@@ -149,6 +202,22 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                     }
+                    item(
+                        headlineContent = { Text("后台生成保护") },
+                        supportingContent = { Text("使用常驻前台通知和短时唤醒锁，降低系统挂起导致的断连") },
+                        trailingContent = { Switch(checked = displaySetting.backgroundGenerationProtection,
+                            onCheckedChange = {
+                                if (it && !permissionState.allPermissionsGranted) permissionState.requestPermissions()
+                                updateDisplaySetting(displaySetting.copy(backgroundGenerationProtection = it))
+                            }) },
+                    )
+                    item(
+                        headlineContent = { Text("生成期间保持唤醒") },
+                        supportingContent = { Text("仅在有生成任务时生效，会增加耗电") },
+                        trailingContent = { Switch(checked = displaySetting.generationWakeLock,
+                            enabled = displaySetting.backgroundGenerationProtection,
+                            onCheckedChange = { updateDisplaySetting(displaySetting.copy(generationWakeLock = it)) }) },
+                    )
                 }
             }
         }

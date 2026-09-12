@@ -20,6 +20,17 @@ import org.junit.Test
 
 class ExtensionAuditTest {
     @Test
+    fun `valid expression alone is a trigger and searchable`() {
+        val book = Lorebook(name = "Book", entries = listOf(PromptInjection.RegexInjection(
+            name = "Scene", content = "Details", keywordExpression = "forest AND rain",
+        )))
+        val audit = buildExtensionAudit(Settings(extensionManagementMode = ExtensionManagementMode.ENTERTAINMENT,
+            lorebooks = listOf(book), modeInjections = emptyList()), SkillScanResult(), emptyList())
+        assertTrue(audit.issues.none { it.kind == ExtensionIssueKind.MISSING_TRIGGER })
+        assertTrue(audit.searchItems.single().matches("forest"))
+    }
+
+    @Test
     fun `summaries count enabled items and distinct assistant usage`() {
         val quickMessage = QuickMessage(title = "Start scene", content = "Begin at the station")
         val emptyQuickMessage = QuickMessage()
@@ -102,7 +113,7 @@ class ExtensionAuditTest {
                     content = "Content",
                     keywords = listOf("("),
                     useRegex = true,
-                    scanDepth = 0,
+                    scanDepth = -1,
                     role = MessageRole.SYSTEM,
                 )
             ),

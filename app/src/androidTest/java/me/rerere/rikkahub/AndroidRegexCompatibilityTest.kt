@@ -59,4 +59,14 @@ class AndroidRegexCompatibilityTest {
             latexReadableFallback("\\frac{\\alpha}{\\beta} \\le \\sqrt{\\mathrm{x}}"),
         )
     }
+
+    @Test
+    fun latexLayoutFallbackUsesAndroidIcuCompatibleBoundaries() {
+        assertEquals("( x ) y z", latexReadableFallback("\\left( x \\right)\\,y\\;z\\!\\quad\\qquad"))
+        assertEquals("leftover rightward quadric", latexReadableFallback("\\leftover \\rightward \\quadric"))
+        // Every plain fallback previously constructed the invalid regex even
+        // when the formula did not contain a layout command.
+        assertEquals("unsupported(x)", latexReadableFallback("\\unsupported(x)"))
+        assertEquals("a b c", latexReadableFallback("a\\,b\\;c"))
+    }
 }

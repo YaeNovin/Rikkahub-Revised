@@ -8,9 +8,13 @@ import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
-import me.rerere.rikkahub.ui.context.LocalGlobalGlassSurfaceOpacity
+import me.rerere.rikkahub.ui.context.AppearanceSurfaceRole
+import me.rerere.rikkahub.ui.context.LocalAppearanceSurfaceOpacityPolicy
+import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.context.forRole
 
 data class ExtendColors(
     val red1: Color,
@@ -64,6 +68,11 @@ data class ExtendColors(
     val gray9: Color,
     val gray10: Color,
 )
+
+internal fun resolveScaffoldContainerColor(
+    backgroundActive: Boolean,
+    defaultColor: Color,
+): Color = if (backgroundActive) Color.Transparent else defaultColor
 
 fun lightExtendColors(): ExtendColors = ExtendColors(
     red1 = Color(255, 236, 232),
@@ -174,15 +183,36 @@ fun darkExtendColors(): ExtendColors = ExtendColors(
 object CustomColors {
     var black = false
 
+    val scaffoldContainerColor: Color
+        @Composable get() = resolveScaffoldContainerColor(
+            backgroundActive = LocalGlobalBackgroundActive.current,
+            defaultColor = topBarColors.containerColor,
+        )
+
     val topBarColors: TopAppBarColors
         @Composable get() {
             if (LocalGlobalBackgroundActive.current) {
+                val effectsEnabled = LocalSettings.current
+                    .advancedAppearanceSetting.enableTopBarPerformanceEffects
                 val translucentContainer = colorScheme.surfaceContainer.copy(
-                    alpha = (LocalGlobalGlassSurfaceOpacity.current - 0.08f).coerceIn(0.35f, 1f)
+                    alpha = if (effectsEnabled) {
+                        LocalAppearanceSurfaceOpacityPolicy.current
+                            .forRole(AppearanceSurfaceRole.TOP_BAR)
+                    } else {
+                        1f
+                    }
+                )
+                val foreground = me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
+                    translucentContainer, translucentContainer.alpha, colorScheme.onSurface,
+                    me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground.current?.readability?.backgrounds,
+                    currentTextPaletteSeed(),
                 )
                 return TopAppBarDefaults.topAppBarColors(
                     containerColor = translucentContainer,
                     scrolledContainerColor = translucentContainer,
+                    navigationIconContentColor = foreground,
+                    titleContentColor = foreground,
+                    actionIconContentColor = foreground,
                 )
             }
             return if (!LocalDarkMode.current) TopAppBarDefaults.topAppBarColors(
@@ -191,36 +221,52 @@ object CustomColors {
             ) else TopAppBarDefaults.topAppBarColors()
         }
 
-    val cardColors: CardColors
-        @Composable get() = CardDefaults.cardColors(
-            containerColor = colorScheme.surfaceContainer.copy(
-                alpha = if (LocalGlobalBackgroundActive.current) {
-                    LocalGlobalGlassSurfaceOpacity.current.coerceIn(0.35f, 1f)
-                } else {
-                    1f
-                }
+    @Composable
+    private fun surfaceColor(color: Color): Color {
+        return color.copy(alpha = if (LocalGlobalBackgroundActive.current) LocalAppearanceSurfaceOpacityPolicy.current.forRole(AppearanceSurfaceRole.CARD) else 1f)
+    }
+
+    @Composable
+    private fun foregroundFor(color: Color): Color {
+        val seed = currentTextPaletteSeed()
+        val inherited = colorScheme.onSurface
+        if (LocalGlobalBackgroundActive.current) {
+            return me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
+                color, color.alpha, inherited,
+                me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground.current?.readability?.backgrounds, seed,
             )
-        )
+        }
+        return remember(color, seed, inherited) {
+            seed?.let { textForegroundFor(listOf(color.copy(alpha = 1f)), it) } ?: inherited
+        }
+    }
+
+    val cardColors: CardColors
+        @Composable get() {
+            val surface = surfaceColor(colorScheme.surfaceContainer)
+            return CardDefaults.cardColors(containerColor = surface, contentColor = foregroundFor(surface))
+        }
 
     val cardColorsOnSurfaceContainer: CardColors
-        @Composable get() = CardDefaults.cardColors(
-            containerColor = colorScheme.surfaceBright.copy(
-                alpha = if (LocalGlobalBackgroundActive.current) {
-                    LocalGlobalGlassSurfaceOpacity.current.coerceIn(0.35f, 1f)
-                } else {
-                    1f
-                }
-            )
-        )
+        @Composable get() {
+            val surface = surfaceColor(colorScheme.surfaceBright)
+            return CardDefaults.cardColors(containerColor = surface, contentColor = foregroundFor(surface))
+        }
 
     val listItemColors: ListItemColors
-        @Composable get() = ListItemDefaults.colors(
-            containerColor = colorScheme.surfaceBright.copy(
-                alpha = if (LocalGlobalBackgroundActive.current) {
-                    LocalGlobalGlassSurfaceOpacity.current.coerceIn(0.35f, 1f)
-                } else {
-                    1f
-                }
+        @Composable get() {
+            val surface = surfaceColor(colorScheme.surfaceBright)
+            if (!LocalGlobalBackgroundActive.current && currentTextPaletteSeed() == null) {
+                return ListItemDefaults.colors(containerColor = surface)
+            }
+            val foreground = foregroundFor(surface)
+            return ListItemDefaults.colors(
+                containerColor = surface,
+                headlineColor = foreground,
+                supportingColor = foreground.copy(alpha = .78f),
+                overlineColor = foreground.copy(alpha = .78f),
+                leadingIconColor = foreground,
+                trailingIconColor = foreground,
             )
-        )
+        }
 }

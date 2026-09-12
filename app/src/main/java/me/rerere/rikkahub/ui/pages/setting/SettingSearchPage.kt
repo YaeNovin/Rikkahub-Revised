@@ -27,7 +27,7 @@ import me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu as DropdownMen
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -101,7 +101,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = CustomColors.scaffoldContainerColor
     ) {
         val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
             val fromIndex = from.index

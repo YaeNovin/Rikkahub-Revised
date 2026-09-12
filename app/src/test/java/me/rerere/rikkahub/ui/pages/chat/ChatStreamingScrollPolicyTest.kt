@@ -6,6 +6,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatStreamingScrollPolicyTest {
+    @Test fun `a drag completed inside the follow delay still cancels the old scroll`() {
+        val gate = StreamingScrollGate()
+        val version = gate.interactionVersion
+        gate.onUserScroll()
+        gate.onScrollSettled(atBottom = true)
+        assertFalse(gate.allowsPending(version, 8, 200, 8, 200))
+        assertTrue(gate.allowsPending(gate.interactionVersion, 8, 200, 8, 200))
+    }
+
+    @Test fun `manual browsing stays detached until the user returns to the bottom`() {
+        val gate = StreamingScrollGate()
+        gate.onUserScroll()
+        gate.onScrollSettled(atBottom = false)
+        assertTrue(gate.browsing)
+        assertFalse(gate.allowsPending(gate.interactionVersion, 8, 200, 8, 200))
+        gate.onScrollSettled(atBottom = true)
+        assertTrue(gate.allowsPending(gate.interactionVersion, 8, 200, 8, 200))
+    }
+
+    @Test fun `changed scroll offsets and changed visible items invalidate delayed corrections`() {
+        val gate = StreamingScrollGate()
+        assertFalse(gate.allowsPending(0, 8, 200, 8, 199))
+        assertFalse(gate.allowsPending(0, 8, 200, 7, 200))
+    }
     @Test
     fun `streaming output follows only when the real last item is near the bottom`() {
         assertTrue(

@@ -19,17 +19,18 @@ class QuickMessagesVM(
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
 
     fun addQuickMessage(quickMessage: QuickMessage) {
-        updateQuickMessages(
-            settings.value.quickMessages + quickMessage
-        )
+        updateQuickMessages { it + quickMessage }
     }
 
     fun updateQuickMessage(updated: QuickMessage) {
-        updateQuickMessages(
-            settings.value.quickMessages.map { quickMessage ->
-                if (quickMessage.id == updated.id) updated else quickMessage
+        updateQuickMessages { current ->
+            current.map { quickMessage ->
+                if (quickMessage.id == updated.id) updated.copy(
+                    useCount = quickMessage.useCount,
+                    lastUsedAt = quickMessage.lastUsedAt,
+                ) else quickMessage
             }
-        )
+        }
     }
 
     fun deleteQuickMessage(id: Uuid) {
@@ -42,10 +43,11 @@ class QuickMessagesVM(
         }
     }
 
-    private fun updateQuickMessages(quickMessages: List<QuickMessage>) {
-        val validIds = quickMessages.map { it.id }.toSet()
+    private fun updateQuickMessages(transform: (List<QuickMessage>) -> List<QuickMessage>) {
         viewModelScope.launch {
             settingsStore.update { settings ->
+                val quickMessages = transform(settings.quickMessages)
+                val validIds = quickMessages.map { it.id }.toSet()
                 settings.copy(
                     quickMessages = quickMessages,
                     assistants = settings.assistants.map { assistant ->

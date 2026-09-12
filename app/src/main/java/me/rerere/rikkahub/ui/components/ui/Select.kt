@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,7 @@ fun <T> Select(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     optionToString: @Composable (T) -> String = { it.toString() },
+    optionEnabled: (T) -> Boolean = { true },
     optionLeading: @Composable ((T) -> Unit)? = null,
     leading: @Composable () -> Unit = {},
     trailing: @Composable () -> Unit = {}
@@ -70,7 +72,7 @@ fun <T> Select(
             tonalElevation = if (globalGlassActive) 0.dp else 4.dp,
             shape = anchorShape,
             border = if (liquidGlassActive) liquidGlassBorder(strength = 0.38f) else null,
-            color = if (globalGlassActive) {
+            color = if (liquidGlassActive) Color.Transparent else if (globalGlassActive) {
                 liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, 0.82f)
             } else {
                 MaterialTheme.colorScheme.surface
@@ -79,9 +81,17 @@ fun <T> Select(
         ) {
             Box {
                 if (liquidGlassActive) {
+                    if (!LocalInsideGlassSurface.current) {
+                    InlineBackdropBlur(
+                        blurRadius = me.rerere.rikkahub.ui.context.LocalSettings.current.advancedAppearanceSetting.pageLiquidGlassBlurRadius,
+                        shape = anchorShape, modifier = Modifier.matchParentSize(),
+                    )
+                    }
+                    Box(Modifier.matchParentSize().background(liquidGlassContainerColor(MaterialTheme.colorScheme.surfaceContainerHigh, .82f)))
                     LiquidGlassSurfaceLayers(
                         modifier = Modifier.matchParentSize(),
                         strength = 0.52f,
+                        shape = anchorShape,
                     )
                 }
                 Row(
@@ -121,6 +131,7 @@ fun <T> Select(
             ) {
                 options.fastForEach { option ->
                     DropdownMenuItem(
+                        enabled = enabled && optionEnabled(option),
                         onClick = {
                             onOptionSelected(option)
                             expanded = false

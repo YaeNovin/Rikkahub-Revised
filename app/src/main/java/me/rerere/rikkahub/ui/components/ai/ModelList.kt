@@ -78,6 +78,7 @@ import me.rerere.hugeicons.stroke.Image03
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Text
 import me.rerere.hugeicons.stroke.Tools
+import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -118,6 +119,7 @@ class ModelListState internal constructor(
 
     val currentModel: Model?
         get() = modelId?.let { providers.findModelById(it) }
+            ?.takeIf { it.type == type }
 
     val filteredProviders: List<ProviderSetting>
         get() = providers.fastFilter { provider ->
@@ -780,6 +782,7 @@ fun ModelTypeTag(model: Model) {
                     ModelType.CHAT -> R.string.setting_provider_page_chat_model
                     ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
                     ModelType.IMAGE -> R.string.setting_provider_page_image_model
+                    ModelType.VIDEO -> R.string.setting_provider_page_video_model
                 }
             )
         )
@@ -796,6 +799,7 @@ fun ModelModalityTag(model: Model) {
                 imageVector = when (modality) {
                     Modality.TEXT -> HugeIcons.Text
                     Modality.IMAGE -> HugeIcons.Image03
+                    Modality.VIDEO -> HugeIcons.Video01
                 },
                 contentDescription = null,
                 modifier = Modifier
@@ -813,6 +817,7 @@ fun ModelModalityTag(model: Model) {
                 imageVector = when (modality) {
                     Modality.TEXT -> HugeIcons.Text
                     Modality.IMAGE -> HugeIcons.Image03
+                    Modality.VIDEO -> HugeIcons.Video01
                 },
                 contentDescription = null,
                 modifier = Modifier

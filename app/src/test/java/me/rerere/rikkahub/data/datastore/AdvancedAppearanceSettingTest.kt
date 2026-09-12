@@ -168,6 +168,8 @@ class AdvancedAppearanceSettingTest {
         assertEquals(1f, appearance.globalBackgroundOpacity)
         assertFalse(appearance.applyGlobalBackgroundToChat)
         assertEquals(1f, Assistant().backgroundOpacity)
+        assertEquals(0f, Assistant().gradientBackgroundAngle)
+        assertEquals(0f, Assistant().gradientBackgroundVignette)
         assertEquals(0.68f, appearance.pageSurfaceOpacity)
         assertEquals(0f, appearance.pageLiquidGlassBlurRadius)
         assertEquals(BackgroundSurfaceStyle.TRANSLUCENT, appearance.pageSurfaceStyle)
@@ -180,6 +182,8 @@ class AdvancedAppearanceSettingTest {
         assertEquals(RichContentStyle.TRANSLUCENT, appearance.richContentStyle)
         assertEquals(0.62f, appearance.richContentSurfaceOpacity)
         assertFalse(appearance.enableAutoAccent)
+        assertTrue(appearance.enableGradientPerformanceEffects)
+        assertTrue(appearance.respectSystemReducedMotion)
         assertEquals(4f, MIN_GLOBAL_BACKGROUND_BLUR_RADIUS)
         assertEquals(4f, MIN_NAVIGATION_GLASS_BLUR_RADIUS)
         assertEquals(0f, MIN_LIQUID_GLASS_BLUR_RADIUS)
@@ -208,7 +212,15 @@ class AdvancedAppearanceSettingTest {
 
     @Test
     fun `gradient chat background enables effects but opaque navigation does not`() {
-        val assistant = Assistant(useGradientBackground = true)
+        val assistant = Assistant(
+            useGradientBackground = true,
+            backgroundOpacity = 0.72f,
+            gradientBackgroundAnimation = false,
+            gradientBackgroundSpeed = 1.5f,
+            gradientBackgroundFollowTheme = true,
+            gradientBackgroundIntensity = 1.25f,
+            gradientBackgroundMotionScale = 0.75f,
+        )
         val settings = Settings(
             assistantId = assistant.id,
             assistants = listOf(assistant),
@@ -228,6 +240,77 @@ class AdvancedAppearanceSettingTest {
         assertTrue(settings.isChatInputGlassActive())
         assertTrue(settings.isChatDockGlassActive())
         assertTrue(settings.isEnhancedChatBubbleActive())
+        val resolved = settings.resolveChatBackground()
+        assertEquals(0.72f, resolved.opacity)
+        assertFalse(resolved.gradientAnimation)
+        assertEquals(1.5f, resolved.gradientSpeed)
+        assertTrue(resolved.gradientFollowTheme)
+        assertEquals(1.25f, resolved.gradientIntensity)
+        assertEquals(0.75f, resolved.gradientMotionScale)
+        assertEquals(0f, resolved.gradientAngle)
+        assertEquals(0f, resolved.gradientVignette)
+    }
+
+    @Test
+    fun `gradient direction and vignette are normalized for rendering`() {
+        val assistant = Assistant(
+            useGradientBackground = true,
+            gradientBackgroundAngle = 240f,
+            gradientBackgroundVignette = -0.5f,
+        )
+        val settings = Settings(
+            assistantId = assistant.id,
+            assistants = listOf(assistant),
+        )
+
+        val resolved = settings.resolveChatBackground()
+        assertEquals(180f, resolved.gradientAngle)
+        assertEquals(0f, resolved.gradientVignette)
+    }
+
+    @Test
+    fun `custom gradient colors reach the resolved chat background`() {
+        val colors = me.rerere.rikkahub.data.model.GradientBackgroundCustomColors(
+            baseColors = listOf(0xFF112233),
+            blobColors = listOf(0xFF445566),
+        )
+        val assistant = Assistant(
+            useGradientBackground = true,
+            gradientBackgroundCustomColors = colors,
+        )
+        val settings = Settings(
+            assistantId = assistant.id,
+            assistants = listOf(assistant),
+        )
+
+        assertEquals(colors, settings.resolveChatBackground().gradientCustomColors)
+    }
+
+    @Test
+    fun `older assistant data receives compatible gradient defaults`() {
+        val assistant = JsonInstant.decodeFromString<Assistant>(
+            """{"useGradientBackground":true}"""
+        )
+
+        assertTrue(assistant.gradientBackgroundAnimation)
+        assertEquals(1f, assistant.gradientBackgroundSpeed)
+        assertFalse(assistant.gradientBackgroundFollowTheme)
+        assertEquals(1f, assistant.gradientBackgroundIntensity)
+        assertEquals(1f, assistant.gradientBackgroundMotionScale)
+        assertTrue(assistant.gradientBackgroundCustomColors.baseColors.isEmpty())
+        assertTrue(assistant.gradientBackgroundCustomColors.blobColors.isEmpty())
+    }
+
+    @Test
+    fun `legacy gemini gradient preset remains readable after rename`() {
+        val assistant = JsonInstant.decodeFromString<Assistant>(
+            """{"useGradientBackground":true,"gradientBackgroundPreset":"gemini"}"""
+        )
+
+        assertEquals(
+            me.rerere.rikkahub.data.model.GradientBackgroundPreset.CLASSIC,
+            assistant.gradientBackgroundPreset,
+        )
     }
 
     @Test
@@ -346,6 +429,32 @@ class AdvancedAppearanceSettingTest {
     }
 
     @Test
+    fun `page performance switches disable their corresponding effects`() {
+        val assistant = Assistant(background = "file:///backgrounds/assistant.jpg")
+        val settings = Settings(
+            assistantId = assistant.id,
+            assistants = listOf(assistant),
+            displaySetting = DisplaySetting(
+                showAssistantBubble = true,
+                enableBlurEffect = true,
+            ),
+            advancedAppearanceSetting = AdvancedAppearanceSetting(
+                enableNavigationGlass = true,
+                enableChatDockGlass = true,
+                enableNavigationPerformanceEffects = false,
+                enableChatDockPerformanceEffects = false,
+                enableBubblePerformanceEffects = false,
+                enableInputPerformanceEffects = false,
+            ),
+        )
+
+        assertFalse(settings.isNavigationGlassActive())
+        assertFalse(settings.isChatDockGlassActive())
+        assertFalse(settings.isEnhancedChatBubbleActive())
+        assertFalse(settings.isChatInputGlassActive())
+    }
+
+    @Test
     fun `auto accent requires global background toggle and extracted color`() {
         val appearance = AdvancedAppearanceSetting(
             enableGlobalBackground = true,
@@ -385,6 +494,11 @@ class AdvancedAppearanceSettingTest {
             richContentSurfaceOpacity = 0.48f,
             enableAutoAccent = true,
             autoAccentColorArgb = 0xFF336699,
+            colorStyle = AppearanceColorStyle.EXPRESSIVE,
+            colorContrast = 0.35f,
+            enableGradientPerformanceEffects = false,
+            gradientRendererMode = GradientRendererMode.AGSL,
+            respectSystemReducedMotion = false,
         )
 
         val encoded = JsonInstant.encodeToString(expected)

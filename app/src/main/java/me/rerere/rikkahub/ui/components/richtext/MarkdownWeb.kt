@@ -4,19 +4,22 @@ import android.content.Context
 import androidx.compose.material3.ColorScheme
 import me.rerere.rikkahub.utils.base64Encode
 import me.rerere.rikkahub.utils.toCssHex
+import me.rerere.rikkahub.utils.escapeHtml
 
 /**
  * Build HTML page for markdown preview with support for:
- * - Markdown rendering via marked.js
+ * - Offline Markdown rendering via markdown-it
  * - LaTeX math via KaTeX
  * - Mermaid diagrams
  * - Syntax highlighting via highlight.js
  */
 fun buildMarkdownPreviewHtml(context: Context, markdown: String, colorScheme: ColorScheme): String {
     val htmlTemplate = context.assets.open("html/mark.html").bufferedReader().use { it.readText() }
+    return buildMarkdownPreviewHtml(htmlTemplate, markdown, colorScheme)
+}
 
+internal fun buildMarkdownPreviewHtml(htmlTemplate: String, markdown: String, colorScheme: ColorScheme): String {
     return htmlTemplate
-        .replace("{{MARKDOWN_BASE64}}", markdown.base64Encode())
         .replace("{{BACKGROUND_COLOR}}", colorScheme.background.toCssHex())
         .replace("{{ON_BACKGROUND_COLOR}}", colorScheme.onBackground.toCssHex())
         .replace("{{SURFACE_COLOR}}", colorScheme.surface.toCssHex())
@@ -26,4 +29,6 @@ fun buildMarkdownPreviewHtml(context: Context, markdown: String, colorScheme: Co
         .replace("{{PRIMARY_COLOR}}", colorScheme.primary.toCssHex())
         .replace("{{OUTLINE_COLOR}}", colorScheme.outline.toCssHex())
         .replace("{{OUTLINE_VARIANT_COLOR}}", colorScheme.outlineVariant.toCssHex())
+        .replace("{{MARKDOWN_BASE64}}", markdown.base64Encode())
+        .replace("{{MARKDOWN_FALLBACK}}", markdown.escapeHtml())
 }

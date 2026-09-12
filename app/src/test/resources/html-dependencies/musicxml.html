@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+<div id="score" style="width:100%;max-width:380px"></div>
+<script>
+var osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('score', { backend: 'svg', autoResize: false });
+osmd.load('<?xml version="1.0"?><score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>').then(function() {
+  osmd.render();
+  window.musicxmlDone = true;
+});
+</script>
+</body></html>

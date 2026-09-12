@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -71,7 +71,7 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = CustomColors.scaffoldContainerColor
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -162,12 +162,19 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                     )
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_inspiration_cards_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_inspiration_cards_desc)) },
+                        supportingContent = {
+                            Column {
+                                Text(stringResource(R.string.setting_display_page_inspiration_cards_desc))
+                                me.rerere.rikkahub.ui.pages.chat.InspirationSettingsEntry()
+                            }
+                        },
                         trailingContent = {
                             Switch(
                                 checked = displaySetting.showInspirationCards,
                                 onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(showInspirationCards = it))
+                                    val enabled = it
+                                    displaySetting = displaySetting.copy(showInspirationCards = enabled)
+                                    vm.updateDisplaySetting { current -> current.copy(showInspirationCards = enabled) }
                                 }
                             )
                         },

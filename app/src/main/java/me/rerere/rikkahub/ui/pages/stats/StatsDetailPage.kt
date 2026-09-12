@@ -23,13 +23,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -75,6 +73,8 @@ import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.RequestStatEntity
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog
+import me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu as DropdownMenu
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -484,7 +484,7 @@ private fun ProviderFilterDialog(
         options.filter { it.contains(query.trim(), ignoreCase = true) }
     }
 
-    AlertDialog(
+    AppearanceAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.stats_detail_provider_filter)) },
         text = {

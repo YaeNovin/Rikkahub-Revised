@@ -7,6 +7,17 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class WebViewContentCacheTest {
+    @Test fun `corrupt cache is detected and repaired when reopening source`() {
+        val id = WebViewContentCache.store(temporaryFolder.root, "<html>ok</html>")
+        temporaryFolder.root.resolve("webview_content/$id").writeText("broken")
+        assertNull(WebViewContentCache.load(temporaryFolder.root, id))
+        WebViewContentCache.store(temporaryFolder.root, "<html>ok</html>")
+        assertEquals("<html>ok</html>", WebViewContentCache.load(temporaryFolder.root, id))
+    }
+    @Test(expected = IllegalArgumentException::class)
+    fun `oversized preview is rejected before creating a cache file`() {
+        WebViewContentCache.store(temporaryFolder.root, "x".repeat(WebViewContentCache.MAX_CONTENT_BYTES + 1))
+    }
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 

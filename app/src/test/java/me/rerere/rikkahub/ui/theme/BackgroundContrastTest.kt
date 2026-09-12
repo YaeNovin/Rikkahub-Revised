@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -86,6 +87,48 @@ class BackgroundContrastTest {
         assertEquals(scheme.secondary, readable.secondary)
         assertEquals(scheme.tertiary, readable.tertiary)
         assertEquals(Color.Black, readable.onSurface)
+    }
+
+    @Test
+    fun `gradient readability includes the configured edge shading`() {
+        val scheme = androidx.compose.material3.lightColorScheme(
+            background = Color(0xFFF5F7FA),
+            primaryContainer = Color(0xFFDDE8FF),
+            secondaryContainer = Color(0xFFE7F2EF),
+        )
+
+        val withoutVignette = rememberChatBackgroundForegroundForTest(
+            scheme = scheme,
+            vignette = 0f,
+        )
+        val withVignette = rememberChatBackgroundForegroundForTest(
+            scheme = scheme,
+            vignette = 1f,
+        )
+
+        assertEquals(Color.Black, withoutVignette)
+        assertEquals(Color.Black, withVignette)
+    }
+
+    private fun rememberChatBackgroundForegroundForTest(
+        scheme: androidx.compose.material3.ColorScheme,
+        vignette: Float,
+    ): Color {
+        val palette = createGradientBackgroundPalette(
+            colorScheme = scheme,
+            dark = false,
+            followTheme = true,
+        )
+        val samples = gradientReadabilitySamples(
+            palette = palette,
+            opacity = 1f,
+            intensity = 1f,
+            baseColor = scheme.background,
+        )
+        val edgeSamples = samples.map { sample ->
+            Color.Black.copy(alpha = vignette * 0.28f).compositeOver(sample)
+        }
+        return readableForegroundColor(samples + edgeSamples)
     }
 
     @Test

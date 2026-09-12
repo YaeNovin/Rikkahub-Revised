@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
@@ -29,14 +30,11 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.View
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_ASSET_URL
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
-import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.components.ui.LocalExportContext
-import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.escapeHtml
@@ -49,13 +47,13 @@ fun Mermaid(
     modifier: Modifier = Modifier,
     showFullScreenAction: Boolean = true,
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = me.rerere.rikkahub.ui.theme.LocalBackgroundBaseColorScheme.current ?: MaterialTheme.colorScheme
     val darkMode = LocalDarkMode.current
     val context = LocalContext.current
     val activity = LocalActivity.current
     val toaster = LocalToaster.current
-    val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
+    val openPreview = me.rerere.rikkahub.ui.components.webview.rememberWebPreviewLauncher()
     val exportSuccessMessage = stringResource(R.string.mermaid_export_success)
     val exportFailedMessage = stringResource(R.string.mermaid_export_failed)
 
@@ -72,11 +70,14 @@ fun Mermaid(
                 scope.launch {
                     runCatching {
                         val currentActivity = requireNotNull(activity)
-                        require(base64Image.isNotBlank())
-                        val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
-                        val bitmap = requireNotNull(
-                            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                        )
+                        require(base64Image.isNotBlank() && base64Image.length <= 24 * 1024 * 1024)
+                        val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, bounds)
+                            require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 4_000_000L)
+                            requireNotNull(BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size))
+                        }
                         try {
                             context.exportImage(
                                 currentActivity,
@@ -89,6 +90,7 @@ fun Mermaid(
                     }.onSuccess {
                         toaster.show(exportSuccessMessage, type = ToastType.Success)
                     }.onFailure { error ->
+                        if (error is kotlinx.coroutines.CancellationException) throw error
                         error.printStackTrace()
                         toaster.show(exportFailedMessage, type = ToastType.Error)
                     }
@@ -122,11 +124,7 @@ fun Mermaid(
             loadWithOverviewMode = true
         }
     )
-    val previewHeight = richPreviewHeight(
-        minHeightDp = 220,
-        maxHeightDp = 380,
-        widthFraction = 0.75f,
-    )
+    val previewHeight = 200.dp
 
     Column(
         modifier = modifier
@@ -137,6 +135,7 @@ fun Mermaid(
             preferParentVerticalScroll = true,
             transparentBackground = true,
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(RoundedCornerShape(4.dp))
                 .height(previewHeight),
         )
@@ -151,8 +150,7 @@ fun Mermaid(
                 if (showFullScreenAction) {
                     IconButton(
                         onClick = {
-                            val contentId = WebViewContentCache.store(context.cacheDir, html)
-                            navController.navigate(Screen.WebView(contentId = contentId))
+                            openPreview { html }
                         },
                     ) {
                         Icon(
@@ -203,15 +201,16 @@ internal fun buildMermaidHtml(
     colorScheme: ColorScheme,
     renderErrorMessage: String = "Unable to render this content.",
 ): String {
+    fun foreground(color: androidx.compose.ui.graphics.Color) = me.rerere.rikkahub.ui.theme.readableForegroundColor(color.copy(alpha = 1f)).toCssHex()
     val primaryColor = colorScheme.primaryContainer.toCssHex()
     val secondaryColor = colorScheme.secondaryContainer.toCssHex()
     val tertiaryColor = colorScheme.tertiaryContainer.toCssHex()
     val background = colorScheme.background.toCssHex()
     val surface = colorScheme.surface.toCssHex()
-    val onPrimary = colorScheme.onPrimaryContainer.toCssHex()
-    val onSecondary = colorScheme.onSecondaryContainer.toCssHex()
-    val onTertiary = colorScheme.onTertiaryContainer.toCssHex()
-    val onBackground = colorScheme.onBackground.toCssHex()
+    val onPrimary = foreground(colorScheme.primaryContainer)
+    val onSecondary = foreground(colorScheme.secondaryContainer)
+    val onTertiary = foreground(colorScheme.tertiaryContainer)
+    val onBackground = foreground(colorScheme.surface)
     val errorColor = colorScheme.error.toCssHex()
     val onErrorColor = colorScheme.onError.toCssHex()
 
@@ -231,8 +230,9 @@ internal fun buildMermaidHtml(
                     overflow: auto;
                     background: transparent;
                 }
-                #diagram-container { width: 100%; min-height: 100%; overflow: auto; touch-action: pan-x pan-y pinch-zoom; display: flex; align-items: center; justify-content: center; }
+                #diagram-container { width: 100%; overflow: auto; touch-action: pan-x pan-y pinch-zoom; display: flex; align-items: center; justify-content: center; background: $surface; color: $onBackground; border-radius: 8px; }
                 .mermaid {
+                    visibility: hidden;
                     box-sizing: border-box;
                     margin: 0;
                     padding: 8px;
@@ -258,13 +258,17 @@ internal fun buildMermaidHtml(
             <span id="localized-render-error" hidden>${renderErrorMessage.escapeHtml()}</span>
             <script>
               const mermaidNode = document.querySelector('.mermaid');
+              window.__rikkaRenderStatus = 'loading';
               const localizedRenderError = document.getElementById('localized-render-error').textContent;
               function showRenderError(error) {
+                  window.__rikkaRenderStatus = 'error';
                   console.error(error);
                   mermaidNode.textContent = localizedRenderError;
                   mermaidNode.classList.remove('mermaid');
+                  mermaidNode.style.visibility = 'visible';
                   mermaidNode.style.whiteSpace = 'pre-wrap';
               }
+              try {
               mermaid.initialize({
                     startOnLoad: false,
                     securityLevel: 'strict',
@@ -306,22 +310,39 @@ internal fun buildMermaidHtml(
                         taskTextDarkColor: '${onBackground}',
 
                         labelColor: '${onBackground}',
+                        cScale0: '$primaryColor', cScaleLabel0: '$onPrimary',
+                        cScale1: '$secondaryColor', cScaleLabel1: '$onSecondary',
+                        cScale2: '$tertiaryColor', cScaleLabel2: '$onTertiary',
+                        cScale3: '$primaryColor', cScaleLabel3: '$onPrimary',
+                        cScale4: '$secondaryColor', cScaleLabel4: '$onSecondary',
+                        cScale5: '$tertiaryColor', cScaleLabel5: '$onTertiary',
+                        cScale6: '$primaryColor', cScaleLabel6: '$onPrimary',
+                        cScale7: '$secondaryColor', cScaleLabel7: '$onSecondary',
+                        cScale8: '$tertiaryColor', cScaleLabel8: '$onTertiary',
+                        cScale9: '$primaryColor', cScaleLabel9: '$onPrimary',
+                        cScale10: '$secondaryColor', cScaleLabel10: '$onSecondary',
+                        cScale11: '$tertiaryColor', cScaleLabel11: '$onTertiary',
                         errorBkgColor: '${errorColor}',
                         errorTextColor: '${onErrorColor}'
                     }
               });
               function fitRenderedDiagram() {
                   const svgElement = document.querySelector('.mermaid svg');
-                  if (!svgElement) return;
+                  if (!svgElement) { showRenderError(new Error('No diagram generated')); return; }
+                  mermaidNode.style.visibility = 'visible';
                   svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
                   svgElement.removeAttribute('width');
                   svgElement.removeAttribute('height');
                   svgElement.style.width = '100%';
                   svgElement.style.height = 'auto';
+                  window.__rikkaRenderStatus = 'ready';
               }
+              const renderTimeout = setTimeout(function() { showRenderError(new Error('Diagram rendering timed out')); }, 20000);
               mermaid.run({ nodes: [mermaidNode] })
                   .then(fitRenderedDiagram)
-                  .catch(showRenderError);
+                  .catch(showRenderError)
+                  .finally(function() { clearTimeout(renderTimeout); });
+              } catch (error) { showRenderError(error); }
 
               window.exportSvgToPng = function() {
                 try {
@@ -338,15 +359,17 @@ internal fun buildMermaidHtml(
                     const width = svgRect.width;
                     const height = svgRect.height;
 
-                    const scaleFactor = window.devicePixelRatio * 2;
-                    canvas.width = width * scaleFactor;
-                    canvas.height = height * scaleFactor;
+                    if (!(width > 0 && height > 0)) throw new Error('Empty diagram');
+                    const scaleFactor = Math.min(window.devicePixelRatio * 2, 4096 / width, 4096 / height, Math.sqrt(4000000 / (width * height)));
+                    canvas.width = Math.max(1, Math.floor(width * scaleFactor));
+                    canvas.height = Math.max(1, Math.floor(height * scaleFactor));
 
                     const svgXml = new XMLSerializer().serializeToString(svgElement);
                     const svgBase64 = btoa(unescape(encodeURIComponent(svgXml)));
 
                     const img = new Image();
                     img.onload = function() {
+                        try {
                         ctx.fillStyle = '${background}';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -357,6 +380,7 @@ internal fun buildMermaidHtml(
 
                         const pngBase64 = canvas.toDataURL('image/png').split(',')[1];
                         AndroidInterface.exportImage(pngBase64);
+                        } catch (error) { AndroidInterface.exportImage(''); }
                     };
                     img.onerror = function(e) {
                         AndroidInterface.exportImage('');

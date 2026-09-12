@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -132,7 +133,7 @@ val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
 
 // 预处理markdown内容
-private fun preProcess(content: String): String = normalizeMarkdownLatex(content)
+private fun preProcess(content: String): String = normalizeMarkdownLatex(protectRawSvg(content))
 
 @Preview(showBackground = true)
 @Composable
@@ -208,7 +209,7 @@ private val markdownParseCache = object : LinkedHashMap<String, MarkdownParseRes
 }
 
 private val GRAPHICAL_CODE_FENCE_REGEX = Regex(
-    pattern = "(?m)^\\s*```\\s*(?:mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|html|svg)\\b",
+    pattern = "(?m)^\\s*```\\s*(?:mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|ebnf|html|svg|wavedrom|waveform|timing|digital-waveform|dot|graphviz|vega|vega-lite|vegalite|smiles|smiles-drawer|molecule|musicxml|music-xml)\\b",
     option = RegexOption.IGNORE_CASE,
 )
 
@@ -232,7 +233,7 @@ private fun cachedMarkdownParse(content: String): MarkdownParseResult? =
     synchronized(markdownParseCache) { markdownParseCache[content] }
 
 private fun ASTNode.containsHtml(): Boolean {
-    if (type == MarkdownElementTypes.HTML_BLOCK || type == MarkdownTokenTypes.HTML_TAG) return true
+    if (type == MarkdownElementTypes.HTML_BLOCK || type == MarkdownTokenTypes.HTML_TAG || type == MarkdownElementTypes.IMAGE) return true
     return children.any { it.containsHtml() }
 }
 
@@ -420,11 +421,21 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {}
 ) {
+    MarkdownBlockBody(content, modifier, style, onClickCitation)
+}
+
+@Composable
+private fun MarkdownBlockBody(
+    content: String,
+    modifier: Modifier,
+    style: TextStyle,
+    onClickCitation: (String) -> Unit,
+) {
     val diffParts = remember(content) { splitMarkdownAroundDiff(content) }
     if (diffParts.isNotEmpty()) {
         Column(modifier = modifier.fillMaxWidth()) {
             diffParts.forEachIndexed { index, part ->
-                key(index, part.isDiff, part.content.hashCode()) {
+                key(index, part.isDiff) {
                     if (part.isDiff) {
                         DiffView(
                             diff = part.content,
@@ -445,15 +456,18 @@ fun MarkdownBlock(
     }
     var data by remember { mutableStateOf(cachedMarkdownParse(content)) }
     val updatedContent by rememberUpdatedState(content)
+    var parseFailed by remember { mutableStateOf(false) }
+    var parseRetry by remember { mutableIntStateOf(0) }
 
     // Conflate continuous token updates and parse them sequentially. The previous successful tree
     // stays composed while a new one is prepared, so completed WebViews are never replaced by a
     // loading placeholder merely because trailing text arrived.
-    LaunchedEffect(Unit) {
+    LaunchedEffect(parseRetry) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
             .conflate()
             .collect {
+                parseFailed = false
                 delay(streamingMarkdownParseIntervalMs(updatedContent))
                 val targetContent = updatedContent
                 if (data?.source == targetContent) return@collect
@@ -467,12 +481,20 @@ fun MarkdownBlock(
                     throw cancellation
                 } catch (exception: Exception) {
                     exception.printStackTrace()
+                    parseFailed = true
                 }
             }
     }
 
     val parsed = data
-    if (parsed == null) {
+    ReportRichTextLayoutLoading(!parseFailed && (parsed == null || parsed.source != content))
+    me.rerere.rikkahub.ui.components.ui.AwaitExportRender(!parseFailed && (parsed == null || parsed.source != content))
+    if (parseFailed) {
+        Column(modifier) {
+            Text("消息内容解析失败，可重试或查看原始消息。")
+            androidx.compose.material3.TextButton(onClick = { parseRetry++ }) { Text("重试") }
+        }
+    } else if (parsed == null) {
         Box(
             modifier = modifier
                 .fillMaxWidth()
@@ -481,7 +503,7 @@ fun MarkdownBlock(
                 .clip(RoundedCornerShape(4.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
         )
-    } else if (parsed.hasHtml) {
+    } else if (parsed.hasHtml || (LocalGitHubCardsEnabled.current && parsed.source.contains("github.com", ignoreCase = true))) {
         MarkdownNew(
             content = parsed.source,
             modifier = modifier,
@@ -817,10 +839,10 @@ private fun MarkdownNode(
                 fontFamily = JetbrainsMono,
                 fontSize = LocalTextStyle.current.fontSize * 0.9f,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = modifier
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f))
+                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 1f))
                     .padding(horizontal = 4.dp, vertical = 1.dp),
             )
         }
@@ -1025,9 +1047,6 @@ private fun Paragraph(
     }
 
     val colorScheme = MaterialTheme.colorScheme
-    val inlineContents = remember {
-        mutableStateMapOf<String, InlineTextContent>()
-    }
     val hasInlineMath = remember(node) {
         node.findChildOfTypeRecursive(GFMElementTypes.INLINE_MATH) != null
     }
@@ -1036,13 +1055,16 @@ private fun Paragraph(
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
     val latexColorArgb = LocalContentColor.current.toArgb()
+    val inlineContents = remember(node, content, colorScheme, textStyle, density, enableLatexRendering, latexColorArgb) {
+        mutableStateMapOf<String, InlineTextContent>()
+    }
     FlowRow(
         modifier = modifier.then(
             if (node.nextSibling() != null) Modifier.padding(bottom = markdownParagraphSpacing())
             else Modifier
         )
     ) {
-        val annotatedString = remember(content, enableLatexRendering, latexColorArgb) {
+        val annotatedString = remember(node, content, enableLatexRendering, latexColorArgb, colorScheme, textStyle, density, trim, onClickCitation) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -1399,8 +1421,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     fontFamily = JetbrainsMono,
                     fontSize = 0.9.em,
                     fontWeight = FontWeight.Medium,
-                    color = colorScheme.onSurface,
-                    background = colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
+                    color = colorScheme.onSecondaryContainer,
+                    background = colorScheme.secondaryContainer.copy(alpha = 1f),
                 )
             ) {
                 append(' ')

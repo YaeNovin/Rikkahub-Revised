@@ -86,7 +86,7 @@ import org.jsoup.nodes.TextNode
 
 // ---- Preprocessing (mirrors Markdown.kt logic) ----
 
-private fun preProcess(content: String): String = normalizeMarkdownLatex(content)
+private fun preProcess(content: String): String = normalizeMarkdownLatex(protectRawSvg(content))
 
 // ---- HTML generation ----
 
@@ -114,19 +114,36 @@ internal fun isMarkdownDocumentCached(content: String): Boolean =
 
 internal fun preloadMarkdownDocument(content: String): Document {
     cachedMarkdownDocument(content)?.let { return it }
-    val document = synchronized(htmlParserLock) {
-        Jsoup.parse(generateMarkdownHtml(content))
-    }
+    val document = buildMarkdownDocument(content)
     synchronized(markdownHtmlCache) {
         markdownHtmlCache[content] = document
     }
     return document
 }
 
-private fun generateMarkdownHtml(content: String): String {
+internal fun buildMarkdownDocument(content: String): Document = synchronized(htmlParserLock) {
     val preprocessed = preProcess(content)
     val tree = parser.buildMarkdownTreeFromString(preprocessed)
-    return HtmlGenerator(preprocessed, tree, flavour).generateHtml()
+    // The library writes <pre> as raw HTML but passes <code> through its tag
+    // renderer. Mark that source node, then pass completion to the block wrapper.
+    val html = HtmlGenerator(preprocessed, tree, flavour).generateHtml { node, tag, attributes ->
+        if (tag.toString() == "code" &&
+            node.type == org.intellij.markdown.MarkdownElementTypes.CODE_FENCE &&
+            node.children.none { it.type == org.intellij.markdown.MarkdownTokenTypes.CODE_FENCE_END }
+        ) {
+            attributes + "data-rikka-complete=\"false\""
+        } else {
+            attributes
+        }
+    }
+    Jsoup.parse(html).also { document ->
+        // Only the post-parse decorator may create native repository cards.
+        document.select("[data-rikka-github-repository]").removeAttr("data-rikka-github-repository")
+        document.select("pre > code[data-rikka-complete=false]").forEach { code ->
+            code.parent()?.attr("data-rikka-complete", "false")
+            code.removeAttr("data-rikka-complete")
+        }
+    }
 }
 
 // ---- Main composable ----
@@ -139,27 +156,39 @@ fun MarkdownNew(
     onClickCitation: (String) -> Unit = {},
 ) {
     var document by remember { mutableStateOf(cachedMarkdownDocument(content)) }
+    var parseFailed by remember(content) { mutableStateOf(false) }
+    var parseRetry by remember(content) { mutableStateOf(0) }
+    val repositoryCards = LocalGitHubCardsEnabled.current && !LocalRichTextStreaming.current
 
-    LaunchedEffect(content) {
-        cachedMarkdownDocument(content)?.let {
+    LaunchedEffect(content, parseRetry, repositoryCards) {
+        parseFailed = false
+        cachedMarkdownDocument(content)?.takeUnless { repositoryCards }?.let {
             document = it
             return@LaunchedEffect
         }
         delay(STREAMING_MARKDOWN_PARSE_INTERVAL_MS)
         try {
             document = withContext(RichTextParsingDispatcher) {
-                preloadMarkdownDocument(content)
+                preloadMarkdownDocument(content).let { if (repositoryCards) withGitHubRepositoryCards(it) else it }
             }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (exception: Exception) {
             exception.printStackTrace()
+            parseFailed = true
         }
     }
 
     ProvideTextStyle(style) {
         val parsedDocument = document
-        if (parsedDocument == null) {
+        ReportRichTextLayoutLoading(parsedDocument == null && !parseFailed)
+        me.rerere.rikkahub.ui.components.ui.AwaitExportRender(parsedDocument == null && !parseFailed)
+        if (parseFailed) {
+            Column(modifier) {
+                Text("HTML 内容解析失败，可重试或查看原始消息。")
+                androidx.compose.material3.TextButton(onClick = { parseRetry++ }) { Text("重试") }
+            }
+        } else if (parsedDocument == null) {
             Box(
                 modifier = modifier
                     .fillMaxWidth()
@@ -222,7 +251,16 @@ private fun HtmlBlockElement(
     onClickCitation: (String) -> Unit,
     listLevel: Int = 0,
 ) {
+    if (LocalGitHubCardsEnabled.current && element.gitHubCardName() != null) {
+        GitHubRepositoryCard(me.rerere.rikkahub.data.github.GitHubRepositoryUrl.url(requireNotNull(element.gitHubCardName())), linkLabel = element.text())
+        return
+    }
+    rawSvgSource(element)?.let { svg ->
+        HighlightCodeBlock(svg.source, "svg", Modifier.fillMaxWidth(), completeCodeBlock = svg.complete)
+        return
+    }
     when (element.tagName().lowercase()) {
+        "svg" -> HighlightCodeBlock(element.outerHtml(), "svg", Modifier.fillMaxWidth())
         "p" -> HtmlParagraph(
             element = element,
             onClickCitation = onClickCitation,
@@ -275,8 +313,9 @@ private fun HtmlBlockElement(
                         model = src,
                         contentDescription = alt.takeIf { it.isNotEmpty() },
                         respectIntrinsicSize = true,
+                        requestedWidthDp = htmlImageDimension(element.attr("width")),
+                        requestedHeightDp = htmlImageDimension(element.attr("height")),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
                             .widthIn(max = 360.dp)
                             .heightIn(max = 280.dp),
                     )
@@ -292,6 +331,10 @@ private fun HtmlBlockElement(
                 HtmlInlineGroup(nodes = listOf(element), onClickCitation = onClickCitation)
             }
         }
+
+        "a" -> if (element.select("img").isNotEmpty()) {
+            HtmlInlineAsComposable(element, onClickCitation)
+        } else HtmlInlineGroup(nodes = listOf(element), onClickCitation = onClickCitation)
 
         "details" -> HtmlStyledElement(element = element) {
             HtmlDetails(element = element, onClickCitation = onClickCitation)
@@ -349,13 +392,24 @@ private fun HtmlParagraphContent(
     modifier: Modifier = Modifier,
 ) {
     val hasImages = element.select("img").isNotEmpty()
+    if (LocalGitHubCardsEnabled.current && element.containsGitHubCard()) {
+        HtmlInlineGroup(element.childNodes(), onClickCitation, modifier)
+        return
+    }
     // A span.math with inline != "true" is a block math element
     val hasBlockMath = element.select("span.math").any { it.attr("inline") != "true" }
+
+    if (hasImages && !hasBlockMath) {
+        HtmlInlineGroup(element.childNodes(), onClickCitation, modifier)
+        return
+    }
 
     if (hasImages || hasBlockMath) {
         // Mixed block content: render children individually in a FlowRow
         FlowRow(
             modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             element.childNodes().fastForEach { child ->
@@ -508,14 +562,15 @@ private fun HtmlListItem(
                                 (node.tagName().lowercase() == "input" && node.attr("type") == "checkbox")))
                     }
                     // Group consecutive inline nodes and render as a single paragraph
+                    val blockTags = setOf("p", "div", "pre", "table", "blockquote", "svg")
                     val groups = mutableListOf<MutableList<Node>>()
                     directContentNodes.fastForEach { node ->
-                        if (node is Element && node.tagName().lowercase() == "p") {
+                        if (node is Element && node.tagName().lowercase() in blockTags) {
                             groups.add(mutableListOf(node))
                         } else {
                             val last = groups.lastOrNull()
                             if (last != null && last.none {
-                                    it is Element && it.tagName().lowercase() == "p"
+                                    it is Element && it.tagName().lowercase() in blockTags
                                 }) {
                                 last.add(node)
                             } else {
@@ -525,8 +580,8 @@ private fun HtmlListItem(
                     }
                     groups.fastForEach { group ->
                         val first = group.firstOrNull()
-                        if (first is Element && first.tagName().lowercase() == "p") {
-                            HtmlParagraph(element = first, onClickCitation = onClickCitation)
+                        if (first is Element && first.tagName().lowercase() in blockTags) {
+                            HtmlBlockElement(element = first, onClickCitation = onClickCitation)
                         } else {
                             HtmlInlineGroup(nodes = group, onClickCitation = onClickCitation)
                         }
@@ -565,12 +620,29 @@ private fun HtmlCodeBlock(element: Element) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 4.dp),
-        completeCodeBlock = true,
+        completeCodeBlock = element.attr("data-rikka-complete") != "false",
     )
 }
 
 @Composable
 private fun HtmlBlockquote(element: Element, onClickCitation: (String) -> Unit) {
+    val callout = remember(element.outerHtml()) { htmlCallout(element) }
+    if (callout != null) {
+        val richContent = richContentColors()
+        val title = callout.title.lowercase().replaceFirstChar { it.uppercase() }
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            color = richContent.toolbar,
+            shape = MaterialTheme.shapes.medium,
+            border = BorderStroke(1.dp, richContent.border),
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                callout.body.forEach { HtmlBodyNode(it, onClickCitation) }
+            }
+        }
+        return
+    }
     ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
         val richContent = richContentColors()
         Column(
@@ -729,7 +801,42 @@ private fun HtmlProgress(element: Element) {
  * rendered on separate lines.
  */
 @Composable
-private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit) {
+internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit, modifier: Modifier = Modifier) {
+    if (LocalGitHubCardsEnabled.current && nodes.any { it.containsGitHubCard() }) {
+        val runs = remember(nodes) { gitHubInlineRuns(nodes) }
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            runs.forEach { run -> when (run) {
+                is GitHubInlineRun.Content -> HtmlInlineGroup(run.nodes, onClickCitation)
+                is GitHubInlineRun.Card -> GitHubRepositoryCard(me.rerere.rikkahub.data.github.GitHubRepositoryUrl.url(run.fullName), linkLabel = run.label)
+            } }
+        }
+        return
+    }
+    if (nodes.any { it.containsInlineImage() }) {
+        val runs = remember(nodes) { htmlImageRuns(nodes) }
+        FlowRow(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            runs.forEach { run ->
+                when (run) {
+                    is HtmlImageRun.Text -> HtmlInlineGroup(run.nodes, onClickCitation)
+                    is HtmlImageRun.Image -> ZoomableAsyncImage(
+                        model = run.element.attr("src"),
+                        contentDescription = run.element.attr("alt").ifBlank { null },
+                        linkUrl = run.link,
+                        respectIntrinsicSize = true,
+                        requestedWidthDp = htmlImageDimension(run.element.attr("width")),
+                        requestedHeightDp = htmlImageDimension(run.element.attr("height")),
+                        modifier = Modifier.widthIn(max = 360.dp).heightIn(max = 280.dp),
+                    )
+                }
+            }
+        }
+        return
+    }
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
@@ -762,7 +869,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     }
 
     if (annotatedString.isNotEmpty()) {
-        Text(text = annotatedString, inlineContent = inlineContents)
+        Text(text = annotatedString, inlineContent = inlineContents, modifier = modifier)
     }
 }
 
@@ -774,6 +881,14 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
  */
 @Composable
 private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit) {
+    if (LocalGitHubCardsEnabled.current && node.containsGitHubCard()) {
+        HtmlInlineGroup(listOf(node), onClickCitation)
+        return
+    }
+    if (node.containsInlineImage()) {
+        HtmlInlineGroup(listOf(node), onClickCitation)
+        return
+    }
     when (node) {
         is TextNode -> {
             val text = node.text()
@@ -783,22 +898,6 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
         is Element -> {
             val tag = node.tagName().lowercase()
             when {
-                tag == "img" -> {
-                    val src = node.attr("src")
-                    val alt = node.attr("alt")
-                    if (src.isNotEmpty()) {
-                        ZoomableAsyncImage(
-                            model = src,
-                            contentDescription = alt.takeIf { it.isNotEmpty() },
-                            respectIntrinsicSize = true,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .widthIn(max = 360.dp)
-                                .heightIn(max = 280.dp),
-                        )
-                    }
-                }
-
                 tag == "span" && node.hasClass("math") && node.attr("inline") != "true" -> {
                     HtmlMathBlock(formula = node.text())
                 }
@@ -923,13 +1022,25 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                 fontFamily = JetbrainsMono,
                 fontSize = 0.9.em,
                 fontWeight = FontWeight.Medium,
-                color = colorScheme.onSurface,
-                background = colorScheme.surfaceContainerHighest.copy(alpha = 0.78f),
+                color = colorScheme.onSecondaryContainer,
+                background = colorScheme.secondaryContainer.copy(alpha = 1f),
             ).merge(cssStyle ?: SpanStyle())
         ) {
             append(' ')
             append(element.text())
             append(' ')
+        }
+
+        "kbd" -> withStyle(
+            SpanStyle(
+                fontFamily = JetbrainsMono,
+                fontSize = 0.88.em,
+                fontWeight = FontWeight.Medium,
+                color = colorScheme.onSecondaryContainer,
+                background = colorScheme.secondaryContainer,
+            ).merge(cssStyle ?: SpanStyle())
+        ) {
+            append(" "); recurseChildren(element, style); append(" ")
         }
 
         "a" -> {

@@ -404,7 +404,7 @@
   <string name="extensions_page_issue_invalid_keyword_expression">世界書包含無效的關鍵詞組合表達式</string>
   <string name="extensions_page_issue_missing_trigger">非常駐條目沒有設定觸發關鍵字</string>
   <string name="extensions_page_issue_invalid_depth">注入深度必須至少為 1</string>
-  <string name="extensions_page_issue_invalid_scan_depth">世界書掃描深度必須至少為 1</string>
+  <string name="extensions_page_issue_invalid_scan_depth">世界書掃描深度須為 0–1000，0 表示不掃描</string>
   <string name="extensions_page_issue_invalid_role">注入角色必須為使用者或助手</string>
   <string name="extensions_page_issue_missing_skill_manifest">技能目錄中缺少 SKILL.md</string>
   <string name="extensions_page_issue_unreadable_skill_manifest">無法讀取 SKILL.md</string>
@@ -772,7 +772,7 @@
   <string name="setting_display_page_enable_blur_effect_title">原始一體式佈局</string>
   <string name="setting_display_page_input_blur_radius_title">容器模糊強度</string>
   <string name="setting_display_page_input_blur_radius_desc">調整輸入框與 Dock 一體容器的背景模糊；數值越高，聊天時的 GPU 負擔越大。</string>
-  <string name="setting_display_page_input_tint_title">容器透明度</string>
+  <string name="setting_display_page_input_tint_title">輸入區不透明度</string>
   <string name="setting_display_page_input_tint_desc">調整輸入框與 Dock 一體表面的透明度，未啟用助手背景或全域背景時也會生效。</string>
   <string name="setting_advanced_appearance_chat_input_section">聊天輸入框與 Dock</string>
   <string name="setting_display_page_enable_latex_rendering_desc">使用 LaTeX 語法呈現數學表達式與公式</string>
@@ -1459,6 +1459,10 @@
   <string name="log_page_operation_stream_text">串流文字請求</string>
   <string name="log_page_operation_image">圖片生成請求</string>
   <string name="log_page_operation_image_edit">圖片編輯請求</string>
+  <string name="log_page_operation_video_create">影片生成請求</string>
+  <string name="log_page_operation_video_status">影片生成狀態查詢</string>
+  <string name="log_page_operation_video_cancel">影片生成取消請求</string>
+  <string name="log_page_operation_video_download">生成影片下載</string>
   <string name="log_page_diagnostic_error">診斷錯誤原文：%1$s</string>
   <string name="log_page_diagnostic_error_label">診斷錯誤原文</string>
   <string name="log_page_title">錯誤與診斷日誌</string>

@@ -15,6 +15,9 @@ private val BARE_LATEX_LINE_REGEX = Regex(
     pattern = "(?m)^[ \\t]*(\\\\(?:displaystyle\\s+)?(?:d?frac|tfrac|sqrt|sum|prod|int|lim|begin\\{cases\\}|mathbf|mathbb|mathcal|operatorname)\\b[^\\r\\n]*)$",
 )
 private val INLINE_LATEX_LINE_BREAK_REGEX = Regex("[ \\t]*\\r?\\n[ \\t]*")
+// Android uses ICU regex, which rejects quantifying a zero-width boundary (\b?).
+// TeX word commands end at a non-letter; punctuation commands need no boundary.
+private val LATEX_LAYOUT_COMMAND_REGEX = Regex("\\\\(?:(?:left|right|quad|qquad)(?![A-Za-z])|[,;!])")
 
 internal fun normalizeMarkdownLatex(content: String): String {
     if ('\\' !in content) return content
@@ -137,7 +140,7 @@ internal fun latexReadableFallback(latex: String): String {
         readable = readable.replace(Regex("\\\\$macro\\b"), symbol)
     }
     return readable
-        .replace(Regex("\\\\(?:left|right|,|;|!|quad|qquad)\\b?"), " ")
+        .replace(LATEX_LAYOUT_COMMAND_REGEX, " ")
         .replace(Regex("\\\\([A-Za-z]+)\\*?"), "$1")
         .replace("\\{", "{")
         .replace("\\}", "}")

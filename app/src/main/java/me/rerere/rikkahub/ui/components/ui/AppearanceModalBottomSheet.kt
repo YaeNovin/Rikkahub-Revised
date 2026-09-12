@@ -37,6 +37,7 @@ fun AppearanceModalBottomSheet(
         sheetState = sheetState,
         sheetGesturesEnabled = sheetGesturesEnabled,
         containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
         scrimColor = unifiedOverlayScrimColor(),
         dragHandle = null,
     ) {

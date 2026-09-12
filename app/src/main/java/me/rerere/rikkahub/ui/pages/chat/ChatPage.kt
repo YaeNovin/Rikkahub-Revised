@@ -1,5 +1,10 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.rikkahub.data.model.placeholderNames
+import me.rerere.rikkahub.data.model.render
+
+import android.content.ClipData
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -12,18 +17,21 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,15 +43,16 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
@@ -51,6 +60,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -61,13 +71,21 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -84,20 +102,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.google.requestChannel
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AiBrain01
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
+import me.rerere.hugeicons.stroke.Settings02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.SuggestionInsertMode
 import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.hasActiveChatBackground
@@ -105,11 +130,26 @@ import me.rerere.rikkahub.data.datastore.resolveChatBackground
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.memoryAssistant
+import me.rerere.rikkahub.data.datastore.resolveMemoryExtractionModel
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.ChatSuggestionAction
+import me.rerere.rikkahub.data.model.ChatSuggestionItem
+import me.rerere.rikkahub.data.model.availableSuggestionActions
+import me.rerere.rikkahub.data.model.currentChatSuggestions
+import me.rerere.rikkahub.data.model.*
+import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.collectLatest
 import me.rerere.rikkahub.data.model.ActiveMode
+import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.constrained
 import me.rerere.rikkahub.data.model.LorebookEntryStatus
 import me.rerere.rikkahub.data.model.InjectionPosition
+import me.rerere.rikkahub.data.model.MemoryType
 import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
+import me.rerere.rikkahub.data.memory.MemoryExtractionOutcome
+import me.rerere.rikkahub.data.memory.MemoryExtractionStatus
 import me.rerere.rikkahub.data.model.resolveActiveModes
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
@@ -132,12 +172,16 @@ import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
+import me.rerere.rikkahub.ui.context.LocalAppearanceSurfaceOpacityPolicy
+import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
+import me.rerere.rikkahub.ui.context.appearanceSurfaceOpacityPolicy
 import me.rerere.rikkahub.ui.theme.LocalChatBackgroundForeground
 import me.rerere.rikkahub.ui.theme.BackgroundReadabilityTheme
-import me.rerere.rikkahub.ui.theme.rememberChatBackgroundForeground
+import me.rerere.rikkahub.ui.theme.rememberBackgroundReadability
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.pages.imggen.ImageGenerationSettingsBottomSheet
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.isAllowedFileType
@@ -147,6 +191,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 import java.io.File
+import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private enum class ConversationContentStage {
@@ -187,6 +232,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val branchSourceAvailable by vm.branchSourceAvailable.collectAsStateWithLifecycle()
     val promptInjectionDiagnostics by vm.promptInjectionDiagnostics.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
+    val chatImageModel by vm.chatImageModel.collectAsStateWithLifecycle()
+    val chatImageConstraints by vm.chatImageConstraints.collectAsStateWithLifecycle()
+    val chatImageState by vm.chatImageState.collectAsStateWithLifecycle()
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
 
@@ -222,9 +270,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val inputState = vm.inputState
+    var webPreviewId by remember(id) { mutableStateOf<String?>(null) }
+    me.rerere.rikkahub.ui.components.webview.ChatWebPreviewHost(webPreviewId) { webPreviewId = null }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {
+        val decodedText = text?.base64Decode()?.takeIf { it.isNotEmpty() }
+        if (files.isNotEmpty() || decodedText != null) {
+            // Explicit share/import content replaces the existing draft. A
+            // normal navigation without arguments keeps the shared draft.
+            inputState.clearInput()
+        }
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
             val contentTypes = files.map { file ->
@@ -247,10 +303,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             }
             inputState.messageContent = parts
         }
-        text?.base64Decode()?.let { decodedText ->
-            if (decodedText.isNotEmpty()) {
-                inputState.setMessageText(decodedText)
-            }
+        decodedText?.let {
+            inputState.setMessageText(it)
         }
     }
 
@@ -262,12 +316,21 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             ),
         )
     }
+    val previewReturn = rememberChatPreviewReturn(
+        conversationKey = id.toString(),
+        listState = chatListState,
+        messageKeys = remember(conversation.messageNodes) { conversation.messageNodes.map { it.id.toString() } },
+        ready = conversationLoadState == ConversationLoadState.Ready,
+        active = (navController.currentScreen as? me.rerere.rikkahub.Screen.Chat)?.id == id.toString(),
+    )
     LaunchedEffect(id, nodeId, conversationLoadState, conversation.messageNodes.size) {
         if (conversationLoadState == ConversationLoadState.Ready &&
             !vm.chatListInitialized &&
             conversation.messageNodes.isNotEmpty()
         ) {
-            if (nodeId != null) {
+            if (previewReturn.anchor != null) {
+                // Returning from a preview must not run the initial jump-to-bottom again.
+            } else if (nodeId != null) {
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
                     chatListState.scrollToItem(index)
@@ -280,27 +343,79 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val resolvedChatBackground = setting.resolveChatBackground()
-    val appearanceForeground = rememberChatBackgroundForeground(
+    val glassBackdrop = me.rerere.rikkahub.ui.components.ui.rememberGlassBackdrop()
+    val chatReadability = rememberBackgroundReadability(
         background = resolvedChatBackground.background,
         backgroundOpacity = resolvedChatBackground.opacity,
         useGradientBackground = resolvedChatBackground.useGradientBackground,
+        gradientFollowTheme = resolvedChatBackground.gradientFollowTheme,
+        gradientPreset = resolvedChatBackground.gradientPreset,
+        gradientCustomColors = resolvedChatBackground.gradientCustomColors,
+        gradientIntensity = resolvedChatBackground.gradientIntensity,
+        gradientVignette = resolvedChatBackground.gradientVignette,
     )
+    val appearanceForeground = chatReadability.foreground
     val assistantBackgroundSpec = AppearanceBackgroundSpec(
         background = resolvedChatBackground.background,
         opacity = resolvedChatBackground.opacity,
         blurRadius = resolvedChatBackground.blurRadius,
         useGradientBackground = resolvedChatBackground.useGradientBackground,
+        gradientAnimation = resolvedChatBackground.gradientAnimation,
+        gradientSpeed = resolvedChatBackground.gradientSpeed,
+        gradientFollowTheme = resolvedChatBackground.gradientFollowTheme,
+        gradientPreset = resolvedChatBackground.gradientPreset,
+        gradientCustomColors = resolvedChatBackground.gradientCustomColors,
+        gradientIntensity = resolvedChatBackground.gradientIntensity,
+        gradientMotionScale = resolvedChatBackground.gradientMotionScale,
+        gradientBlobCount = resolvedChatBackground.gradientBlobCount,
+        gradientSoftness = resolvedChatBackground.gradientSoftness,
+        gradientAngle = resolvedChatBackground.gradientAngle,
+        gradientVignette = resolvedChatBackground.gradientVignette,
+        gradientPerformanceEffectsEnabled = setting.advancedAppearanceSetting
+            .enableGradientPerformanceEffects,
+        gradientRendererMode = setting.advancedAppearanceSetting.gradientRendererMode,
+        gradientInteractionInProgress = chatListState.isScrollInProgress || loadingJob != null,
+        respectSystemReducedMotion = setting.advancedAppearanceSetting
+            .respectSystemReducedMotion,
         foreground = appearanceForeground,
+        readability = chatReadability,
     )
 
     CompositionLocalProvider(
+        me.rerere.rikkahub.ui.components.webview.LocalChatWebPreview provides { previewId -> webPreviewId = previewId },
+        me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible provides (webPreviewId != null),
+        LocalChatPreviewReturn provides previewReturn,
+        me.rerere.rikkahub.ui.components.webview.LocalBeforeWebPreview provides { previewReturn.capture(chatListState) },
+        LocalGlobalBackgroundActive provides setting.hasActiveChatBackground(),
+        me.rerere.rikkahub.ui.components.ui.LocalGlassBackdrop provides glassBackdrop,
+        me.rerere.rikkahub.ui.components.ui.LocalGlobalBackgroundHazeState provides navigationHazeState,
+        me.rerere.rikkahub.ui.components.ui.LocalGlassBusy provides (me.rerere.rikkahub.ui.components.ui.LocalGlassBusy.current || glassBackdrop.interacting || chatListState.isScrollInProgress || loadingJob != null),
         LocalAppearanceBackground provides assistantBackgroundSpec,
+        me.rerere.rikkahub.ui.components.message.LocalAskUserDraftWriter provides { toolId, input, answers, displayed ->
+            vm.saveAskUserDraft(conversation.id, toolId, input, answers, displayed)
+        },
+        me.rerere.rikkahub.ui.components.message.LocalAskUserDraftScope provides conversation.id.toString(),
         LocalChatBackgroundForeground provides appearanceForeground,
+        LocalAppearanceSurfaceOpacityPolicy provides appearanceSurfaceOpacityPolicy(
+            cardOpacity = setting.advancedAppearanceSetting.pageSurfaceOpacity,
+            topBarOpacity = setting.displaySetting.topBarSurfaceOpacity,
+            inputOpacity = setting.displaySetting.inputSurfaceOpacity,
+            dockOpacity = setting.advancedAppearanceSetting.chatDockGlassOpacity,
+            cardBackgroundActive = setting.hasActiveChatBackground(),
+        ),
     ) {
-        BackgroundReadabilityTheme(
-            active = setting.hasActiveChatBackground(),
-            foreground = appearanceForeground,
+            BackgroundReadabilityTheme(
+            active = setting.hasActiveChatBackground() ||
+                me.rerere.rikkahub.ui.theme.LocalTextColorMode.current != me.rerere.rikkahub.data.datastore.TextColorMode.THEME,
+                foreground = appearanceForeground,
         ) {
+            Box(Modifier.fillMaxSize()) {
+            // A stable, full-page source includes both the sidebar and chat column.
+            AssistantBackground(
+                setting = setting,
+                interactionInProgress = chatListState.isScrollInProgress || loadingJob != null,
+                modifier = Modifier.fillMaxSize().hazeSource(chatChromeHazeState).hazeSource(navigationHazeState),
+            )
             when {
             isBigScreen -> {
             PermanentNavigationDrawer(
@@ -334,6 +449,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     navigationHazeState = navigationHazeState,
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
+                    chatImageModel = chatImageModel,
+                    chatImageConstraints = chatImageConstraints,
+                    chatImageState = chatImageState,
                     bigScreen = true,
                     errors = errors,
                     branchSourceAvailable = branchSourceAvailable,
@@ -363,8 +481,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         },
                         onNavigate = { destination ->
                             scope.launch {
-                                drawerState.close()
                                 navController.navigate(destination)
+                                // The destination transition owns the handoff. Keep the drawer
+                                // state until its parent entry is removed so it does not flash shut.
                             }
                         },
                     )
@@ -372,12 +491,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             ) {
                 val drawerOccludesContent = drawerState.currentValue != DrawerValue.Closed ||
                     drawerState.targetValue != DrawerValue.Closed
-                if (drawerOccludesContent) {
-                    AssistantBackground(
-                        setting = setting,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
+                if (!drawerOccludesContent) {
                     ChatPageContent(
                     inputState = inputState,
                     loadingJob = loadingJob,
@@ -394,6 +508,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     navigationHazeState = navigationHazeState,
                     enableWebSearch = enableWebSearch,
                     currentChatModel = currentChatModel,
+                    chatImageModel = chatImageModel,
+                    chatImageConstraints = chatImageConstraints,
+                    chatImageState = chatImageState,
                     bigScreen = false,
                     errors = errors,
                     branchSourceAvailable = branchSourceAvailable,
@@ -407,10 +524,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             }
             }
             }
+            }
         }
     }
 }
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
 private fun ChatPageContent(
     inputState: ChatInputState,
@@ -429,6 +548,9 @@ private fun ChatPageContent(
     navigationHazeState: HazeState,
     enableWebSearch: Boolean,
     currentChatModel: Model?,
+    chatImageModel: Model?,
+    chatImageConstraints: ImageGenerationConstraints?,
+    chatImageState: ChatVM.ChatImageState,
     errors: List<ChatError>,
     branchSourceAvailable: Boolean?,
     onDismissError: (Uuid) -> Unit,
@@ -436,12 +558,71 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val context = LocalContext.current
+    var showChatImageDialog by remember(conversation.id) { mutableStateOf(false) }
+    // Save primitive coordinates instead of Offset, which is not Bundle-saveable
+    // on all Compose versions used by supported Android devices.
+    var imageButtonOffsetX by rememberSaveable(conversation.id) { mutableStateOf(Float.NaN) }
+    var imageButtonOffsetY by rememberSaveable(conversation.id) { mutableStateOf(Float.NaN) }
+    val clipboard = LocalClipboard.current
     val selectModelRequired = stringResource(R.string.chat_page_select_model_required)
     val createForkFailed = stringResource(R.string.create_fork_failed)
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable(conversation.id) { mutableStateOf(false) }
-    val assistant = setting.getCurrentAssistant()
-    val contextCapacityTokens = currentChatModel?.contextWindowTokens?.takeIf { it > 0 }
+    val assistant = setting.getAssistantById(conversation.assistantId)
+        ?: setting.getCurrentAssistant()
+    val chatImageProvider = chatImageModel?.findProvider(setting.providers)
+    val chatImageGoogleProvider = chatImageProvider as? ProviderSetting.Google
+    val isGeminiChatImageModel = chatImageGoogleProvider != null &&
+        chatImageConstraints?.sizeRequestField == "aspect_ratio" &&
+        chatImageModel.modelId
+            .substringAfterLast('/')
+            .startsWith("gemini-", ignoreCase = true)
+    val chatImageGeminiModelId = chatImageModel?.modelId?.takeIf { isGeminiChatImageModel }
+    val chatImageRequestChannel = chatImageGoogleProvider
+        ?.requestChannel()
+        ?.takeIf { isGeminiChatImageModel }
+    LaunchedEffect(chatImageModel?.id, chatImageConstraints) {
+        chatImageConstraints?.let { constraints ->
+            val current = inputState.imageGenerationSettings
+            val constrained = current.constrained(constraints)
+            if (constrained != current) {
+                inputState.imageGenerationSettings = constrained
+            }
+        }
+    }
+    val memoryExtractionStatus by vm.memoryExtractionStatus.collectAsStateWithLifecycle()
+    val suggestionGenerationState by vm.suggestionGenerationState.collectAsStateWithLifecycle()
+    val suggestionConfig = conversation.suggestionConfig(setting)
+    var suggestionUndo by remember(conversation.id) { mutableStateOf<SuggestionDraftEdit?>(null) }
+    var suggestionPreview by remember(conversation.id) { mutableStateOf<ChatSuggestionItem?>(null) }
+    var inspirationDraft by rememberSaveable(conversation.id, conversation.assistantId, stateSaver = InspirationCardStateSaver) {
+        mutableStateOf<me.rerere.rikkahub.data.model.InspirationCard?>(null)
+    }
+    fun insertInspiration(prompt: String, mode: me.rerere.rikkahub.data.model.InspirationInsert, reviewed: String): Boolean {
+        if (vm.conversation.value.id != conversation.id || vm.conversation.value.assistantId != conversation.assistantId) return false
+        val edit = me.rerere.rikkahub.data.model.inspirationDraftEdit(inputState.textContent.text.toString(), prompt, mode, reviewed)
+            ?: return false
+        inputState.setMessageText(edit.after)
+        inputState.textContent.edit { selection = androidx.compose.ui.text.TextRange(edit.cursor) }
+        return true
+    }
+    var showSuggestionPanel by remember(conversation.id) { mutableStateOf(false) }
+    fun insertSuggestionText(text: String, location: SuggestionInsertLocation = if (suggestionConfig.insertMode == SuggestionInsertMode.APPEND)
+        SuggestionInsertLocation.APPEND else SuggestionInsertLocation.REPLACE) {
+        val selection = inputState.textContent.selection
+        val edit = prepareSuggestionInsertion(inputState.textContent.text.toString(), text, location, selection.start, selection.end)
+        inputState.cancelEditing()
+        inputState.setMessageText(edit.after)
+        inputState.textContent.edit { this.selection = androidx.compose.ui.text.TextRange(edit.cursor) }
+        suggestionUndo = edit
+    }
+    val recentMemories by vm.recentMemories.collectAsStateWithLifecycle()
+    val recentConversationMemories by vm.recentConversationMemories.collectAsStateWithLifecycle()
+    var showFilesSheet by remember(conversation.id) { mutableStateOf(false) }
+    val contextCapacityTokens = currentChatModel?.let { it.contextWindowTokens?.takeIf { value -> value > 0 } ?: me.rerere.ai.provider.inferContextWindowTokens(it.modelId) }
+    val scopeKey = currentChatModel?.let { me.rerere.rikkahub.data.ai.context.requestContextScopeKey(conversation, setting, it) }
+    val latestContextConversation by rememberUpdatedState(conversation)
     val contextUsage by produceState(
         initialValue = ChatContextUsage(
             usedTokens = 0,
@@ -449,24 +630,85 @@ private fun ChatPageContent(
             isEstimated = true,
         ),
         conversation.id,
-        conversation.currentMessages,
-        conversation.rollingContextSummary,
+        showFilesSheet,
+        scopeKey,
         contextCapacityTokens,
     ) {
-        val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(
-            conversation.currentMessages,
-        )
-        value = withContext(Dispatchers.Default) {
-            calculateChatContextUsage(
-                messages = contextMessages,
-                rollingContextSummary = conversation.rollingContextSummary,
-                capacityTokens = contextCapacityTokens,
-            )
+        if (!showFilesSheet) return@produceState
+        androidx.compose.runtime.snapshotFlow { latestContextConversation.currentMessages }
+            .sample(400).onStart { emit(latestContextConversation.currentMessages) }.collectLatest { raw ->
+            val source = latestContextConversation
+            val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(raw)
+            value = withContext(Dispatchers.Default) {
+                calculateChatContextUsage(messages = contextMessages, rawMessages = raw,
+                    rollingContextSummary = source.rollingContextSummary.takeIf { assistant.enableRollingContextCompression },
+                    capacityTokens = contextCapacityTokens, scopeKey = scopeKey, modelId = currentChatModel?.id?.toString(),
+                    includeReasoning = me.rerere.rikkahub.data.ai.context.countHistoryReasoning(currentChatModel?.findProvider(setting.providers)),
+                    systemPrompt = if (assistant.allowConversationSystemPrompt && !source.customSystemPrompt.isNullOrBlank()) source.customSystemPrompt.orEmpty() else assistant.systemPrompt)
+            }
         }
     }
-    var showFilesSheet by remember(conversation.id) { mutableStateOf(false) }
     var showPromptDiagnostics by remember(conversation.id) { mutableStateOf(false) }
+    var showRecentMemories by remember(conversation.id) { mutableStateOf(false) }
     var forkingMessageId by remember(conversation.id) { mutableStateOf<Uuid?>(null) }
+    fun applySuggestion(suggestion: ChatSuggestionItem, text: String, location: SuggestionInsertLocation) {
+        val latest = vm.conversation.value
+        if (latest.id != conversation.id || suggestion.action !in latest.availableSuggestionActions(vm.settings.value) ||
+            (suggestion.sourceMessageId != null && latest.currentChatSuggestions().none { it.id == suggestion.id })) {
+            toaster.show("建议已失效，请重新生成"); return
+        }
+        when (suggestion.action) {
+            ChatSuggestionAction.COPY_TEXT -> scope.launch {
+                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, text))); toaster.show(context.getString(R.string.copied))
+            }
+            ChatSuggestionAction.SAVE_QUICK_MESSAGE -> {
+                val targetAssistantId = latest.assistantId
+                scope.launch {
+                    try { vm.saveSuggestionAsQuickMessage(suggestion, targetAssistantId); toaster.show(context.getString(R.string.chat_page_suggestion_saved)) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { toaster.show(context.getString(R.string.chat_page_suggestion_save_failed), type = ToastType.Error) }
+                }
+            }
+            ChatSuggestionAction.CREATE_BRANCH -> {
+                val source = suggestion.sourceMessageId?.let { id -> latest.currentMessages.firstOrNull { it.id == id } } ?: latest.suggestionSourceMessage()
+                if (source != null && forkingMessageId == null && loadingJob == null) {
+                    forkingMessageId = source.id
+                    scope.launch {
+                        try {
+                            val fork = vm.forkMessage(source)
+                            insertSuggestionText(text, location)
+                            navigateToChatPage(navController, chatId = fork.id)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { toaster.show(createForkFailed, type = ToastType.Error) }
+                        finally { forkingMessageId = null }
+                    }
+                }
+            }
+            else -> {
+                insertSuggestionText(text, location)
+                if (suggestion.action == ChatSuggestionAction.IMAGE_DRAFT) showChatImageDialog = true
+            }
+        }
+    }
+    fun selectSuggestion(suggestion: ChatSuggestionItem) {
+        if (suggestion.action !in setOf(ChatSuggestionAction.COPY_TEXT, ChatSuggestionAction.SAVE_QUICK_MESSAGE) &&
+            (suggestionConfig.options.previewBeforeInsert || suggestion.parameterForm != null || suggestion.action == ChatSuggestionAction.IMAGE_DRAFT)) {
+            suggestionPreview = suggestion
+        } else applySuggestion(suggestion, suggestionActionInput(context, suggestion),
+            if (suggestionConfig.insertMode == SuggestionInsertMode.APPEND) SuggestionInsertLocation.APPEND else SuggestionInsertLocation.REPLACE)
+    }
+    val suggestionActions = SuggestionUiActions(
+        changeSession = { edited -> vm.updateSuggestionSession { latest -> latest.copy(
+            settings = if (edited.settings != conversation.suggestionSession.settings) edited.settings else latest.settings,
+            paused = if (edited.paused != conversation.suggestionSession.paused) edited.paused else latest.paused,
+            collapsed = if (edited.collapsed != conversation.suggestionSession.collapsed) edited.collapsed else latest.collapsed,
+        ) } },
+        refreshOne = { vm.generateSuggestion(vm.conversation.value, replaceId = it) },
+        pin = { vm.toggleSuggestionPin(it) }, undoBatch = { vm.undoSuggestionRefresh() }, resetTarget = { vm.resetSuggestionTarget() },
+        feedback = { item, reason -> vm.feedbackSuggestion(item, reason) }, clearFeedback = { vm.clearSuggestionFeedback() },
+        canUndoDraft = suggestionUndo?.after == inputState.textContent.text.toString(),
+        undoDraft = { suggestionUndo?.takeIf { it.after == inputState.textContent.text.toString() }?.let { inputState.setMessageText(it.before); suggestionUndo = null } },
+    )
     val activeModes = if (setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT) {
         resolveActiveModes(
             modeInjections = setting.modeInjections,
@@ -506,13 +748,11 @@ private fun ChatPageContent(
     ) {
         CompositionLocalProvider(
             LocalChatBackgroundForeground provides chatBackgroundForeground,
+            LocalMessageSuggestionAction provides { message, selection ->
+                vm.generateSuggestionFor(message, selection)
+                showSuggestionPanel = true
+            },
         ) {
-            AssistantBackground(
-                setting = setting,
-                modifier = Modifier
-                    .hazeSource(chatChromeHazeState)
-                    .hazeSource(navigationHazeState),
-            )
             Scaffold(
             topBar = {
                 Column {
@@ -615,20 +855,6 @@ private fun ChatPageContent(
                         }
                         inputState.clearInput()
                     },
-                    onLongSendClick = {
-                        if (inputState.isEditing()) {
-                            vm.handleMessageEdit(
-                                parts = inputState.getContents(),
-                                messageId = inputState.editingMessage!!,
-                            )
-                        } else {
-                            vm.handleMessageSend(content = inputState.getContents(), answer = false)
-                            scope.launch {
-                                chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
-                            }
-                        }
-                        inputState.clearInput()
-                    },
                     onUpdateChatModel = {
                         vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
                     },
@@ -655,19 +881,43 @@ private fun ChatPageContent(
                     onMoreClick = {
                         showFilesSheet = true
                     },
+                    imageModel = chatImageModel,
+                    imageGenerationLoading = chatImageState is ChatVM.ChatImageState.Running,
+                    onGenerateImageClick = {
+                        val prompt = inputState.textContent.text.toString().trim()
+                        if (prompt.isNotEmpty()) {
+                            vm.generateChatImage(prompt)
+                            inputState.setMessageText("")
+                            scope.launch {
+                                chatListState.requestScrollToItem(
+                                    conversation.messageNodes.size + 1,
+                                )
+                            }
+                        }
+                    },
                     )
                 }
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
+            Box(Modifier.fillMaxSize()) {
+            var hasShownConversation by rememberSaveable(conversation.id) {
+                mutableStateOf(conversationLoadState == ConversationLoadState.Ready)
+            }
+            androidx.compose.runtime.SideEffect {
+                if (conversationLoadState == ConversationLoadState.Ready) hasShownConversation = true
+            }
             AnimatedContent(
                 targetState = ConversationContentKey(
                     conversationId = conversation.id,
-                    stage = conversationLoadState.contentStage(),
+                    stage = if (hasShownConversation || conversationLoadState == ConversationLoadState.Ready)
+                        ConversationContentStage.READY else conversationLoadState.contentStage(),
                 ),
                 transitionSpec = {
-                    fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 40)) togetherWith
-                        fadeOut(animationSpec = tween(durationMillis = 120))
+                    if (initialState.stage == ConversationContentStage.LOADING && targetState.stage == ConversationContentStage.READY) {
+                        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(160)) togetherWith
+                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(80))
+                    } else androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
                 },
                 contentKey = { it },
                 label = "ConversationContentTransition",
@@ -679,6 +929,7 @@ private fun ChatPageContent(
                 conversation = conversation,
                 state = chatListState,
                 loading = loadingJob != null,
+                imageGenerationLoading = chatImageState is ChatVM.ChatImageState.Running,
                 processingStatus = processingStatus,
                 previewMode = previewMode,
                 settings = setting,
@@ -735,9 +986,27 @@ private fun ChatPageContent(
                         ))
                     vm.saveConversationAsync()
                 },
-                onClickSuggestion = { suggestion ->
-                    inputState.editingMessage = null
-                    inputState.setMessageText(suggestion)
+                onSuggestionAction = ::selectSuggestion,
+                onInspirationSelected = { card ->
+                    val current = vm.settings.value
+                    val owner = current.getAssistantById(conversation.assistantId)
+                    if (owner != null) {
+                        val automatic = me.rerere.rikkahub.data.model.automaticQuickMessageValues(current, owner)
+                        val template = card.template()
+                        val unresolved = template.placeholderNames().filterNot(automatic::containsKey)
+                        if (unresolved.isNotEmpty() || !insertInspiration(template.render(automatic),
+                                me.rerere.rikkahub.data.model.InspirationInsert.AUTO, inputState.textContent.text.toString())) {
+                            inspirationDraft = card
+                        }
+                    }
+                },
+                suggestionGenerationState = suggestionGenerationState,
+                suggestionActions = suggestionActions,
+                onRefreshSuggestions = {
+                    vm.generateSuggestion(conversation)
+                },
+                onDismissSuggestions = {
+                    vm.dismissSuggestions(conversation)
                 },
                 onTranslate = { message, locale ->
                     vm.translateMessage(message, locale)
@@ -757,6 +1026,9 @@ private fun ChatPageContent(
                 onToolAnswer = { toolCallId, answer ->
                     vm.handleToolAnswer(toolCallId, answer)
                 },
+                onToolCancel = { toolCallId, reason ->
+                    vm.handleToolCancellation(toolCallId, reason)
+                },
                 onToggleFavorite = { node ->
                     vm.toggleMessageFavorite(node)
                 },
@@ -775,6 +1047,15 @@ private fun ChatPageContent(
                     )
                 }
             }
+                if (hasShownConversation && conversationLoadState != ConversationLoadState.Ready) {
+                    androidx.compose.material3.Surface(Modifier.align(Alignment.TopCenter).padding(innerPadding)) {
+                        if (conversationLoadState is ConversationLoadState.Failed) {
+                            TextButton(onClick = vm::retryConversationLoad) { Text("对话更新失败，点击重试") }
+                        } else {
+                            androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                    }
+                }
         }
 
             if (showFilesSheet) {
@@ -786,6 +1067,13 @@ private fun ChatPageContent(
                     vm = vm,
                     contextUsage = contextUsage,
                     promptInjectionDiagnostics = promptInjectionDiagnostics,
+                    memoryExtractionStatus = memoryExtractionStatus,
+                    recentMemoryCount = recentMemories.size,
+                    onShowRecentMemories = {
+                        showFilesSheet = false
+                        showRecentMemories = true
+                    },
+                    onShowSuggestions = { showFilesSheet = false; showSuggestionPanel = true },
                     onShowPromptDiagnostics = {
                         showFilesSheet = false
                         showPromptDiagnostics = true
@@ -799,8 +1087,437 @@ private fun ChatPageContent(
                     onDismiss = { showPromptDiagnostics = false },
                 )
             }
+            if (showRecentMemories) {
+                RecentMemoriesDialog(
+                    conversation = conversation,
+                    memoryAssistant = conversation.memoryAssistant(assistant, setting),
+                    extractionAvailable = setting.resolveMemoryExtractionModel() != null,
+                    onMemoryModeChange = vm::setMemoryMode,
+                    status = memoryExtractionStatus,
+                    memories = recentMemories,
+                    conversationMemories = recentConversationMemories,
+                    onDismiss = { showRecentMemories = false },
+                    onRetry = vm::retryMemoryExtraction,
+                    onDeleteExcerpt = vm::deleteConversationMemory,
+                    loadMemoryPreview = vm::loadMemoryPreview,
+                    rebuildMemoryIndex = vm::rebuildMemoryIndex,
+                    onOpenMemorySource = { sourceId, messageId ->
+                        scope.launch {
+                            val destination = vm.resolveMemorySource(sourceId, messageId)
+                            if (destination == null) toaster.show("来源对话已不存在") else {
+                                showRecentMemories = false
+                                navigateToChatPage(navController, chatId = destination.first, nodeId = destination.second)
+                            }
+                        }
+                    },
+                )
+            }
+            if (chatImageModel != null && conversationLoadState == ConversationLoadState.Ready) {
+                // Keep the action below the app bar and above the input bar. The old
+                // overlay had no anchor, so its zero offset placed the button at the
+                // window's top-left corner (inside the system status bar).
+                val imageButtonSize = 40.dp
+                val imageButtonTouchTarget = 48.dp
+                val imageButtonMargin = 12.dp
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                ) {
+                    val density = LocalDensity.current
+                    val containerWidthPx = with(density) { maxWidth.toPx() }
+                    val containerHeightPx = with(density) { maxHeight.toPx() }
+                    val touchTargetPx = with(density) { imageButtonTouchTarget.toPx() }
+                    val marginPx = with(density) { imageButtonMargin.toPx() }
+                    val minOffsetX = marginPx
+                    val maxOffsetX = (containerWidthPx - touchTargetPx - marginPx)
+                        .coerceAtLeast(minOffsetX)
+                    val minOffsetY = marginPx
+                    val maxOffsetY = (containerHeightPx - touchTargetPx - marginPx)
+                        .coerceAtLeast(minOffsetY)
+
+                    // Clamp positions restored from an earlier screen size or
+                    // orientation so the button cannot remain off-screen.
+                    val safeOffsetX = imageButtonOffsetX
+                        .takeUnless(Float::isNaN)
+                        ?.coerceIn(minOffsetX, maxOffsetX)
+                        ?: maxOffsetX
+                    val safeOffsetY = imageButtonOffsetY
+                        .takeUnless(Float::isNaN)
+                        ?.coerceIn(minOffsetY, maxOffsetY)
+                        ?: minOffsetY
+                    LaunchedEffect(minOffsetX, maxOffsetX, minOffsetY, maxOffsetY) {
+                        imageButtonOffsetX = safeOffsetX
+                        imageButtonOffsetY = safeOffsetY
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(safeOffsetX.roundToInt(), safeOffsetY.roundToInt())
+                            }
+                            .size(imageButtonTouchTarget)
+                            .pointerInput(conversation.id, minOffsetX, maxOffsetX, minOffsetY, maxOffsetY) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    imageButtonOffsetX = (imageButtonOffsetX + dragAmount.x)
+                                        .coerceIn(minOffsetX, maxOffsetX)
+                                    imageButtonOffsetY = (imageButtonOffsetY + dragAmount.y)
+                                        .coerceIn(minOffsetY, maxOffsetY)
+                                }
+                            },
+                    ) {
+                        SmallFloatingActionButton(
+                            onClick = {
+                                if (chatImageState !is ChatVM.ChatImageState.Running) {
+                                    showChatImageDialog = true
+                                }
+                            },
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(imageButtonSize),
+                        ) {
+                            if (chatImageState is ChatVM.ChatImageState.Running) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.5.dp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            } else {
+                                Icon(
+                                    HugeIcons.Settings02,
+                                    contentDescription = stringResource(R.string.chat_image_settings),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            }
         }
     }
+
+    if (showSuggestionPanel) SuggestionControlPanel(conversation, setting, suggestionGenerationState, suggestionActions,
+        onRefresh = { vm.generateSuggestion(vm.conversation.value) }, onClear = { vm.dismissSuggestions(vm.conversation.value) },
+        onAction = ::selectSuggestion, onDismiss = { showSuggestionPanel = false }, mainGenerating = loadingJob != null)
+    suggestionPreview?.let { item -> SuggestionPreviewDialog(item, suggestionActionInput(context, item),
+        onInsert = { text, location -> applySuggestion(item, text, location) }, onDismiss = { suggestionPreview = null }) }
+    inspirationDraft?.let { card ->
+        val owner = setting.getAssistantById(conversation.assistantId)
+        if (owner != null) InspirationDraftDialog(card,
+            me.rerere.rikkahub.data.model.automaticQuickMessageValues(setting, owner),
+            readDraft = { inputState.textContent.text.toString() }, onInsert = ::insertInspiration,
+            onDismiss = { inspirationDraft = null })
+    }
+
+    if (showChatImageDialog && chatImageModel != null && chatImageConstraints != null) {
+        key(conversation.id, chatImageModel.id) {
+            val imageSettingsSheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            )
+            ImageGenerationSettingsBottomSheet(
+                state = inputState.imageGenerationSettings,
+                constraints = chatImageConstraints,
+                onStateChange = { inputState.imageGenerationSettings = it },
+                geminiModelId = chatImageGeminiModelId,
+                geminiRequestChannel = chatImageRequestChannel,
+                referenceImageCount = 0,
+                sheetState = imageSettingsSheetState,
+                onDismiss = { showChatImageDialog = false },
+                headerContent = {
+                    Text(
+                        text = buildString {
+                            append(chatImageModel.displayName.ifBlank { chatImageModel.modelId })
+                            chatImageProvider?.name?.takeIf(String::isNotBlank)?.let { providerName ->
+                                append(" (")
+                                append(providerName)
+                                append(')')
+                            }
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                },
+                footerContent = {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = { showChatImageDialog = false }) {
+                            Text(stringResource(R.string.confirm))
+                        }
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentMemoryMenuButton(
+    status: MemoryExtractionStatus,
+    memoryCount: Int,
+    onClick: () -> Unit,
+) {
+    val isFailure = status is MemoryExtractionStatus.Failed
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .padding(start = 12.dp, end = 12.dp, bottom = 4.dp)
+            .heightIn(min = 36.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 12.dp,
+            vertical = 4.dp,
+        ),
+    ) {
+        if (status is MemoryExtractionStatus.Running) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(15.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Icon(
+                imageVector = HugeIcons.AiBrain01,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = if (isFailure) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.primary,
+            )
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.chat_page_recent_memories_title),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (isFailure) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.primary,
+        )
+        if (memoryCount > 0) {
+            androidx.compose.foundation.layout.Spacer(Modifier.width(4.dp))
+            Text(
+                text = memoryCount.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentMemoriesDialog(
+    conversation: Conversation,
+    memoryAssistant: Assistant,
+    extractionAvailable: Boolean,
+    onMemoryModeChange: (me.rerere.rikkahub.data.model.ConversationMemoryMode) -> Unit,
+    status: MemoryExtractionStatus,
+    memories: List<AssistantMemory>,
+    conversationMemories: List<me.rerere.rikkahub.data.memory.ConversationMemoryRecord>,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    onDeleteExcerpt: suspend (String) -> Boolean,
+    loadMemoryPreview: suspend (Int) -> me.rerere.rikkahub.data.repository.MemorySearchRecord?,
+    onOpenMemorySource: (String, String) -> Unit,
+    rebuildMemoryIndex: suspend (Int) -> Unit,
+) {
+    var showConversationExcerpts by remember(conversation.id) { mutableStateOf(false) }
+    var preview by remember(conversation.id) { mutableStateOf<MemoryPreviewContent?>(null) }
+    var deleteExcerpt by remember(conversation.id) { mutableStateOf<me.rerere.rikkahub.data.memory.ConversationMemoryRecord?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var operationError by remember { mutableStateOf<String?>(null) }
+    val previewScope = rememberCoroutineScope()
+    val extractionActive = memoryAssistant.enableMemory && extractionAvailable
+    val visibleExcerpts = if (memoryAssistant.enableMemoryRag) conversationMemories else emptyList()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.chat_page_recent_memories_title)) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 440.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "memory-mode") {
+                    ConversationMemoryControls(conversation, onMemoryModeChange)
+                    Text("情景记忆与片段仅用于本对话；事实记忆沿用助手/全局范围。分支继承聊天历史，后续索引独立。", style = MaterialTheme.typography.bodySmall)
+                    operationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    if (memoryAssistant.enableMemoryRag && !memoryAssistant.enableMemory) {
+                        Text(
+                            stringResource(R.string.setting_memory_vector_model_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                item(key = "status") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = if (!memoryAssistant.enableMemory && !memoryAssistant.enableMemoryRag) {
+                                stringResource(R.string.conversation_memory_disabled_desc)
+                            } else if (!memoryAssistant.enableMemory && memoryAssistant.enableMemoryRag) {
+                                stringResource(R.string.conversation_memory_rag_desc)
+                            } else if (!extractionAvailable) {
+                                stringResource(R.string.conversation_memory_extraction_model_required)
+                            } else memoryExtractionStatusText(status),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (extractionActive && status is MemoryExtractionStatus.Failed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                        )
+                        if (extractionActive && status is MemoryExtractionStatus.Failed) {
+                            Text(
+                                text = status.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                item(key = "memory-maintenance") { ClearAllMemoryButton() }
+                if (visibleExcerpts.isNotEmpty()) {
+                    item(key = "rag-title") {
+                        TextButton(onClick = { showConversationExcerpts = !showConversationExcerpts }) {
+                            Text(
+                                stringResource(
+                                    if (showConversationExcerpts) R.string.conversation_memory_excerpts_collapse
+                                    else R.string.conversation_memory_excerpts_expand,
+                                    visibleExcerpts.size,
+                                )
+                            )
+                        }
+                    }
+                    if (showConversationExcerpts) {
+                        items(visibleExcerpts, key = { "rag-${it.id}" }) { record ->
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    stringResource(if (record.embedding != null) R.string.conversation_memory_indexed
+                                        else R.string.conversation_memory_lexical),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(record.content, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                                Row {
+                                    TextButton(onClick = { preview = MemoryPreviewContent("对话片段与索引", record.content, record.id,
+                                        record.contentHash, record.sourceMessageId, record.embedding, record.embeddingModelId, record.embeddingDimension) }) { Text("全屏预览") }
+                                    TextButton(onClick = { deleteExcerpt = record }) { Text("删除") }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (memories.isEmpty() && visibleExcerpts.isEmpty()) {
+                    item(key = "empty") {
+                        Text(
+                            text = stringResource(R.string.chat_page_recent_memories_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    items(memories, key = AssistantMemory::id) { memory ->
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = stringResource(
+                                    if (memory.type == MemoryType.EPISODIC) {
+                                        R.string.assistant_page_memory_filter_episodic
+                                    } else {
+                                        R.string.assistant_page_memory_filter_fact
+                                    }
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (memory.type == MemoryType.EPISODIC) {
+                                    MaterialTheme.colorScheme.tertiary
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                            )
+                            Text(
+                                text = memory.content,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            TextButton(onClick = {
+                                preview = MemoryPreviewContent("记忆详情", memory.content, memory.id.toString(), memoryContentHash(memory.content), memory.sourceConversationId)
+                                previewScope.launch {
+                                    try {
+                                        loadMemoryPreview(memory.id)?.let { record ->
+                                            if (preview?.id == memory.id.toString()) preview = MemoryPreviewContent("记忆详情", record.memory.content,
+                                                record.memory.id.toString(), memoryContentHash(record.memory.content), record.memory.sourceConversationId,
+                                                record.embedding, record.embeddingModelId, record.embeddingDimension,
+                                                identity = memoryIdentityDescription(record), sources = record.sources)
+                                        }
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                    catch (_: Exception) { operationError = "索引详情读取失败，请重试" }
+                                }
+                            }) { Text("全屏预览") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (status is MemoryExtractionStatus.Failed && extractionActive) {
+                    TextButton(onClick = onRetry) {
+                        Text(stringResource(R.string.chat_page_memory_retry))
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+        },
+    )
+    preview?.let { shown -> MemoryFullscreenPreview(shown, onOpenSource = onOpenMemorySource,
+        rebuildIndex = shown.id.toIntOrNull()?.let { id -> { rebuildMemoryIndex(id)
+            loadMemoryPreview(id)?.let { record -> if (preview?.id == shown.id) preview = shown.copy(
+                vector = record.embedding, modelId = record.embeddingModelId, dimension = record.embeddingDimension,
+                identity = memoryIdentityDescription(record), sources = record.sources) }
+        } }) { preview = null } }
+    deleteExcerpt?.let { record -> AlertDialog(onDismissRequest = { if (!deleting) deleteExcerpt = null },
+        title = { Text("删除片段及索引？") }, text = { Text("聊天原文会保留。本条片段和向量会移除，同一内容版本不会被后台自动重新加入。") },
+        confirmButton = { TextButton(enabled = !deleting, onClick = {
+            deleting = true
+            previewScope.launch {
+                try { onDeleteExcerpt(record.id); deleteExcerpt = null; operationError = null }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { operationError = "删除失败，请重试"; deleteExcerpt = null }
+                finally { deleting = false }
+            }
+        }) { Text(if (deleting) "删除中…" else "删除") } }, dismissButton = { TextButton(enabled = !deleting, onClick = { deleteExcerpt = null }) { Text("取消") } }) }
+}
+
+@Composable
+private fun memoryExtractionStatusText(status: MemoryExtractionStatus): String = when (status) {
+    MemoryExtractionStatus.Idle -> stringResource(R.string.chat_page_memory_status_ready)
+    is MemoryExtractionStatus.Running -> stringResource(R.string.chat_page_memory_status_running)
+    is MemoryExtractionStatus.Queued -> stringResource(
+        R.string.chat_page_memory_status_queued,
+        status.pendingUserTurns,
+    )
+    is MemoryExtractionStatus.Completed -> stringResource(
+        R.string.chat_page_memory_status_saved,
+        status.savedCount,
+    )
+    is MemoryExtractionStatus.NoChanges -> stringResource(
+        when (status.reason) {
+            MemoryExtractionOutcome.Reason.NO_COMPLETE_TURN ->
+                R.string.chat_page_memory_status_waiting
+            MemoryExtractionOutcome.Reason.NOTHING_TO_REMEMBER ->
+                R.string.chat_page_memory_status_no_changes
+            MemoryExtractionOutcome.Reason.ALL_DUPLICATES ->
+                R.string.chat_page_memory_status_up_to_date
+        }
+    )
+    is MemoryExtractionStatus.Failed -> stringResource(R.string.chat_page_memory_status_failed)
 }
 
 @Composable
@@ -810,6 +1527,10 @@ private fun ConversationLoadContent(
     modifier: Modifier = Modifier,
 ) {
     if (state == ConversationLoadState.Ready) return
+    if (state == ConversationLoadState.Loading) {
+        ConversationLoadingSkeleton(modifier)
+        return
+    }
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center,
@@ -820,14 +1541,7 @@ private fun ConversationLoadContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             when (state) {
-                ConversationLoadState.Loading -> {
-                    CircularProgressIndicator()
-                    Text(
-                        text = stringResource(R.string.chat_page_loading_conversation),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                ConversationLoadState.Loading -> Unit
 
                 is ConversationLoadState.Failed -> {
                     Text(
@@ -925,6 +1639,13 @@ private fun PromptInjectionDiagnosticsDialog(
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
+                            entry.detail?.let { Text(if (it == "truncated") "内容已按预算截断" else it, color = MaterialTheme.colorScheme.tertiary) }
+                            if (entry.remainingActiveTurns > 0 || entry.remainingCooldownTurns > 0) Text("后续持续 ${entry.remainingActiveTurns} 轮 · 冷却 ${entry.remainingCooldownTurns} 轮", style = MaterialTheme.typography.bodySmall)
+                            var showContent by remember(entry.entryId, entry.injectedContent) { mutableStateOf(false) }
+                            if (entry.injectedContent != null) {
+                                TextButton(onClick = { showContent = !showContent }) { Text(if (showContent) "收起实际注入正文" else "查看实际注入正文") }
+                                if (showContent) Text(entry.injectedContent)
+                            }
                             Text(
                                 stringResource(
                                     R.string.prompt_diagnostics_injection,
@@ -963,6 +1684,29 @@ private fun promptInjectionPositionLabel(position: InjectionPosition): String = 
     InjectionPosition.AT_DEPTH -> stringResource(R.string.prompt_page_position_at_depth)
 }
 
+private fun suggestionActionInput(
+    context: Context,
+    suggestion: ChatSuggestionItem,
+): String {
+    val payload = suggestion.payload.ifBlank { suggestion.text }.trim()
+    val resource = when (suggestion.action) {
+        ChatSuggestionAction.SEARCH_WEB -> R.string.chat_page_suggestion_request_web
+        ChatSuggestionAction.SEARCH_KNOWLEDGE -> R.string.chat_page_suggestion_request_knowledge
+        ChatSuggestionAction.SEARCH_MEMORY -> R.string.chat_page_suggestion_request_memory
+        ChatSuggestionAction.SEARCH_CONVERSATIONS -> R.string.chat_page_suggestion_request_conversations
+        ChatSuggestionAction.ASK_USER -> R.string.chat_page_suggestion_request_ask
+        ChatSuggestionAction.WORKSPACE -> R.string.chat_page_suggestion_request_workspace
+        ChatSuggestionAction.USE_SKILL -> R.string.chat_page_suggestion_request_skill
+        ChatSuggestionAction.MCP -> R.string.chat_page_suggestion_request_mcp
+        ChatSuggestionAction.INSERT_TEXT,
+        ChatSuggestionAction.IMAGE_DRAFT,
+        ChatSuggestionAction.COPY_TEXT,
+        ChatSuggestionAction.SAVE_QUICK_MESSAGE,
+        ChatSuggestionAction.CREATE_BRANCH -> return payload
+    }
+    return context.getString(resource, payload)
+}
+
 @Composable
 private fun ChatFilesPickerSheet(
     inputState: ChatInputState,
@@ -972,6 +1716,10 @@ private fun ChatFilesPickerSheet(
     vm: ChatVM,
     contextUsage: ChatContextUsage,
     promptInjectionDiagnostics: PromptInjectionDiagnostics?,
+    memoryExtractionStatus: MemoryExtractionStatus,
+    recentMemoryCount: Int,
+    onShowRecentMemories: () -> Unit,
+    onShowSuggestions: () -> Unit,
     onShowPromptDiagnostics: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1171,7 +1919,16 @@ private fun ChatFilesPickerSheet(
         onDismissRequest = { dismissAll() },
         modifier = Modifier.fillMaxHeight(0.88f),
     ) {
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
         ContextUsageSummary(usage = contextUsage)
+        run {
+            RecentMemoryMenuButton(
+                status = memoryExtractionStatus,
+                memoryCount = recentMemoryCount,
+                onClick = onShowRecentMemories,
+            )
+        }
+        TextButton(onClick = onShowSuggestions) { Text("聊天建议") }
         FilesPicker(
             conversation = conversation,
             state = inputState,
@@ -1222,6 +1979,7 @@ private fun ChatFilesPickerSheet(
             onPickAudio = { audioPickerLauncher.launch("audio/*") },
             onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
         )
+        }
     }
 }
 
@@ -1308,7 +2066,7 @@ private fun TopBar(
     val displaySetting = settings.displaySetting
     val appearanceCapabilities = LocalAdvancedAppearanceCapabilities.current
     val currentAssistant = settings.getCurrentAssistant()
-    val topBarContentColor = if (settings.hasActiveChatBackground()) {
+    val backgroundForeground = if (settings.hasActiveChatBackground()) {
         LocalChatBackgroundForeground.current
             .takeUnless { it == Color.Unspecified }
             ?: MaterialTheme.colorScheme.onSurface
@@ -1316,25 +2074,30 @@ private fun TopBar(
         MaterialTheme.colorScheme.onSurface
     }
     val useTopBarBlur = displaySetting.enableTopBarBlur &&
+        settings.advancedAppearanceSetting.enableTopBarPerformanceEffects &&
         appearanceCapabilities.supportsRealtimeBlur &&
         settings.hasActiveChatBackground()
-    val topBarHazeStyle = HazeBlurStyle.Material3 {
-        blurRadius(
-            appearanceCapabilities.limitLiveBlur(
-                displaySetting.topBarBlurRadius.coerceIn(0f, 40f)
-            ).dp
+    val topBarEffectsDisabled = !settings.advancedAppearanceSetting.enableTopBarPerformanceEffects
+    val topBarBlurRadius = appearanceCapabilities.limitLiveBlur(displaySetting.topBarBlurRadius)
+    val topBarHazeStyle = me.rerere.rikkahub.ui.components.ui.backgroundOnlyBlurStyle(topBarBlurRadius)
+    val topBarColor = when {
+        !topBarEffectsDisabled && settings.hasActiveChatBackground() ->
+            MaterialTheme.colorScheme.surface.copy(
+            alpha = LocalAppearanceSurfaceOpacityPolicy.current.topBar
         )
-    }
-    val topBarColor = if (useTopBarBlur) {
-        MaterialTheme.colorScheme.surface.copy(
-            alpha = displaySetting.topBarSurfaceOpacity.coerceIn(0f, 1f)
-        )
-    } else {
-        Color.Transparent
+        topBarEffectsDisabled && settings.hasActiveChatBackground() ->
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 1f)
+        else -> Color.Transparent
     }
 
+    val topBarContentColor = me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
+        topBarColor, topBarColor.alpha, backgroundForeground,
+        LocalAppearanceBackground.current?.readability?.backgrounds,
+        me.rerere.rikkahub.ui.theme.currentTextPaletteSeed(),
+    )
+
     TopAppBar(
-        modifier = if (useTopBarBlur) {
+        modifier = if (useTopBarBlur && topBarBlurRadius > 0f) {
             Modifier.hazeBlur(
                 input = HazeInput.Sources(hazeState),
                 style = topBarHazeStyle,

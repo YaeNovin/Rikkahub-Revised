@@ -156,6 +156,7 @@ fun CardGroup(
     val globalGlassActive = LocalGlobalBackgroundActive.current
     val liquidGlassActive = globalGlassActive &&
         LocalPageSurfaceStyle.current == BackgroundSurfaceStyle.LIQUID_GLASS
+    val sampleBackdrop = liquidGlassActive && !LocalInsideGlassSurface.current
     val groupShape = RoundedCornerShape(CardGroupCorner)
 
     Column(modifier = modifier) {
@@ -168,26 +169,24 @@ fun CardGroup(
                 }
             }
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (liquidGlassActive) {
-                        Modifier
-                            .clip(groupShape)
-                            .border(liquidGlassBorder(strength = 0.28f), groupShape)
-                    } else {
-                        Modifier
-                    }
+        Box(Modifier.fillMaxWidth().then(if (liquidGlassActive) Modifier.clip(groupShape) else Modifier)) {
+            if (sampleBackdrop) {
+                InlineBackdropBlur(
+                    blurRadius = me.rerere.rikkahub.ui.context.LocalSettings.current.advancedAppearanceSetting.pageLiquidGlassBlurRadius,
+                    shape = groupShape, modifier = Modifier.matchParentSize(),
                 )
-        ) {
-            val count = scope.items.size
-            scope.items.fastForEachIndexed { index, item ->
-                CardGroupListItem(item = item, count = count, index = index)
-                if (index != count - 1) {
-                    Spacer(modifier = Modifier.height(CardGroupItemSpacing))
+            }
+            if (liquidGlassActive) LiquidGlassSurfaceLayers(Modifier.matchParentSize(), strength = .5f, shape = groupShape, drawEdges = false)
+            CompositionLocalProvider(LocalInsideGlassSurface provides true) {
+            Column(Modifier.fillMaxWidth()) {
+                val count = scope.items.size
+                scope.items.fastForEachIndexed { index, item ->
+                    CardGroupListItem(item = item, count = count, index = index)
+                    if (index != count - 1) Spacer(modifier = Modifier.height(CardGroupItemSpacing))
                 }
             }
+            }
+            if (liquidGlassActive) LiquidGlassSurfaceLayers(Modifier.matchParentSize(), strength = .5f, shape = groupShape, drawTint = false)
         }
     }
 }
@@ -204,7 +203,7 @@ private fun CardGroupPreview() {
                 colors = CustomColors.topBarColors,
             )
         },
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         Column(
             modifier = Modifier

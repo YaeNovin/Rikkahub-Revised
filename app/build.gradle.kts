@@ -210,6 +210,8 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)
@@ -287,6 +289,8 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.okhttp)
     implementation(libs.coil.svg)
+    // Same renderer already supplied by Coil; expose viewport control to the SVG adapter.
+    implementation(libs.androidsvg)
     implementation(libs.coil.cache.control)
 
     // serialization

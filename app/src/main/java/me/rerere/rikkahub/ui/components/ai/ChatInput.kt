@@ -42,6 +42,8 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.BasicAlertDialog
 import me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu as DropdownMenu
 import me.rerere.rikkahub.ui.components.ui.IsolatedOverlaySurface
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,11 +79,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
-import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.hazeBlur
-import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -102,8 +100,6 @@ import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.chatInputContainerBlurRadius
-import me.rerere.rikkahub.data.datastore.chatInputContainerOpacity
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -117,7 +113,7 @@ import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionList
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionProvider
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
-import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
+import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -143,28 +139,20 @@ fun ChatInput(
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onMoreClick: () -> Unit,
+    imageModel: Model? = null,
+    imageGenerationLoading: Boolean = false,
+    onGenerateImageClick: () -> Unit = {},
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
-    onLongSendClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
-    val appearanceCapabilities = LocalAdvancedAppearanceCapabilities.current
-    val containerBlurRadius = appearanceCapabilities.limitLiveBlur(
-        settings.chatInputContainerBlurRadius()
-    ).coerceAtLeast(0f)
-    val containerBlurActive = appearanceCapabilities.supportsRealtimeBlur &&
-        containerBlurRadius > 0f
-    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(
-        alpha = settings.chatInputContainerOpacity()
-    )
-    val containerBlurStyle = HazeBlurStyle.Material3 {
-        blurRadius(containerBlurRadius.dp)
-    }
+    val chatModel = settings.getCurrentChatModel()
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    var showSendTargetMenu by remember(imageModel?.id) { mutableStateOf(false) }
 
     val imeVisible = WindowInsets.isImeVisible
     val containerShape = if (imeVisible) {
@@ -179,13 +167,25 @@ fun ChatInput(
     fun sendMessage() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading) onCancelClick() else onSendClick()
+        when {
+            loading -> onCancelClick()
+            imageModel != null && !state.isEditing() -> showSendTargetMenu = true
+            else -> onSendClick()
+        }
     }
 
-    fun sendMessageWithoutAnswer() {
+    fun sendToChatModel() {
+        showSendTargetMenu = false
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading) onCancelClick() else onLongSendClick()
+        onSendClick()
+    }
+
+    fun sendToImageModel() {
+        showSendTargetMenu = false
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+        onGenerateImageClick()
     }
 
     val asr = LocalASRState.current
@@ -224,28 +224,7 @@ fun ChatInput(
                 .padding(horizontal = 8.dp)
                 .padding(bottom = if (imeVisible) 0.dp else 8.dp),
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(containerShape)
-                    .then(
-                        if (containerBlurActive) {
-                            Modifier.hazeBlur(
-                                input = HazeInput.Sources(hazeState),
-                                style = containerBlurStyle,
-                            )
-                        } else {
-                            Modifier
-                        }
-                    ),
-                shape = containerShape,
-                tonalElevation = 0.dp,
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                ),
-                color = containerColor,
-            ) {
+            ChatComposerSurface(settings = settings, hazeState = hazeState, shape = containerShape, modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -260,6 +239,7 @@ fun ChatInput(
                         onSendMessage = { sendMessage() },
                     )
 
+                    Box(Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -284,7 +264,6 @@ fun ChatInput(
 
                     val enableSearchMsg = stringResource(R.string.web_search_enabled)
                     val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                    val chatModel = settings.getCurrentChatModel()
                     SearchPickerButton(
                         enableSearch = enableSearch,
                         settings = settings,
@@ -332,7 +311,7 @@ fun ChatInput(
                             compatibleEndpoint = reasoningSupport.compatibleEndpoint,
                             onlyIcon = true,
                         )
-                    }
+                     }
                 }
 
                 ActionIconButton(
@@ -383,7 +362,7 @@ fun ChatInput(
                             .combinedClickable(
                                 enabled = loading || !state.isEmpty(),
                                 onClick = { sendMessage() },
-                                onLongClick = { sendMessageWithoutAnswer() },
+                                onLongClick = {},
                             ),
                     ) {
                         val containerColor = when {
@@ -418,8 +397,81 @@ fun ChatInput(
                                 modifier = Modifier.size(18.dp),
                             )
                         }
+                        DropdownMenu(
+                            expanded = showSendTargetMenu,
+                            onDismissRequest = { showSendTargetMenu = false },
+                            modifier = Modifier.widthIn(min = 232.dp, max = 320.dp),
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = stringResource(R.string.chat_send_to_chat_model),
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                        Text(
+                                            text = chatModel?.let { model ->
+                                                model.displayName.ifBlank { model.modelId }
+                                            }
+                                                ?: stringResource(R.string.chat_page_select_model_required),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                },
+                                enabled = chatModel != null,
+                                leadingIcon = {
+                                    AutoAIIcon(
+                                        name = chatModel?.modelId ?: "chat",
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                },
+                                onClick = ::sendToChatModel,
+                            )
+                            imageModel?.let { model ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = stringResource(R.string.chat_send_to_image_model),
+                                                style = MaterialTheme.typography.labelLarge,
+                                            )
+                                            Text(
+                                                text = model.displayName.ifBlank { model.modelId },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    },
+                                    enabled = !imageGenerationLoading,
+                                    leadingIcon = {
+                                        AutoAIIcon(
+                                            name = model.modelId,
+                                            modifier = Modifier.size(24.dp),
+                                            loading = imageGenerationLoading,
+                                        )
+                                    },
+                                    trailingIcon = if (imageGenerationLoading) {
+                                        {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp,
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    onClick = ::sendToImageModel,
+                                )
+                            }
+                        }
                     }
                         }
+                    }
                     }
                 }
             }

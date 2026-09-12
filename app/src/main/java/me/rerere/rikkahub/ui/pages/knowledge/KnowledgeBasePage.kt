@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -25,7 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
@@ -59,10 +60,14 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ai.ModelListSheet
+import me.rerere.rikkahub.ui.components.ai.rememberModelListState
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.ai.provider.ModelType
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -73,6 +78,8 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
     val lastError by vm.lastError.collectAsStateWithLifecycle()
     val assistants by vm.assistants.collectAsStateWithLifecycle()
     val documentPreview by vm.documentPreview.collectAsStateWithLifecycle()
+    val settingsStore: SettingsStore = koinInject()
+    val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -91,7 +98,7 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
                 Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.knowledge_base_page_create))
             }
         },
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { padding ->
         LazyColumn(
@@ -135,10 +142,12 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
                 KnowledgeBaseCard(
                     base = base,
                     assistants = assistants,
+                    embeddingProviders = settings.providers,
                     onImport = { uri -> vm.importDocument(base, uri) },
                     onDelete = { vm.deleteBase(base.id) },
                     onSetEnabled = { vm.setBaseEnabled(base.id, it) },
                     onSetRagEnabled = { vm.setBaseRagEnabled(base.id, it) },
+                    onSetEmbeddingModel = { vm.setBaseEmbeddingModel(base.id, it) },
                     onSetAssistantBinding = { assistantId, bound ->
                         vm.setAssistantBinding(base.id, assistantId, bound)
                     },
@@ -189,10 +198,12 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
 private fun KnowledgeBaseCard(
     base: KnowledgeBaseEntity,
     assistants: List<me.rerere.rikkahub.data.model.Assistant>,
+    embeddingProviders: List<me.rerere.ai.provider.ProviderSetting>,
     onImport: (Uri) -> Unit,
     onDelete: () -> Unit,
     onSetEnabled: (Boolean) -> Unit,
     onSetRagEnabled: (Boolean) -> Unit,
+    onSetEmbeddingModel: (Uuid?) -> Unit,
     onSetAssistantBinding: (Uuid, Boolean) -> Unit,
     onDeleteDocument: (String) -> Unit,
     onPreviewDocument: (KnowledgeDocumentEntity) -> Unit,
@@ -203,6 +214,14 @@ private fun KnowledgeBaseCard(
     var showBindingsSheet by remember { mutableStateOf(false) }
     var documentToDelete by remember { mutableStateOf<KnowledgeDocumentEntity?>(null) }
     val boundAssistants = assistants.filter { base.id in it.knowledgeBaseIds.map(Uuid::toString) }
+    val baseEmbeddingModelId = remember(base.embeddingModelId) {
+        base.embeddingModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+    }
+    val embeddingModelState = rememberModelListState(
+        modelId = baseEmbeddingModelId,
+        providers = embeddingProviders,
+        type = ModelType.EMBEDDING,
+    )
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(onImport)
     }
@@ -261,6 +280,37 @@ private fun KnowledgeBaseCard(
                 }
                 Switch(checked = base.ragEnabled, onCheckedChange = onSetRagEnabled)
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.knowledge_base_page_embedding_model))
+                    Text(
+                        text = stringResource(R.string.knowledge_base_page_embedding_model_desc),
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = embeddingModelState::open) {
+                        Text(
+                            text = embeddingModelState.currentModel?.displayName
+                                ?: stringResource(R.string.knowledge_base_page_embedding_model_default),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (embeddingModelState.currentModel != null) {
+                        IconButton(onClick = { onSetEmbeddingModel(null) }) {
+                            Icon(
+                                HugeIcons.Cancel01,
+                                contentDescription = stringResource(R.string.knowledge_base_page_embedding_model_clear),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+            }
             TextButton(onClick = { showBindingsSheet = true }) {
                 Text(
                     stringResource(
@@ -278,6 +328,11 @@ private fun KnowledgeBaseCard(
             }
         }
     }
+
+    ModelListSheet(
+        state = embeddingModelState,
+        onSelect = { onSetEmbeddingModel(it.id) },
+    )
 
     if (showDeleteDialog) {
         AlertDialog(

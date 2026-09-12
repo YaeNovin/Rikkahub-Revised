@@ -27,9 +27,14 @@ internal data class RichContentColors(
 internal fun richContentColors(): RichContentColors {
     val colorScheme = MaterialTheme.colorScheme
     val appearance = LocalSettings.current.advancedAppearanceSetting
-    val opacity = appearance.richContentSurfaceOpacity.coerceIn(0.2f, 0.9f)
+    val effectsEnabled = appearance.enableRichContentPerformanceEffects
+    val opacity = if (effectsEnabled) {
+        appearance.richContentSurfaceOpacity.coerceIn(0.2f, 0.9f)
+    } else {
+        1f
+    }
 
-    return when (appearance.richContentStyle) {
+    return when (if (effectsEnabled) appearance.richContentStyle else RichContentStyle.OUTLINED) {
         RichContentStyle.TRANSLUCENT -> RichContentColors(
             container = colorScheme.surfaceContainer.copy(alpha = opacity),
             toolbar = colorScheme.primaryContainer.copy(

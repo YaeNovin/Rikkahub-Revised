@@ -21,6 +21,8 @@ class WorkspaceVM(
     private val repository: WorkspaceRepository,
     settingsStore: SettingsStore,
 ) : ViewModel() {
+    val operationError = MutableStateFlow<String?>(null)
+    val operationRunning = MutableStateFlow(false)
     val workspaces = combine(repository.listFlow(), settingsStore.settingsFlow) { workspaces, settings ->
         workspaces.map { workspace ->
             val stats = runCatching { repository.filesAreaStats(workspace.id) }.getOrDefault(0L to 0)
@@ -37,21 +39,33 @@ class WorkspaceVM(
     }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    fun create(name: String) {
-        viewModelScope.launch {
-            runCatching { repository.create(name) }
-        }
+    fun create(name: String, onSuccess: () -> Unit) {
+        perform(onSuccess) { repository.create(name) }
     }
 
-    fun rename(workspace: WorkspaceEntity, name: String) {
-        viewModelScope.launch {
-            runCatching { repository.rename(workspace.id, name) }
-        }
+    fun rename(workspace: WorkspaceEntity, name: String, onSuccess: () -> Unit) {
+        perform(onSuccess) { check(repository.rename(workspace.id, name)) { "重命名失败" } }
     }
 
     fun delete(workspace: WorkspaceEntity) {
+        perform({}) { check(repository.delete(workspace.id)) { "删除失败" } }
+    }
+
+    private fun perform(onSuccess: () -> Unit, action: suspend () -> Unit) {
+        if (operationRunning.value) return
+        operationRunning.value = true
+        operationError.value = null
         viewModelScope.launch {
-            repository.delete(workspace.id)
+            try {
+                action()
+                onSuccess()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                operationError.value = e.message ?: "工作区操作失败，请重试"
+            } finally {
+                operationRunning.value = false
+            }
         }
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.rikkahub.R
@@ -68,7 +69,7 @@ fun ChatMessageAssistantAvatar(
 ) {
     val settings = LocalSettings.current
     val showIcon = settings.displaySetting.showModelIcon
-    val useAssistantAvatar = assistant?.useAssistantAvatar == true
+    val useAssistantAvatar = assistant?.useAssistantAvatar == true && model?.type != ModelType.IMAGE
     val labelColor = chatMessageHeaderLabelColor()
     if (message.role == MessageRole.ASSISTANT && (model != null || useAssistantAvatar)) {
         Row(

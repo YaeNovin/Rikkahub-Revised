@@ -285,6 +285,7 @@ fun ChatMessageActionsSheet(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            me.rerere.rikkahub.ui.pages.chat.MessageSuggestionAction(message, onDismissRequest)
             // Select and Copy
             Card(
                 onClick = {

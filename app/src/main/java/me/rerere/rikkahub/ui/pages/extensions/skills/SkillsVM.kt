@@ -61,7 +61,7 @@ class SkillsVM(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val fileName = FileUtils.getFileNameFromUri(appContext, uri).orEmpty()
-                val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readSkillBytes(MAX_SKILL_IMPORT_BYTES) }
                     ?: run {
                         withContext(Dispatchers.Main) { onResult(false, "无法读取文件") }
                         return@launch
@@ -78,6 +78,7 @@ class SkillsVM(
                     onResult(true, importedNames.joinToString())
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 withContext(Dispatchers.Main) { onResult(false, e.message ?: "未知错误") }
             }
         }
@@ -116,17 +117,21 @@ class SkillsVM(
                     return@launch
                 }
 
-                val fileContents = LinkedHashMap<String, String>()
+                require(!frontmatter["description"].isNullOrBlank()) { "SKILL.md 格式错误：缺少 description 字段" }
+                val fileContents = LinkedHashMap<String, ByteArray>()
+                var totalBytes = 0
                 for ((relativePath, downloadUrl) in files) {
-                    val content = downloadText(downloadUrl)
+                    val content = downloadBytes(downloadUrl)
                     if (content == null) {
                         withContext(Dispatchers.Main) { onResult(false, "下载文件失败：$relativePath") }
                         return@launch
                     }
+                    totalBytes += content.size
+                    require(totalBytes <= MAX_SKILL_IMPORT_BYTES) { "技能导入总量超过 32 MiB" }
                     fileContents[relativePath] = content
                 }
 
-                val saved = skillManager.saveSkillFilesAtomically(name, fileContents)
+                val saved = skillManager.saveSkillFileBytesAtomically(name, fileContents)
                 if (!saved) {
                     withContext(Dispatchers.Main) { onResult(false, "保存失败") }
                     return@launch
@@ -135,6 +140,7 @@ class SkillsVM(
                 _skills.value = skillManager.listSkills()
                 withContext(Dispatchers.Main) { onResult(true, name) }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
                 withContext(Dispatchers.Main) { onResult(false, e.message ?: "未知错误") }
             }
@@ -142,6 +148,7 @@ class SkillsVM(
     }
 
     private fun importSkillMarkdown(bytes: ByteArray): List<String> {
+        require(bytes.size <= MAX_SKILL_FILE_BYTES) { "单个技能文件不能超过 8 MiB" }
         val content = bytes.toString(Charsets.UTF_8)
         val frontmatter = SkillFrontmatterParser.parse(content)
         val name = frontmatter["name"]?.trim()
@@ -157,19 +164,22 @@ class SkillsVM(
 
     private fun importSkillsFromZip(bytes: ByteArray): List<String> {
         val files = LinkedHashMap<String, ByteArray>()
+        var totalBytes = 0
+        var entryCount = 0
         ZipInputStream(ByteArrayInputStream(bytes)).use { zipInput ->
             while (true) {
                 val entry = zipInput.nextEntry ?: break
-                try {
-                    if (!entry.isDirectory) {
-                        val path = normalizeZipEntryPath(entry.name)
-                        if (path != null) {
-                            files[path] = zipInput.readBytes()
-                        }
-                    }
-                } finally {
-                    zipInput.closeEntry()
+                require(++entryCount <= MAX_SKILL_IMPORT_FILES) { "技能压缩包条目超过 512 个" }
+                if (!entry.isDirectory) {
+                    val path = requireNotNull(normalizeZipEntryPath(entry.name)) { "技能压缩包包含无效路径" }
+                    val content = zipInput.readSkillBytes(minOf(MAX_SKILL_FILE_BYTES, MAX_SKILL_IMPORT_BYTES - totalBytes))
+                    totalBytes += content.size
+                    files[path] = content
+                } else {
+                    zipInput.readSkillBytes(0)
                 }
+                // Only drain a successfully bounded entry. On failure close the entire archive.
+                zipInput.closeEntry()
             }
         }
 
@@ -265,6 +275,7 @@ class SkillsVM(
         basePath: String,
         result: MutableList<Pair<String, String>>,
     ): Boolean {
+        require(dirPath.count { it == '/' } < 32) { "技能目录层级过深" }
         val apiUrl = "https://api.github.com/repos/$owner/$repo/contents/$dirPath?ref=$branch"
         val json = downloadText(apiUrl) ?: return false
         val array = JSONArray(json)
@@ -278,6 +289,7 @@ class SkillsVM(
                     val downloadUrl = item.optString("download_url").takeIf { it.isNotBlank() }
                         ?: return false
                     result.add(relativePath to downloadUrl)
+                    require(result.size <= MAX_SKILL_IMPORT_FILES) { "技能文件超过 512 个" }
                 }
 
                 "dir" -> {
@@ -310,13 +322,15 @@ class SkillsVM(
         return GitHubRepoInfo(owner, repo, branch, subPath)
     }
 
-    private fun downloadText(url: String): String? {
+    private fun downloadText(url: String): String? = downloadBytes(url)?.toString(Charsets.UTF_8)
+
+    private fun downloadBytes(url: String): ByteArray? {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 10_000
         connection.readTimeout = 30_000
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         return try {
-            if (connection.responseCode == 200) connection.inputStream.bufferedReader().readText()
+            if (connection.responseCode == 200) connection.inputStream.use { it.readSkillBytes(MAX_SKILL_FILE_BYTES) }
             else null
         } finally {
             connection.disconnect()

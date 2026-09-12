@@ -14,9 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardColors
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -48,7 +46,7 @@ import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
 
-private val LocalCardColor = staticCompositionLocalOf { Color.White }
+private val LocalStepHeaderColor = staticCompositionLocalOf { Color.Transparent }
 
 /**
  * 以时间线/步骤卡片的形式展示一组思考过程。
@@ -68,9 +66,7 @@ private val LocalCardColor = staticCompositionLocalOf { Color.White }
 @Composable
 fun <T> ChainOfThought(
     modifier: Modifier = Modifier,
-    cardColors: CardColors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ),
+    cardColors: CardColors? = null,
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
     collapsedAdaptiveWidth: Boolean = false,
@@ -81,12 +77,11 @@ fun <T> ChainOfThought(
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
     CompositionLocalProvider(
-        LocalCardColor provides cardColors.containerColor
+        LocalStepHeaderColor provides me.rerere.rikkahub.ui.components.richtext.richContentColors().toolbar,
     ) {
-        Card(
+        me.rerere.rikkahub.ui.components.richtext.RichSummarySurface(
             modifier = modifier,
-            colors = cardColors,
-            shape = RoundedCornerShape(16.dp),
+            cardColors = cardColors,
         ) {
             Column(
                 modifier = Modifier
@@ -147,20 +142,8 @@ fun <T> ChainOfThought(
                     }
                 }
 
-                val lineColor = MaterialTheme.colorScheme.outlineVariant
                 val scope = remember { ChainOfThoughtScopeImpl() }
-                Box(
-                    modifier = Modifier.drawBehind {
-                        val x = 12.dp.toPx()
-                        val offsetPx = 18.dp.toPx()
-                        drawLine(
-                            color = lineColor,
-                            start = Offset(x, offsetPx),
-                            end = Offset(x, size.height - offsetPx),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
-                ) {
+                Box {
                     Column {
                         visibleSteps.fastForEach { step ->
                             scope.content(step)
@@ -224,6 +207,7 @@ interface ChainOfThoughtScope {
         onClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
         contentVisible: Boolean = expanded,
+        headerModifier: Modifier = Modifier,
         content: (@Composable () -> Unit)? = null,
     )
 }
@@ -248,6 +232,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             expanded = expanded,
             onExpandedChange = { expanded = it },
             contentVisible = expanded,
+            headerModifier = Modifier,
             content = content,
         )
     }
@@ -262,6 +247,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         onClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
+        headerModifier: Modifier,
         content: @Composable (() -> Unit)?
     ) {
         ChainOfThoughtStepContent(
@@ -273,6 +259,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             expanded = expanded,
             onExpandedChange = onExpandedChange,
             contentVisible = contentVisible,
+            headerModifier = headerModifier,
             content = content,
         )
     }
@@ -287,6 +274,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
         contentVisible: Boolean,
+        headerModifier: Modifier,
         content: @Composable (() -> Unit)?
     ) {
         val hasContent = content != null
@@ -324,7 +312,10 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                             Modifier
                         }
                     )
-                    .padding(vertical = 8.dp),
+                    .clip(MaterialTheme.shapes.small)
+                    .background(LocalStepHeaderColor.current)
+                    .then(headerModifier)
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -335,8 +326,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(20.dp)
-                            .background(LocalCardColor.current),
+                            .size(20.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (icon != null) {
@@ -395,6 +385,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
 
             // 展开内容（缩进对齐 label）
             if (contentVisible && hasContent) {
+                val lineColor = MaterialTheme.colorScheme.outlineVariant
                 Box(
                     modifier = Modifier
                         .then(
@@ -404,7 +395,11 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                                 Modifier
                             }
                         )
-                        .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
+                        .drawBehind {
+                            drawLine(lineColor, Offset(16.dp.toPx(), 4.dp.toPx()),
+                                Offset(16.dp.toPx(), size.height), strokeWidth = 1.dp.toPx())
+                        }
+                        .padding(start = 36.dp, top = 8.dp, bottom = 8.dp)
                 ) {
                     content()
                 }
@@ -426,6 +421,7 @@ private fun ChainOfThoughtPreview() {
         val controlled: Boolean = false,
     )
 
+    CompositionLocalProvider(me.rerere.rikkahub.ui.context.LocalSettings provides me.rerere.rikkahub.data.datastore.Settings()) {
     MaterialTheme {
         Scaffold(
             topBar = {
@@ -539,5 +535,6 @@ private fun ChainOfThoughtPreview() {
                 }
             }
         }
+    }
     }
 }

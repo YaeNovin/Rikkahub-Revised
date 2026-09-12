@@ -43,13 +43,13 @@ data class AdvancedAppearanceCapabilities(
         if (supportsBubbleStyle(style)) style else ChatBubbleStyle.OUTLINED
 
     fun limitBackgroundBlur(radius: Float): Float =
-        radius.coerceIn(0f, maxBackgroundBlurRadius)
+        finiteAppearanceValue(radius, 0f, maxBackgroundBlurRadius, 0f)
 
     fun limitLiveBlur(radius: Float): Float =
-        radius.coerceIn(0f, maxLiveBlurRadius)
+        finiteAppearanceValue(radius, 0f, maxLiveBlurRadius, 0f)
 
     fun limitOpticalStrength(strength: Float): Float =
-        (strength.coerceIn(0f, 1f) * opticalStrengthScale).coerceIn(0f, 1f)
+        (finiteAppearanceValue(strength, 0f, 1f, 0f) * opticalStrengthScale).coerceIn(0f, 1f)
 }
 
 fun advancedAppearanceCapabilities(sdkInt: Int): AdvancedAppearanceCapabilities = when {

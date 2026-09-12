@@ -52,7 +52,7 @@ fun SimpleHtmlBlock(
 ) {
     val parseErrorMessage = stringResource(R.string.error_message_html_processing)
     val document = remember(html, parseErrorMessage) {
-        runCatching { Jsoup.parse(html) }.getOrElse {
+        runCatching { Jsoup.parse(protectRawSvg(html)) }.getOrElse {
             Jsoup.parse("<p>${parseErrorMessage.escapeHtml()}</p>")
         }
     }
@@ -93,7 +93,16 @@ private fun RenderNode(
         }
 
         is Element -> {
+            rawSvgSource(node)?.let { svg ->
+                HighlightCodeBlock(svg.source, "svg", Modifier.fillMaxWidth(), completeCodeBlock = svg.complete)
+                return
+            }
+            if (node.normalName() in setOf("p", "a", "span", "strong", "b", "em", "i") && node.containsInlineImage()) {
+                HtmlInlineGroup(listOf(node), onClickCitation = {})
+                return
+            }
             when (node.tagName().lowercase()) {
+                "svg" -> HighlightCodeBlock(node.outerHtml(), "svg", Modifier.fillMaxWidth())
                 "p" -> {
                     val annotatedString = buildAnnotatedStringFromElement(node, onLinkClick)
                     if (annotatedString.text.isNotBlank()) {
@@ -121,6 +130,13 @@ private fun RenderNode(
                         4 -> MaterialTheme.typography.titleLarge
                         5 -> MaterialTheme.typography.titleMedium
                         else -> MaterialTheme.typography.titleSmall
+                    }
+
+                    if (node.containsInlineImage()) {
+                        androidx.compose.material3.ProvideTextStyle(textStyle) {
+                            HtmlInlineGroup(listOf(node), onClickCitation = {}, modifier = Modifier.padding(vertical = 8.dp))
+                        }
+                        return
                     }
 
                     val annotatedString = buildAnnotatedStringFromElement(node, onLinkClick)
@@ -306,10 +322,11 @@ private fun RenderImage(
                 model = src,
                 contentDescription = alt.takeIf { it.isNotEmpty() },
                 respectIntrinsicSize = true,
+                requestedWidthDp = htmlImageDimension(imgElement.attr("width")),
+                requestedHeightDp = htmlImageDimension(imgElement.attr("height")),
                 modifier = Modifier
                     .widthIn(max = 360.dp)
-                    .heightIn(max = 280.dp)
-                    .clip(RoundedCornerShape(8.dp)),
+                    .heightIn(max = 280.dp),
                 contentScale = ContentScale.Fit,
             )
         }

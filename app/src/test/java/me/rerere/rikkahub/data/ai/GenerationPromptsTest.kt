@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryLifecycleState
 import me.rerere.rikkahub.data.model.MemoryType
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -46,17 +47,35 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains("source_conversation_id"))
     }
 
+    @Test
+    fun `memory prompt excludes completed and superseded memories`() {
+        val prompt = buildMemoryPrompt(
+            memories = listOf(
+                memory(1, "Active event", MemoryType.EPISODIC),
+                memory(2, "Completed event", MemoryType.EPISODIC, lifecycleState = MemoryLifecycleState.COMPLETED),
+                memory(3, "Old decision", MemoryType.EPISODIC, lifecycleState = MemoryLifecycleState.SUPERSEDED),
+            ),
+            includeEpisodic = true,
+        )
+
+        assertTrue(prompt.contains("Active event"))
+        assertFalse(prompt.contains("Completed event"))
+        assertFalse(prompt.contains("Old decision"))
+    }
+
     private fun memory(
         id: Int,
         content: String,
         type: MemoryType,
         createdAt: Long = 1L,
         sourceConversationId: String? = null,
+        lifecycleState: MemoryLifecycleState = MemoryLifecycleState.ACTIVE,
     ) = AssistantMemory(
         id = id,
         content = content,
         type = type,
         createdAt = createdAt,
         sourceConversationId = sourceConversationId,
+        lifecycleState = lifecycleState,
     )
 }

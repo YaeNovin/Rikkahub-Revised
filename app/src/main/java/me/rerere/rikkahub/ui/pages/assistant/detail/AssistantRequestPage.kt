@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -21,6 +21,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -35,6 +38,10 @@ fun AssistantRequestPage(id: String) {
         }
     )
     val assistant by vm.assistant.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val model = settings.providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
+    val provider = model?.findProvider(settings.providers)
+    val route = provider?.parameterRequestRouteForModel(model.parameterModelId())
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -51,11 +58,15 @@ fun AssistantRequestPage(id: String) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         AssistantRequestContent(
             innerPadding = innerPadding,
             assistant = assistant,
+            modelId = model?.parameterModelId(),
+            route = route,
+            modelHeaders = model?.customHeaders.orEmpty(),
+            modelBodies = model?.customBodies.orEmpty(),
             onUpdate = { vm.update(it) }
         )
     }
@@ -65,8 +76,20 @@ fun AssistantRequestPage(id: String) {
 internal fun AssistantRequestContent(
     innerPadding: PaddingValues,
     assistant: Assistant,
+    modelId: String?,
+    route: ParameterRequestRoute?,
+    modelHeaders: List<me.rerere.ai.provider.CustomHeader>,
+    modelBodies: List<me.rerere.ai.provider.CustomBody>,
     onUpdate: (Assistant) -> Unit
 ) {
+    val issues = analyzeCustomRequest(
+        assistantHeaders = assistant.customHeaders,
+        assistantBodies = assistant.customBodies,
+        modelHeaders = modelHeaders,
+        modelBodies = modelBodies,
+        route = route,
+    )
+    val presets = customRequestPresets(route, modelId.orEmpty())
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -76,6 +99,30 @@ internal fun AssistantRequestContent(
             .imePadding(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        CustomRequestOverview(
+            modelId = modelId,
+            route = route,
+            issues = issues,
+            presets = presets,
+            existingBodyKeys = assistant.customBodies.mapTo(hashSetOf()) { it.key.trim() },
+            effectiveHeaders = effectiveCustomHeaders(assistant.customHeaders, modelHeaders),
+            effectiveBody = effectiveCustomBody(assistant.customBodies, modelBodies),
+            onImportBody = { imported ->
+                onUpdate(
+                    assistant.copy(
+                        customBodies = importCustomBodyObject(assistant.customBodies, imported)
+                    )
+                )
+            },
+            onApplyPreset = { preset ->
+                onUpdate(
+                    assistant.copy(
+                        customBodies = addCustomRequestPreset(assistant.customBodies, preset)
+                    )
+                )
+            },
+        )
+
         CustomHeaders(
             headers = assistant.customHeaders,
             onUpdate = {

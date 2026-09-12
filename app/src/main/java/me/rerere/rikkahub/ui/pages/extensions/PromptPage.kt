@@ -49,7 +49,7 @@ import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVertica
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -116,6 +116,7 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var totalBudget by remember(settings.lorebookTotalTokenBudget) { mutableStateOf(settings.lorebookTotalTokenBudget.toString()) }
 
     Scaffold(
         topBar = {
@@ -147,7 +148,7 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
             }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         HorizontalPager(
             state = pagerState,
@@ -159,14 +160,18 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                 0 -> ModeInjectionTab(
                     modeInjections = settings.modeInjections,
                     entertainmentMode = entertainmentMode,
-                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
+                    onUpdate = { vm.updateSettings(settings, settings.copy(modeInjections = it)) }
                 )
 
-                1 -> LorebookTab(
+                1 -> Column(Modifier.fillMaxSize()) {
+                    OutlinedTextField(totalBudget, { totalBudget = it }, label = { Text("跨世界书总 Token 预算（0 不限，最高 1000000）") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true)
+                    TextButton(enabled = totalBudget.toIntOrNull() in 0..1000000, onClick = { vm.setLorebookTotalBudget(totalBudget.toInt()) }) { Text("保存总预算 · 按书序分配，两种模式均生效") }
+                    LorebookTab(
                     lorebooks = settings.lorebooks,
                     entertainmentMode = entertainmentMode,
-                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
+                    onUpdate = { vm.updateSettings(settings, settings.copy(lorebooks = it)) }
                 )
+                }
             }
         }
     }
@@ -406,7 +411,7 @@ private fun ModeInjectionCard(
 }
 
 @Composable
-private fun ModeInjectionEditSheet(
+internal fun ModeInjectionEditSheet(
     injection: PromptInjection.ModeInjection,
     entertainmentMode: Boolean,
     onDismiss: () -> Unit,
@@ -629,12 +634,20 @@ private fun LorebookTab(
     }
     val importSuccessMsg = stringResource(R.string.export_import_success)
     val context = LocalContext.current
+    var pendingLorebookImport by remember { mutableStateOf<Lorebook?>(null) }
     val importer = rememberImporter(LorebookSerializer) { result ->
         result.onSuccess { imported ->
-            onUpdate(currentLorebooks + imported)
-            toaster.show(importSuccessMsg)
+            pendingLorebookImport = imported
         }.onFailure { error ->
             toaster.show(context.formatUserFacingError(error))
+        }
+    }
+
+    pendingLorebookImport?.let { imported ->
+        LorebookImportPreview(imported, currentLorebooks, { pendingLorebookImport = null }) { updated ->
+            onUpdate(updated)
+            pendingLorebookImport = null
+            toaster.show(importSuccessMsg)
         }
     }
 
@@ -748,6 +761,7 @@ private fun LorebookCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val nav = me.rerere.rikkahub.ui.context.LocalNavController.current
     val swipeState = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
@@ -810,6 +824,7 @@ private fun LorebookCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    TextButton(onClick = { nav.navigate(me.rerere.rikkahub.Screen.ExtensionItem("LOREBOOK", "lorebook:${book.id}")) }) { Text("详情、模拟与批量操作") }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -852,496 +867,6 @@ private fun LorebookCard(
 }
 
 @Composable
-private fun LorebookEditSheet(
-    book: Lorebook,
-    entertainmentMode: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-    onEdit: (Lorebook) -> Unit
-) {
-    val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
-    val scope = rememberCoroutineScope()
-    val entryEditState = useEditState<PromptInjection.RegexInjection> { edited ->
-        val index = book.entries.indexOfFirst { it.id == edited.id }
-        if (index >= 0) {
-            onEdit(book.copy(entries = book.entries.toMutableList().apply { set(index, edited) }))
-        } else {
-            onEdit(book.copy(entries = book.entries + edited))
-        }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        sheetGesturesEnabled = false,
-        dragHandle = {
-            IconButton(onClick = {
-                scope.launch {
-                    sheetState.hide()
-                    onDismiss()
-                }
-            }) {
-                Icon(HugeIcons.ArrowDown01, null)
-            }
-        }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.95f)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.prompt_page_edit_lorebook),
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                OutlinedTextField(
-                    value = book.name,
-                    onValueChange = { onEdit(book.copy(name = it)) },
-                    label = { Text(stringResource(R.string.prompt_page_name)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = book.description,
-                    onValueChange = { onEdit(book.copy(description = it)) },
-                    label = { Text(stringResource(R.string.prompt_page_description)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (entertainmentMode) {
-                    OutlinedTextField(
-                        value = book.tokenBudget.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.let { onEdit(book.copy(tokenBudget = it.coerceAtLeast(0))) }
-                        },
-                        label = { Text(stringResource(R.string.prompt_page_token_budget)) },
-                        supportingText = { Text(stringResource(R.string.prompt_page_token_budget_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                    )
-                    Text(
-                        stringResource(R.string.prompt_page_overflow_strategy),
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Select(
-                        options = LorebookOverflowStrategy.entries,
-                        selectedOption = book.overflowStrategy,
-                        onOptionSelected = { onEdit(book.copy(overflowStrategy = it)) },
-                        optionToString = { getOverflowStrategyLabel(it) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                FormItem(
-                    label = { Text(stringResource(R.string.prompt_page_enabled)) },
-                    tail = {
-                        Switch(
-                            checked = book.enabled,
-                            onCheckedChange = { onEdit(book.copy(enabled = it)) }
-                        )
-                    }
-                )
-
-                // 条目列表
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        stringResource(R.string.prompt_page_entries_format, book.entries.size),
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    IconButton(onClick = {
-                        entryEditState.open(PromptInjection.RegexInjection())
-                    }) {
-                        Icon(HugeIcons.Add01, stringResource(R.string.prompt_page_add_entry))
-                    }
-                }
-
-                book.entries.forEach { entry ->
-                    RegexInjectionEntryCard(
-                        entry = entry,
-                        onEdit = { entryEditState.open(entry) },
-                        onDelete = {
-                            onEdit(book.copy(entries = book.entries - entry))
-                        }
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-            ) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.prompt_page_cancel))
-                }
-                TextButton(onClick = onConfirm) {
-                    Text(stringResource(R.string.prompt_page_confirm))
-                }
-            }
-        }
-    }
-
-    if (entryEditState.isEditing) {
-        entryEditState.currentState?.let { state ->
-            RegexInjectionEditDialog(
-                entry = state,
-                entertainmentMode = entertainmentMode,
-                onDismiss = { entryEditState.dismiss() },
-                onConfirm = { entryEditState.confirm() },
-                onEdit = { entryEditState.currentState = it }
-            )
-        }
-    }
-}
-
-@Composable
-private fun RegexInjectionEntryCard(
-    entry: PromptInjection.RegexInjection,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = entry.name.ifEmpty { stringResource(R.string.prompt_page_unnamed_entry) },
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                if (entry.keywords.isNotEmpty()) {
-                    Text(
-                        text = stringResource(R.string.prompt_page_keywords_format, entry.keywords.joinToString(", ")),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (!entry.enabled) {
-                        Tag(type = TagType.WARNING) {
-                            Text(stringResource(R.string.prompt_page_disabled))
-                        }
-                    }
-                    if (entry.triggerProbability < 100) {
-                        Tag(type = TagType.INFO) {
-                            Text("${entry.triggerProbability}%")
-                        }
-                    }
-                    if (entry.stickyTurns > 1) {
-                        Tag(type = TagType.DEFAULT) {
-                            Text(stringResource(R.string.prompt_page_sticky_turns_value, entry.stickyTurns))
-                        }
-                    }
-                }
-            }
-            IconButton(onClick = onEdit) {
-                Icon(HugeIcons.Tools, stringResource(R.string.prompt_page_edit))
-            }
-            IconButton(onClick = onDelete) {
-                Icon(HugeIcons.Delete01, stringResource(R.string.prompt_page_delete))
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun RegexInjectionEditDialog(
-    entry: PromptInjection.RegexInjection,
-    entertainmentMode: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-    onEdit: (PromptInjection.RegexInjection) -> Unit
-) {
-    var newKeyword by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.prompt_page_edit_entry)) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedTextField(
-                    value = entry.name,
-                    onValueChange = { onEdit(entry.copy(name = it)) },
-                    label = { Text(stringResource(R.string.prompt_page_name)) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                FormItem(
-                    label = { Text(stringResource(R.string.prompt_page_enabled)) },
-                    tail = {
-                        Switch(
-                            checked = entry.enabled,
-                            onCheckedChange = { onEdit(entry.copy(enabled = it)) }
-                        )
-                    }
-                )
-
-                OutlinedTextField(
-                    value = entry.priority.toString(),
-                    onValueChange = {
-                        it.toIntOrNull()?.let { p -> onEdit(entry.copy(priority = p)) }
-                    },
-                    label = { Text(stringResource(R.string.prompt_page_priority_label)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-
-                Text(
-                    stringResource(R.string.prompt_page_injection_position),
-                    style = MaterialTheme.typography.titleSmall
-                )
-                InjectionPositionSelector(
-                    position = entry.position,
-                    onSelect = { onEdit(entry.copy(position = it)) }
-                )
-
-                AnimatedVisibility(visible = entry.position == InjectionPosition.AT_DEPTH) {
-                    OutlinedTextField(
-                        value = entry.injectDepth.toString(),
-                        onValueChange = {
-                            it.toIntOrNull()?.let { d -> onEdit(entry.copy(injectDepth = d)) }
-                        },
-                        label = { Text(stringResource(R.string.prompt_page_inject_depth)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
-                }
-
-                // 关键词
-                Text(stringResource(R.string.prompt_page_keywords_label), style = MaterialTheme.typography.titleSmall)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    entry.keywords.forEach { keyword ->
-                        InputChip(
-                            selected = false,
-                            onClick = {},
-                            label = { Text(keyword) },
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = {
-                                        onEdit(entry.copy(keywords = entry.keywords - keyword))
-                                    },
-                                    modifier = Modifier.size(16.dp)
-                                ) {
-                                    Icon(HugeIcons.Cancel01, null, modifier = Modifier.size(12.dp))
-                                }
-                            }
-                        )
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = newKeyword,
-                        onValueChange = { newKeyword = it },
-                        label = { Text(stringResource(R.string.prompt_page_new_keyword)) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    IconButton(
-                        onClick = {
-                            if (newKeyword.isNotBlank()) {
-                                onEdit(entry.copy(keywords = entry.keywords + newKeyword.trim()))
-                                newKeyword = ""
-                            }
-                        }
-                    ) {
-                        Icon(HugeIcons.Add01, stringResource(R.string.prompt_page_add))
-                    }
-                }
-
-                if (entertainmentMode) {
-                    OutlinedTextField(
-                        value = entry.keywordExpression,
-                        onValueChange = { onEdit(entry.copy(keywordExpression = it)) },
-                        label = { Text(stringResource(R.string.prompt_page_keyword_expression)) },
-                        supportingText = { Text(stringResource(R.string.prompt_page_keyword_expression_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                    )
-                    OutlinedTextField(
-                        value = entry.settingKeys.joinToString(", "),
-                        onValueChange = { value ->
-                            onEdit(
-                                entry.copy(
-                                    settingKeys = value.split(',', '，')
-                                        .map(String::trim)
-                                        .filter(String::isNotEmpty)
-                                        .distinctBy(String::lowercase)
-                                )
-                            )
-                        },
-                        label = { Text(stringResource(R.string.prompt_page_setting_keys)) },
-                        supportingText = { Text(stringResource(R.string.prompt_page_setting_keys_hint)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = entry.triggerProbability.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.let {
-                                onEdit(entry.copy(triggerProbability = it.coerceIn(0, 100)))
-                            }
-                        },
-                        label = { Text(stringResource(R.string.prompt_page_trigger_probability)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = entry.stickyTurns.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.let {
-                                onEdit(entry.copy(stickyTurns = it.coerceAtLeast(1)))
-                            }
-                        },
-                        label = { Text(stringResource(R.string.prompt_page_sticky_turns)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = entry.cooldownTurns.toString(),
-                        onValueChange = { value ->
-                            value.toIntOrNull()?.let {
-                                onEdit(entry.copy(cooldownTurns = it.coerceAtLeast(0)))
-                            }
-                        },
-                        label = { Text(stringResource(R.string.prompt_page_cooldown_turns)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                    )
-                }
-
-                FormItem(
-                    label = { Text(stringResource(R.string.prompt_page_use_regex)) },
-                    tail = {
-                        Switch(
-                            checked = entry.useRegex,
-                            onCheckedChange = { onEdit(entry.copy(useRegex = it)) }
-                        )
-                    }
-                )
-
-                FormItem(
-                    label = { Text(stringResource(R.string.prompt_page_case_sensitive)) },
-                    tail = {
-                        Switch(
-                            checked = entry.caseSensitive,
-                            onCheckedChange = { onEdit(entry.copy(caseSensitive = it)) }
-                        )
-                    }
-                )
-
-                FormItem(
-                    label = { Text(stringResource(R.string.prompt_page_constant_active)) },
-                    description = { Text(stringResource(R.string.prompt_page_constant_active_desc)) },
-                    tail = {
-                        Switch(
-                            checked = entry.constantActive,
-                            onCheckedChange = { onEdit(entry.copy(constantActive = it)) }
-                        )
-                    }
-                )
-
-                OutlinedTextField(
-                    value = entry.scanDepth.toString(),
-                    onValueChange = {
-                        it.toIntOrNull()?.let { d -> onEdit(entry.copy(scanDepth = d)) }
-                    },
-                    label = { Text(stringResource(R.string.prompt_page_scan_depth)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-
-                AnimatedVisibility(visible = entry.position.usesStandaloneMessage()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            stringResource(R.string.prompt_page_injection_role),
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        InjectionRoleSelector(
-                            role = entry.role,
-                            onSelect = { onEdit(entry.copy(role = it)) }
-                        )
-                    }
-                }
-
-                OutlinedTextField(
-                    value = entry.content,
-                    onValueChange = { onEdit(entry.copy(content = it)) },
-                    label = { Text(stringResource(R.string.prompt_page_injection_content)) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(150.dp),
-                    minLines = 4
-                )
-            }
-        },
-        confirmButton = {
-            val canSave = entry.keywords.isNotEmpty() ||
-                (entertainmentMode && entry.keywordExpression.isNotBlank()) ||
-                entry.constantActive
-            TextButton(
-                onClick = onConfirm,
-                enabled = canSave
-            ) {
-                Text(stringResource(R.string.prompt_page_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.prompt_page_cancel))
-            }
-        }
-    )
-}
-
-@Composable
-private fun getOverflowStrategyLabel(strategy: LorebookOverflowStrategy): String = when (strategy) {
-    LorebookOverflowStrategy.DROP_LOW_PRIORITY ->
-        stringResource(R.string.prompt_page_overflow_drop_low_priority)
-    LorebookOverflowStrategy.TRUNCATE_LAST ->
-        stringResource(R.string.prompt_page_overflow_truncate_last)
-    LorebookOverflowStrategy.SKIP_BOOK ->
-        stringResource(R.string.prompt_page_overflow_skip_book)
+internal fun LorebookEditSheet(book: Lorebook, entertainmentMode: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit, onEdit: (Lorebook) -> Unit) {
+    LorebookEditorSheet(book, entertainmentMode, onDismiss, onConfirm, onEdit)
 }

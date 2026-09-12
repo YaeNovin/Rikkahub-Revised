@@ -17,7 +17,7 @@ import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -82,6 +82,7 @@ fun AssistantGeminiPage(id: String) {
     val parameterModelId = model?.parameterModelId().orEmpty()
     val isGemini3 = model != null && ModelRegistry.GEMINI_3_SERIES.match(parameterModelId)
     val isGemini37Flash = model != null && ModelRegistry.GEMINI_3_7_FLASH.match(parameterModelId)
+    val isGemini38Flash = model != null && ModelRegistry.GEMINI_3_8_FLASH.match(parameterModelId)
     val googleProvider = provider as? ProviderSetting.Google
     val openAIProvider = provider as? ProviderSetting.OpenAI
     val openAIChatCompatible = openAIProvider != null && !openAIProvider.useResponseApi
@@ -108,7 +109,7 @@ fun AssistantGeminiPage(id: String) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         AssistantGeminiContent(
             innerPadding = innerPadding,
@@ -117,6 +118,7 @@ fun AssistantGeminiPage(id: String) {
             nativeProtocol = nativeProtocol,
             supportsMediaResolution = nativeProtocol && isGemini3,
             isGemini37Flash = isGemini37Flash,
+            isGemini38Flash = isGemini38Flash,
             route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
@@ -132,6 +134,7 @@ internal fun AssistantGeminiContent(
     nativeProtocol: Boolean,
     supportsMediaResolution: Boolean,
     isGemini37Flash: Boolean,
+    isGemini38Flash: Boolean,
     route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
@@ -179,6 +182,9 @@ internal fun AssistantGeminiContent(
                     }
                     if (isGemini37Flash) {
                         Text(stringResource(R.string.assistant_gemini_37_thinking_desc))
+                    }
+                    if (isGemini38Flash) {
+                        Text(stringResource(R.string.assistant_gemini_38_thinking_desc))
                     }
                 },
             )
@@ -245,12 +251,17 @@ internal fun AssistantGeminiContent(
                 GeminiDialogItem(
                     title = stringResource(R.string.assistant_gemini_penalties_title),
                     description = stringResource(R.string.assistant_gemini_penalties_desc),
+                    warning = if (isGemini38Flash) {
+                        stringResource(R.string.assistant_gemini_38_penalties_unsupported)
+                    } else {
+                        null
+                    },
                     value = stringResource(
                         R.string.assistant_gemini_penalties_summary,
                         options.presencePenalty?.toString() ?: automatic,
                         options.frequencyPenalty?.toString() ?: automatic,
                     ),
-                    enabled = enabled,
+                    enabled = enabled && !isGemini38Flash,
                     onClick = { activeDialog = GeminiDialogType.REPETITION_PENALTIES },
                 )
             }
@@ -306,6 +317,7 @@ private fun GeminiDialogItem(
     description: String,
     value: String,
     enabled: Boolean,
+    warning: String? = null,
     onClick: () -> Unit,
 ) {
     Box(
@@ -316,7 +328,10 @@ private fun GeminiDialogItem(
         FormItem(
             modifier = Modifier.padding(12.dp),
             label = { Text(title) },
-            description = { Text(description) },
+            description = {
+                Text(description)
+                warning?.let { ParameterWarningText(it) }
+            },
             tail = {
                 Icon(imageVector = Lucide.ChevronRight, contentDescription = null)
             },

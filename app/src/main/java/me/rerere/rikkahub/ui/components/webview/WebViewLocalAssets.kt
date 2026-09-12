@@ -36,7 +36,10 @@ internal object WebViewLocalAssets {
                 if (mimeType.startsWith("text/") || mimeType.endsWith("json") || mimeType.endsWith("xml")) "UTF-8" else null,
                 context.assets.open(assetPath)
             )
-        }.getOrNull()
+        }.getOrElse {
+            WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(),
+                "Local rendering resource unavailable".byteInputStream())
+        }
     }
 
     private fun mimeTypeOf(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {

@@ -101,6 +101,14 @@ internal fun normalizeCodeFenceLanguage(language: String): String = language
     .removePrefix(".")
     .substringBefore(' ')
     .substringBefore(',')
+    .substringBefore(';')
+    .let {
+        when (it) {
+            "application/json", "text/json" -> "json"
+            "application/geo+json", "application/vnd.geo+json", "geo-json" -> "geojson"
+            else -> it
+        }
+    }
 
 internal fun isDiffCodeFenceLanguage(language: String): Boolean =
     normalizeCodeFenceLanguage(language) in DIFF_LANGUAGES
@@ -161,15 +169,21 @@ fun HighlightCodeBlock(
     val context = LocalContext.current
     val settings = LocalSettings.current
     val richContent = richContentColors()
-    val colorScheme = MaterialTheme.colorScheme
-    val normalizedLanguage = remember(language) { normalizeCodeFenceLanguage(language) }
-    val canInlinePreview = completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES
-    val canRenderMermaid = completeCodeBlock && normalizedLanguage == "mermaid"
+    val colorScheme = me.rerere.rikkahub.ui.theme.LocalBackgroundBaseColorScheme.current ?: MaterialTheme.colorScheme
+    val streaming = LocalRichTextStreaming.current
+    val renderComplete = remember(language, code, completeCodeBlock, streaming) {
+        completeCodeBlock || canRenderFinishedJsonFence(language, code, streaming)
+    }
+    val normalizedLanguage = remember(language, code, renderComplete) {
+        if (renderComplete) resolveDiagramLanguage(language, code) else normalizeCodeFenceLanguage(language)
+    }
+    val canInlinePreview = renderComplete && normalizedLanguage in PREVIEWABLE_LANGUAGES
+    val canRenderMermaid = renderComplete && normalizedLanguage == "mermaid"
     val canRenderDiff = shouldRenderDiffCodeBlock(normalizedLanguage, code)
     val interactiveRenderer = remember(normalizedLanguage) {
         InteractiveCodeRenderer.fromLanguage(normalizedLanguage)
     }
-    val canRenderInteractive = completeCodeBlock &&
+    val canRenderInteractive = renderComplete &&
         interactiveRenderer != null &&
         canRenderInteractiveCodeBlock(normalizedLanguage, code)
     val canShowVisualPreview = canInlinePreview || canRenderMermaid || canRenderInteractive
@@ -202,11 +216,11 @@ fun HighlightCodeBlock(
             else -> null
         }
     }
-    var previewMode by remember(canShowVisualPreview, code, normalizedLanguage) {
+    var previewMode by androidx.compose.runtime.saveable.rememberSaveable(canShowVisualPreview, normalizedLanguage) {
         mutableStateOf(canShowVisualPreview)
     }
 
-    var isExpanded by remember(settings.displaySetting.codeBlockAutoCollapse) {
+    var isExpanded by androidx.compose.runtime.saveable.rememberSaveable(settings.displaySetting.codeBlockAutoCollapse) {
         mutableStateOf(!settings.displaySetting.codeBlockAutoCollapse)
     }
     val autoWrap = settings.displaySetting.codeBlockAutoWrap
@@ -230,6 +244,32 @@ fun HighlightCodeBlock(
         }
     }
 
+    if (previewMode && canShowVisualPreview) {
+        var previewView by remember { androidx.compose.runtime.mutableStateOf<android.webkit.WebView?>(null) }
+        Column(modifier.fillMaxWidth()
+            .border(1.dp, richContent.border, MaterialTheme.shapes.large)
+            .clip(MaterialTheme.shapes.large)
+            .background(richContent.container)) {
+            Box(Modifier.fillMaxWidth().background(richContent.toolbar).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                HighlightCodeActions(
+                    language = language, scope = scope, clipboardManager = clipboardManager,
+                    code = code, createDocumentLauncher = createDocumentLauncher, navController = navController,
+                    completeCodeBlock = renderComplete, previewMode = true, canTogglePreview = true,
+                    fullScreenPreviewHtml = null,
+                    onTogglePreviewMode = { previewMode = false },
+                )
+            }
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                when {
+                    canRenderMermaid -> Mermaid(code, Modifier.fillMaxWidth(), showFullScreenAction = true)
+                    canRenderInteractive -> InteractiveCodeBlock(requireNotNull(interactiveRenderer), code, onViewCreated = { previewView = it })
+                    else -> CodeBlockPreview(code, normalizedLanguage, Modifier.fillMaxWidth().height(200.dp), onViewCreated = { previewView = it })
+                }
+                if (!canRenderMermaid) GraphPreviewActions(fullScreenPreviewHtml.orEmpty(), previewView)
+            }
+        }
+        return
+    }
     Column(
         modifier = modifier
             .border(1.dp, richContent.border, MaterialTheme.shapes.large)
@@ -249,7 +289,7 @@ fun HighlightCodeBlock(
                 code = code,
                 createDocumentLauncher = createDocumentLauncher,
                 navController = navController,
-                completeCodeBlock = completeCodeBlock,
+                completeCodeBlock = renderComplete,
                 previewMode = previewMode,
                 canTogglePreview = canShowVisualPreview,
                 fullScreenPreviewHtml = fullScreenPreviewHtml,
@@ -503,6 +543,7 @@ private fun HighlightCodeActions(
     fullScreenPreviewHtml: String? = null,
     onTogglePreviewMode: () -> Unit = {},
 ) {
+    val openPreview = me.rerere.rikkahub.ui.components.webview.rememberWebPreviewLauncher()
     val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -603,11 +644,7 @@ private fun HighlightCodeActions(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .onClick {
-                            val contentId = WebViewContentCache.store(
-                                context.cacheDir,
-                                fullScreenPreviewHtml,
-                            )
-                            navController.navigate(Screen.WebView(contentId = contentId))
+                            openPreview { fullScreenPreviewHtml }
                         }
                         .padding(4.dp)
                         .size(iconSize)
@@ -622,9 +659,10 @@ private fun CodeBlockPreview(
     code: String,
     language: String,
     modifier: Modifier = Modifier,
+    onViewCreated: (android.webkit.WebView) -> Unit = {},
 ) {
     val state = rememberWebViewState(
-        data = buildCodePreviewHtml(code = code, language = language),
+        data = remember(code, language) { buildCodePreviewHtml(code = code, language = language) },
         baseUrl = "https://rikkahub.local",
         mimeType = "text/html",
         settings = {
@@ -637,6 +675,7 @@ private fun CodeBlockPreview(
 
     WebView(
         state = state,
+        onCreated = onViewCreated,
         deferUntilVisible = !me.rerere.rikkahub.ui.components.ui.LocalExportContext.current,
         preferParentVerticalScroll = true,
         transparentBackground = true,
@@ -645,25 +684,20 @@ private fun CodeBlockPreview(
 }
 
 internal fun extractSvgAspectRatio(code: String): Float? {
-    val viewBox = Regex(
-        pattern = """\bviewBox\s*=\s*["']([^"']+)["']""",
-        option = RegexOption.IGNORE_CASE,
-    ).find(code)?.groupValues?.getOrNull(1)
-        ?.trim()
-        ?.split(Regex("[,\\s]+"))
-        ?.mapNotNull(String::toFloatOrNull)
-    if (viewBox != null && viewBox.size == 4 && viewBox[2] > 0f && viewBox[3] > 0f) {
-        return viewBox[2] / viewBox[3]
+    // Read dimensions from the root SVG only; nested rect/image sizes are unrelated.
+    val svg = Jsoup.parse(code).selectFirst("svg") ?: return null
+    val parts = svg.attr("viewBox").trim().split(Regex("[,\\s]+"))
+    val numbers = parts.map { it.toFloatOrNull() }
+    if (numbers.size == 4 && numbers.all { it != null && it.isFinite() }) {
+        val width = requireNotNull(numbers[2])
+        val height = requireNotNull(numbers[3])
+        if (width > 0 && height > 0) return (width / height).takeIf { it.isFinite() && it > 0 }
     }
-
-    fun dimension(name: String): Float? = Regex(
-        pattern = """\b$name\s*=\s*["']\s*([0-9]+(?:\.[0-9]+)?)(?:px)?\s*["']""",
-        option = RegexOption.IGNORE_CASE,
-    ).find(code)?.groupValues?.getOrNull(1)?.toFloatOrNull()
-
+    fun dimension(name: String): Float? = svg.attr(name).trim().removeSuffix("px")
+        .toFloatOrNull()?.takeIf { it.isFinite() && it > 0 }
     val width = dimension("width") ?: return null
     val height = dimension("height") ?: return null
-    return if (width > 0f && height > 0f) width / height else null
+    return (width / height).takeIf { it.isFinite() && it > 0 }
 }
 
 internal fun buildCodePreviewHtml(code: String, language: String): String {
@@ -687,7 +721,7 @@ internal fun buildCodePreviewHtml(code: String, language: String): String {
                         justify-content: center;
                         align-items: center;
                     }
-                    svg {
+                    body > svg {
                         display: block;
                         max-width: 100%;
                         height: auto;
@@ -699,34 +733,38 @@ internal fun buildCodePreviewHtml(code: String, language: String): String {
                 $code
                 <script>
                     (function() {
-                        const svg = document.querySelector('svg');
+                        const svg = document.querySelector('body > svg');
                         if (!svg) return;
-                        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                        window.__rikkaRenderStatus = 'loading';
+                        if (!svg.hasAttribute('preserveAspectRatio')) svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
                         requestAnimationFrame(function() {
                             try {
-                                const bounds = svg.getBBox();
-                                if (!(bounds.width > 0 && bounds.height > 0)) return;
                                 const current = svg.viewBox && svg.viewBox.baseVal;
                                 const hasViewBox = current && current.width > 0 && current.height > 0;
-                                const minX = hasViewBox ? Math.min(current.x, bounds.x) : bounds.x;
-                                const minY = hasViewBox ? Math.min(current.y, bounds.y) : bounds.y;
-                                const maxX = hasViewBox
-                                    ? Math.max(current.x + current.width, bounds.x + bounds.width)
-                                    : bounds.x + bounds.width;
-                                const maxY = hasViewBox
-                                    ? Math.max(current.y + current.height, bounds.y + bounds.height)
-                                    : bounds.y + bounds.height;
-                                const padding = Math.max(2, Math.min(maxX - minX, maxY - minY) * 0.01);
-                                svg.setAttribute(
-                                    'viewBox',
-                                    [minX - padding, minY - padding, maxX - minX + padding * 2, maxY - minY + padding * 2].join(' ')
-                                );
+                                // Preserve author coordinates, clipping and filter regions.
+                                // Nested SVG elements keep their own viewport entirely.
+                                if (!hasViewBox) {
+                                    const dimension = function(name) {
+                                        const value = (svg.getAttribute(name) || '').trim();
+                                        return /^(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$/i.test(value) ? parseFloat(value) : 0;
+                                    };
+                                    const width = dimension('width'), height = dimension('height');
+                                    if (width > 0 && height > 0) svg.setAttribute('viewBox', [0, 0, width, height].join(' '));
+                                    else {
+                                        const bounds = svg.getBBox();
+                                        if (!(bounds.width > 0 && bounds.height > 0)) { window.__rikkaRenderStatus = 'ready'; return; }
+                                        const padding = Math.max(2, Math.min(bounds.width, bounds.height) * .01);
+                                        svg.setAttribute('viewBox', [bounds.x - padding, bounds.y - padding, bounds.width + 2 * padding, bounds.height + 2 * padding].join(' '));
+                                    }
+                                }
                                 svg.removeAttribute('width');
                                 svg.removeAttribute('height');
                                 svg.style.width = '100%';
                                 svg.style.height = 'auto';
+                                window.__rikkaRenderStatus = 'ready';
                             } catch (error) {
                                 console.warn('Unable to normalize SVG viewport', error);
+                                window.__rikkaRenderStatus = 'error';
                             }
                         });
                     })();
@@ -739,6 +777,8 @@ internal fun buildCodePreviewHtml(code: String, language: String): String {
 
 private fun buildResponsiveHtmlPreview(code: String): String {
     val document = Jsoup.parse(code)
+    document.outputSettings().prettyPrint(false)
+    installHtmlPreviewDependencies(document)
     if (document.head().selectFirst("meta[name=viewport]") == null) {
         document.head().appendElement("meta")
             .attr("name", "viewport")
@@ -746,13 +786,16 @@ private fun buildResponsiveHtmlPreview(code: String): String {
     }
     document.head().appendElement("style")
         .attr("id", "rikkahub-responsive-preview")
-        .appendText(
+        .append(
             """
                 html, body { max-width: 100%; min-height: 100%; margin: 0; overflow: auto; background: transparent; }
-                img, svg, video, canvas, iframe { max-width: 100%; box-sizing: border-box; }
-                img, svg, video, canvas { display: block; margin-left: auto; margin-right: auto; }
-                img, svg, video { height: auto; }
-                svg { overflow: visible; }
+                img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow), :not(.leaflet-pane) > svg, video, canvas, iframe { max-width: 100%; box-sizing: border-box; }
+                img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow), :not(.leaflet-pane) > svg, video, canvas { display: block; margin-left: auto; margin-right: auto; }
+                img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow), :not(.leaflet-pane) > svg, video { height: auto; }
+                :not(.leaflet-pane) > svg { overflow: visible; }
+                /* Tile positioning and overlay viewports belong to Leaflet, not media fitting. */
+                .leaflet-container img.leaflet-tile { max-width: none !important; max-height: none !important; margin: 0; border-radius: 0; }
+                .leaflet-container .leaflet-overlay-pane svg { max-width: none !important; margin: 0; }
             """.trimIndent(),
         )
     return document.outerHtml()

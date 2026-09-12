@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -16,12 +17,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -36,12 +37,17 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.transformers.PromptVariableCatalog
+import me.rerere.rikkahub.data.ai.transformers.PromptVariableResolutionContext
 import me.rerere.rikkahub.data.ai.transformers.PromptVariableScope
+import me.rerere.rikkahub.data.ai.transformers.resolvePromptVariables
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.datastore.resolveBackgroundChatModel
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.PromptVariableReference
 import me.rerere.rikkahub.utils.plus
+import me.rerere.rikkahub.utils.applyPlaceholders
 
 @Composable
 internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPadding: PaddingValues) {
@@ -55,8 +61,9 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 title = stringResource(R.string.setting_model_page_prompt_translation),
                 variableScope = PromptVariableScope.TRANSLATION_PROMPT,
                 promptValue = settings.translatePrompt,
-                onPromptChange = { vm.updateSettings(settings.copy(translatePrompt = it)) },
-                onResetPrompt = { vm.updateSettings(settings.copy(translatePrompt = DEFAULT_TRANSLATION_PROMPT)) },
+                defaultPrompt = DEFAULT_TRANSLATION_PROMPT,
+                settings = settings,
+                onSavePrompt = { prompt -> vm.updateSettings { it.copy(translatePrompt = prompt) } },
                 reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
                 onUpdateReasoningLevel = { vm.updateSettings(settings.copy(translateThinkingBudget = it.budgetTokens)) },
             )
@@ -66,8 +73,9 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 title = stringResource(R.string.setting_model_page_prompt_title),
                 variableScope = PromptVariableScope.TITLE_PROMPT,
                 promptValue = settings.titlePrompt,
-                onPromptChange = { vm.updateSettings(settings.copy(titlePrompt = it)) },
-                onResetPrompt = { vm.updateSettings(settings.copy(titlePrompt = DEFAULT_TITLE_PROMPT)) },
+                defaultPrompt = DEFAULT_TITLE_PROMPT,
+                settings = settings,
+                onSavePrompt = { prompt -> vm.updateSettings { it.copy(titlePrompt = prompt) } },
             )
         }
         item {
@@ -75,8 +83,9 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 title = stringResource(R.string.setting_model_page_prompt_suggestion),
                 variableScope = PromptVariableScope.SUGGESTION_PROMPT,
                 promptValue = settings.suggestionPrompt,
-                onPromptChange = { vm.updateSettings(settings.copy(suggestionPrompt = it)) },
-                onResetPrompt = { vm.updateSettings(settings.copy(suggestionPrompt = DEFAULT_SUGGESTION_PROMPT)) },
+                defaultPrompt = DEFAULT_SUGGESTION_PROMPT,
+                settings = settings,
+                onSavePrompt = { prompt -> vm.updateSettings { it.copy(suggestionPrompt = prompt) } },
             )
         }
         item {
@@ -84,8 +93,9 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 title = stringResource(R.string.setting_model_page_prompt_ocr),
                 variableScope = null,
                 promptValue = settings.ocrPrompt,
-                onPromptChange = { vm.updateSettings(settings.copy(ocrPrompt = it)) },
-                onResetPrompt = { vm.updateSettings(settings.copy(ocrPrompt = DEFAULT_OCR_PROMPT)) },
+                defaultPrompt = DEFAULT_OCR_PROMPT,
+                settings = settings,
+                onSavePrompt = { prompt -> vm.updateSettings { it.copy(ocrPrompt = prompt) } },
             )
         }
         item {
@@ -93,8 +103,9 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 title = stringResource(R.string.setting_model_page_prompt_compress),
                 variableScope = PromptVariableScope.COMPRESS_PROMPT,
                 promptValue = settings.compressPrompt,
-                onPromptChange = { vm.updateSettings(settings.copy(compressPrompt = it)) },
-                onResetPrompt = { vm.updateSettings(settings.copy(compressPrompt = DEFAULT_COMPRESS_PROMPT)) },
+                defaultPrompt = DEFAULT_COMPRESS_PROMPT,
+                settings = settings,
+                onSavePrompt = { prompt -> vm.updateSettings { it.copy(compressPrompt = prompt) } },
             )
         }
     }
@@ -105,8 +116,9 @@ private fun PromptSettingItem(
     title: String,
     variableScope: PromptVariableScope?,
     promptValue: String,
-    onPromptChange: (String) -> Unit,
-    onResetPrompt: () -> Unit,
+    defaultPrompt: String,
+    settings: Settings,
+    onSavePrompt: (String) -> Unit,
     reasoningLevel: ReasoningLevel? = null,
     onUpdateReasoningLevel: ((ReasoningLevel) -> Unit)? = null,
 ) {
@@ -150,7 +162,7 @@ private fun PromptSettingItem(
     }
 
     if (showEditor) {
-        var editorValue by remember(title) {
+        var editorValue by remember(title, showEditor) {
             mutableStateOf(
                 TextFieldValue(
                     text = promptValue,
@@ -158,14 +170,14 @@ private fun PromptSettingItem(
                 )
             )
         }
-        LaunchedEffect(title, promptValue) {
-            if (editorValue.text != promptValue) {
-                editorValue = TextFieldValue(
-                    text = promptValue,
-                    selection = TextRange(promptValue.length),
-                )
-            }
-        }
+        val requiredVariable = variableScope.requiredContentVariable()
+        val missingRequiredVariable = requiredVariable != null &&
+            !editorValue.text.containsPromptVariable(requiredVariable)
+        val preview = expandedPromptPreview(
+            prompt = editorValue.text,
+            scope = variableScope,
+            settings = settings,
+        )
         ModalBottomSheet(
             onDismissRequest = { showEditor = false },
         ) {
@@ -189,13 +201,24 @@ private fun PromptSettingItem(
                 }
                 OutlinedTextField(
                     value = editorValue,
-                    onValueChange = {
-                        editorValue = it
-                        onPromptChange(it.text)
-                    },
+                    onValueChange = { editorValue = it },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 15,
+                    isError = editorValue.text.isBlank(),
+                    supportingText = if (editorValue.text.isBlank()) {
+                        { Text(stringResource(R.string.setting_model_page_prompt_empty_error)) }
+                    } else null,
                 )
+                if (missingRequiredVariable) {
+                    Text(
+                        text = stringResource(
+                            R.string.setting_model_page_prompt_required_variable,
+                            "{$requiredVariable}",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
                 variableScope?.let { scope ->
                     PromptVariableReference(
                         scope = scope,
@@ -206,14 +229,89 @@ private fun PromptSettingItem(
                             val text = editorValue.text.replaceRange(start, end, token)
                             val cursor = start + token.length
                             editorValue = TextFieldValue(text, TextRange(cursor))
-                            onPromptChange(text)
                         },
                     )
                 }
-                TextButton(onClick = onResetPrompt) {
+                Text(
+                    text = stringResource(R.string.setting_model_page_prompt_preview),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Text(
+                    text = preview,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 8,
+                )
+                TextButton(
+                    onClick = {
+                        editorValue = TextFieldValue(
+                            text = defaultPrompt,
+                            selection = TextRange(defaultPrompt.length),
+                        )
+                    }
+                ) {
                     Text(stringResource(R.string.setting_model_page_reset_to_default))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = { showEditor = false }) {
+                        Text(stringResource(R.string.setting_model_page_prompt_cancel))
+                    }
+                    TextButton(
+                        onClick = {
+                            onSavePrompt(editorValue.text)
+                            showEditor = false
+                        },
+                        enabled = editorValue.text.isNotBlank(),
+                    ) {
+                        Text(stringResource(R.string.setting_model_page_prompt_save))
+                    }
                 }
             }
         }
     }
+}
+
+private fun PromptVariableScope?.requiredContentVariable(): String? = when (this) {
+    PromptVariableScope.TITLE_PROMPT,
+    PromptVariableScope.SUGGESTION_PROMPT,
+    PromptVariableScope.COMPRESS_PROMPT -> "content"
+    PromptVariableScope.TRANSLATION_PROMPT -> "source_text"
+    else -> null
+}
+
+private fun String.containsPromptVariable(key: String): Boolean =
+    Regex("\\{\\{?\\s*${Regex.escape(key)}\\s*}}?", RegexOption.IGNORE_CASE).containsMatchIn(this)
+
+@Composable
+private fun expandedPromptPreview(
+    prompt: String,
+    scope: PromptVariableScope?,
+    settings: Settings,
+): String {
+    val context = LocalContext.current
+    val model = when (scope) {
+        PromptVariableScope.TITLE_PROMPT -> settings.resolveBackgroundChatModel(settings.titleModelId)
+        PromptVariableScope.SUGGESTION_PROMPT -> settings.resolveBackgroundChatModel(settings.suggestionModelId)
+        else -> settings.resolveBackgroundChatModel(settings.fastModelId)
+    }
+    val resolved = PromptVariableResolutionContext(
+        settings = settings,
+        model = model,
+        assistant = settings.getCurrentAssistant(),
+        context = context,
+    ).resolvePromptVariables().toMutableMap().apply {
+        put("content", stringResource(R.string.setting_model_page_prompt_preview_sample))
+        put("source_text", stringResource(R.string.setting_model_page_prompt_preview_sample))
+        put("target_lang", java.util.Locale.getDefault().displayName)
+        put("target_tokens", "1024")
+        put("additional_context", "")
+        put("max_title_length", settings.titleMaxLength.toString())
+        put("suggestion_count", settings.suggestionCount.toString())
+        put("suggestion_max_length", settings.suggestionMaxLength.toString())
+        put("suggestion_style", settings.suggestionStyle.name.lowercase())
+    }
+    return prompt.applyPlaceholders(*resolved.toList().toTypedArray())
 }

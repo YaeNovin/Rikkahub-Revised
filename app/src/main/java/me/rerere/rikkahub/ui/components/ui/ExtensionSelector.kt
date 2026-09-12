@@ -103,7 +103,7 @@ fun ExtensionSelector(
         assistant.modeInjectionIds
     }
     val selectedLorebookIds = if (useConversationInjections) {
-        assistant.lorebookIds + conversation.lorebookIds
+        (assistant.lorebookIds + conversation.lorebookIds) - conversation.disabledLorebookIds
     } else {
         assistant.lorebookIds
     }
@@ -263,14 +263,12 @@ fun ExtensionSelector(
                                 if (useConversationInjections) {
                                     if (checked) {
                                         onUpdateConversation(
-                                            conversation.copy(lorebookIds = conversation.lorebookIds + id)
-                                        )
-                                    } else if (id in conversation.lorebookIds) {
-                                        onUpdateConversation(
-                                            conversation.copy(lorebookIds = conversation.lorebookIds - id)
+                                            conversation.copy(lorebookIds = conversation.lorebookIds + id, disabledLorebookIds = conversation.disabledLorebookIds - id)
                                         )
                                     } else {
-                                        onUpdate(assistant.copy(lorebookIds = assistant.lorebookIds - id))
+                                        onUpdateConversation(
+                                            conversation.copy(lorebookIds = conversation.lorebookIds - id, disabledLorebookIds = conversation.disabledLorebookIds + id)
+                                        )
                                     }
                                 } else {
                                     val newIds = if (checked) assistant.lorebookIds + id

@@ -6,10 +6,10 @@
     <title>Markdown Preview</title>
 
     <!-- KaTeX for LaTeX math rendering -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <link rel="stylesheet" href="https://rikkahub.local/assets/html/renderers/katex.min.css">
 
     <!-- Highlight.js for syntax highlighting -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="https://rikkahub.local/assets/html/renderers/atom-one-dark.min.css">
 
     <style>
         body {
@@ -142,6 +142,12 @@
             margin-right: auto;
         }
 
+        /* Badge images retain their CSS dimensions and wrap as an inline row. */
+        img[src*="img.shields.io/"], img[src*="badgen.net/"], img[src*="/badge.svg"] {
+            display: inline-block; vertical-align: middle; border-radius: 0;
+            margin: 2px 4px 2px 0; width: auto; height: auto; max-height: 40px;
+        }
+
         /* Horizontal rules */
         hr {
             background: {{OUTLINE_VARIANT_COLOR}};
@@ -179,20 +185,52 @@
     </style>
 </head>
 <body>
-    <div id="content"></div>
+    <div id="preview-status" role="status">正在排版…</div>
+    <div id="content"><pre id="preview-fallback" style="white-space:pre-wrap;overflow-wrap:anywhere">{{MARKDOWN_FALLBACK}}</pre></div>
+    <script>
+      window.__rikkaRenderStatus = 'loading';
+      window.rikkaPreviewFailure = function(error) {
+        window.__rikkaRenderStatus = 'error';
+        const status = document.getElementById('preview-status');
+        status.hidden = false;
+        status.textContent = '部分预览未能完成，已保留可读内容。可刷新重试。';
+        console.error(error);
+      };
+      window.rikkaPreviewTimer = setTimeout(function() {
+        if (window.__rikkaRenderStatus === 'loading') window.rikkaPreviewFailure(new Error('HTML preview timed out'));
+      }, 20000);
+    </script>
+    <script src="https://rikkahub.local/assets/html/renderers/markdown-it.min.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/katex.min.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/mhchem.min.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/markdown-it-katex.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/markdown-it-task-lists.min.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/highlight.min.js"></script>
+    <script src="https://rikkahub.local/assets/html/mermaid.min.js"></script>
 
-    <script type="module">
-        // Import markdown-it and plugins using esm.sh
-        import MarkdownIt from 'https://esm.sh/markdown-it@14.0.0';
-        import vscodemarkdownItKatex from 'https://esm.sh/@vscode/markdown-it-katex'
-        import markdownItTaskLists from 'https://esm.sh/markdown-it-task-lists@2.1.1';
-
-        import katex from 'https://esm.sh/katex@0.16.8';
-        // mhchem 扩展: 支持 \ce{} 等化学公式语法
-        import 'https://esm.sh/katex@0.16.8/dist/contrib/mhchem.mjs';
-        import hljs from 'https://esm.sh/highlight.js@11.9.0';
-        import mermaid from 'https://esm.sh/mermaid@10.6.1';
-        import { Base64 } from 'https://esm.sh/js-base64@3.7.5';
+    <script>
+      (function() { try {
+        // The same local KaTeX instance is used by the plugin and mhchem.
+        if (!Array.prototype.at) Object.defineProperty(Array.prototype, 'at', { value: function(index) {
+          index = Math.trunc(Number(index) || 0); return this[index < 0 ? this.length + index : index];
+        }, configurable: true, writable: true });
+        const MarkdownIt = window.markdownit;
+        // UMD and ESM-to-UMD builds expose plugins differently. Accept both a direct function
+        // and a { default } export so a WebView/library update cannot produce an avoidable
+        // "...default is undefined" failure.
+        const unwrapPlugin = function(value) { return value && (value.default || value); };
+        const vscodemarkdownItKatex = unwrapPlugin(window.markdownItKatex);
+        const markdownItTaskLists = unwrapPlugin(window.markdownitTaskLists);
+        const Base64 = { decode: function(value) {
+          const binary = atob(value);
+          const bytes = Uint8Array.from(binary, function(c) { return c.charCodeAt(0); });
+          if (typeof window.TextDecoder === 'function') return new window.TextDecoder('utf-8').decode(bytes);
+          // Android WebView versions without TextDecoder still get a UTF-8-safe fallback.
+          let encoded = '';
+          for (let i = 0; i < bytes.length; i++) encoded += '%' + ('00' + bytes[i].toString(16)).slice(-2);
+          try { return decodeURIComponent(encoded); } catch (__) { return binary; }
+        } };
+        if (!MarkdownIt || !window.katex || !vscodemarkdownItKatex || !markdownItTaskLists || !window.hljs || !window.mermaid) throw new Error('Local HTML preview dependency missing');
 
         // Configure markdown-it
         const md = new MarkdownIt({
@@ -237,16 +275,17 @@
 
             if (info === 'mermaid') {
                 const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
-                return `<div class="mermaid" id="${id}">${token.content.trim()}</div>\n`;
+                return `<div class="mermaid" id="${id}">${md.utils.escapeHtml(token.content.trim())}</div>\n`;
             }
 
             return defaultFenceRenderer(tokens, idx, options, env, renderer);
         };
 
         // Configure mermaid
+        const prefersDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
         mermaid.initialize({
             startOnLoad: false,
-            theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+            theme: prefersDark ? 'dark' : 'default',
             securityLevel: 'loose',
             fontFamily: 'inherit'
         });
@@ -272,9 +311,16 @@
                 // Render mermaid diagrams
                 const mermaidElements = document.querySelectorAll('.mermaid');
                 if (mermaidElements.length > 0) {
-                    await mermaid.run({
-                        nodes: mermaidElements
-                    });
+                    // A failed diagram must not prevent the remaining text,
+                    // equations and diagrams from becoming usable.
+                    await Promise.all(Array.from(mermaidElements).map(async function(element) {
+                        try { await mermaid.run({ nodes: [element] }); }
+                        catch (error) {
+                            element.textContent = '图形渲染失败，请检查 Mermaid 语法。';
+                            element.classList.remove('mermaid');
+                            console.warn(error);
+                        }
+                    }));
                 }
 
                 // Render KaTeX math
@@ -308,17 +354,18 @@
                     link.target = '_blank';
                     link.rel = 'noopener noreferrer';
                 });
+                clearTimeout(window.rikkaPreviewTimer);
+                window.__rikkaRenderStatus = 'ready';
+                document.getElementById('preview-status').hidden = true;
             } catch (error) {
-                console.error('Error rendering markdown:', error);
-                document.getElementById('content').innerHTML = '<p>Error rendering markdown content: ' + error.message + '</p>';
+                clearTimeout(window.rikkaPreviewTimer);
+                window.rikkaPreviewFailure(error);
             }
         }
 
         // Call the render function
         renderMarkdown();
-    </script>
-    <script nomodule>
-        alert('您的系统WebView不支持 ES Modules，请升级WebView或者系统!');
+      } catch (error) { clearTimeout(window.rikkaPreviewTimer); window.rikkaPreviewFailure(error); } })();
     </script>
 </body>
 </html>

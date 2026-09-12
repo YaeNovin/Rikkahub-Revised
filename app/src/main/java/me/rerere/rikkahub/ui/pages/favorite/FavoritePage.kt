@@ -17,7 +17,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -77,7 +77,7 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
             SnackbarHost(hostState = snackbarHostState)
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         if (favorites.isEmpty()) {
             Box(

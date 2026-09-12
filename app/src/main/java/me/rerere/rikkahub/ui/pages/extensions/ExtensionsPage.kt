@@ -7,9 +7,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -19,13 +20,11 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -37,7 +36,6 @@ import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Search01
@@ -56,20 +54,22 @@ import org.koin.androidx.compose.koinViewModel
 fun ExtensionsPage() {
     val vm = koinViewModel<ExtensionsVM>()
     val state by vm.uiState.collectAsStateWithLifecycle()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val navController = LocalNavController.current
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var query by rememberSaveable { mutableStateOf("") }
-    val visibleCategories = when (state.mode) {
-        ExtensionManagementMode.NORMAL -> ExtensionCategory.entries
-        ExtensionManagementMode.ENTERTAINMENT -> ExtensionCategory.entries
-            .filterNot { it == ExtensionCategory.WORKSPACES }
+    var selectedCategory by rememberSaveable { mutableStateOf<ExtensionCategory?>(null) }
+    var issuesOnly by rememberSaveable { mutableStateOf(false) }
+    val categories = ExtensionCategory.entries.filter {
+        state.mode == ExtensionManagementMode.NORMAL || it != ExtensionCategory.WORKSPACES
     }
-    val searchResults = state.audit.searchItems.filter {
-        it.category in visibleCategories && it.matches(query)
+    val results = androidx.compose.runtime.remember(state.audit, query, selectedCategory, issuesOnly, state.mode) {
+        state.audit.searchItems.filter {
+            it.category in categories && (selectedCategory == null || it.category == selectedCategory) &&
+                it.matches(query) && (!issuesOnly || it.hasIssue)
+        }
     }
-    val visibleIssues = state.audit.issues.filter { it.category in visibleCategories }
-
-    LaunchedEffect(Unit) { vm.refresh() }
+    val issues = state.audit.issues.filter { it.category in categories }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.refresh() }
 
     Scaffold(
         topBar = {
@@ -81,187 +81,131 @@ fun ExtensionsPage() {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
-    ) { innerPadding ->
+        containerColor = CustomColors.scaffoldContainerColor,
+    ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = padding + PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                ExtensionModeSelector(selected = state.mode, onSelect = vm::setMode)
+                ExtensionModeSelector(state.mode) { selectedCategory = null; vm.setMode(it) }
             }
-
             item {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.extensions_page_search)) },
-                    leadingIcon = { Icon(HugeIcons.Search01, null) },
-                    trailingIcon = if (query.isNotEmpty()) {
-                        {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(
-                                    imageVector = HugeIcons.Cancel01,
-                                    contentDescription = stringResource(R.string.extensions_page_clear_search),
-                                )
-                            }
-                        }
-                    } else null,
+                Text(
+                    "普通模式适合工作与日常；娱乐模式启用互斥模式、临时轮次及世界书概率和预算规则。切换会影响注入方式，已有配置会保留。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-
-            if (query.isNotBlank()) {
-                if (searchResults.isEmpty()) {
-                    item {
-                        Text(
-                            text = stringResource(R.string.extensions_page_search_empty),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            item {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilterChip(selectedCategory == null, { selectedCategory = null }, { Text("全部") })
+                    categories.forEach { category ->
+                        androidx.compose.material3.FilterChip(
+                            selected = selectedCategory == category,
+                            onClick = { selectedCategory = category },
+                            label = { Text(stringResource(category.titleResource())) },
                         )
                     }
-                } else {
-                    item {
-                        CardGroup(title = { Text(stringResource(R.string.extensions_page_search_results)) }) {
-                            searchResults.forEach { result ->
-                                item(
-                                    onClick = { navController.navigate(result.category.destination()) },
-                                    overlineContent = { Text(stringResource(result.kind.labelResource())) },
-                                    headlineContent = {
-                                        Text(
-                                            text = result.title.ifBlank {
-                                                stringResource(R.string.extensions_page_unnamed_item)
-                                            },
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    },
-                                    supportingContent = {
-                                        Column {
-                                            if (result.description.isNotBlank()) {
-                                                Text(
-                                                    text = result.description,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                            Text(
-                                                stringResource(
-                                                    R.string.extensions_page_search_item_status,
-                                                    if (result.enabled) {
-                                                        stringResource(R.string.extensions_page_status_enabled)
-                                                    } else {
-                                                        stringResource(R.string.extensions_page_status_not_enabled)
-                                                    },
-                                                    result.assistantCount,
-                                                )
-                                            )
-                                        }
-                                    },
-                                    leadingContent = { Icon(result.category.icon(), null) },
-                                    trailingContent = {
-                                        Icon(
-                                            imageVector = if (result.hasIssue) HugeIcons.AlertCircle else HugeIcons.ArrowRight01,
-                                            contentDescription = null,
-                                            tint = if (result.hasIssue) MaterialTheme.colorScheme.error else Color.Unspecified,
-                                        )
-                                    },
-                                )
+                }
+            }
+            if (query.isBlank() && !issuesOnly) {
+                items(categories.filter { selectedCategory == null || selectedCategory == it }, key = { "category:$it" }) { category ->
+                    val summary = state.audit.summaries[category]
+                    CardGroup {
+                        item(
+                            onClick = { navController.navigate(category.destination()) },
+                            headlineContent = { Text(stringResource(category.titleResource())) },
+                            supportingContent = {
+                                Column {
+                                    Text(stringResource(category.descriptionResource()))
+                                    Text("共 ${summary?.totalCount ?: 0} 项 · 助手默认使用 ${summary?.enabledCount ?: 0} 项 · 待检查 ${summary?.issueCount ?: 0} 项")
+                                    Text("${summary?.assistantCount ?: 0} 个助手引用，不含对话临时选择", style = MaterialTheme.typography.bodySmall)
+                                }
+                            },
+                            leadingContent = { Icon(category.icon(), null) },
+                            trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                        )
+                    }
+                }
+            }
+            item {
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.extensions_page_search)) },
+                    leadingIcon = { Icon(HugeIcons.Search01, null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
+                            Icon(HugeIcons.Cancel01, stringResource(R.string.extensions_page_clear_search))
+                        }
+                    },
+                )
+            }
+            item {
+                androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    androidx.compose.material3.FilterChip(issuesOnly, { issuesOnly = !issuesOnly }, { Text("仅待检查") })
+                    androidx.compose.material3.TextButton(onClick = vm::refresh, enabled = !state.checking) {
+                        Text(if (state.checking) "正在检查…" else "重新检查")
+                    }
+                }
+                if (state.checking) androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
+                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (!state.checking && state.error == null) {
+                    Text("当前分类 ${results.size} 项 · 全部可见分类 ${issues.size} 条检查提示", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            items(results, key = { "${it.category}:${it.key}" }) { result ->
+                val itemIssues = issues.filter { it.category == result.category && it.itemKey == result.key }
+                CardGroup {
+                    item(
+                        onClick = { navController.navigate(result.destination()) },
+                        overlineContent = { Text(stringResource(result.kind.labelResource())) },
+                        headlineContent = { Text(result.title.ifBlank { "未命名" }) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(result.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("助手默认使用：${if (result.enabled) "是" else "否"} · ${result.assistantCount} 个助手引用")
+                                itemIssues.forEach { issue ->
+                                    Text((if (issue.kind.isAdvisory()) "潜在重叠，需结合使用场景：" else "") + issue.itemTitle + " · " + stringResource(issue.kind.messageResource()), color = if (issue.kind.isAdvisory()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
+                                }
                             }
-                        }
-                    }
-                }
-            } else {
-                item {
-                    CardGroup(title = { Text(stringResource(R.string.extensions_page_section_overview)) }) {
-                        visibleCategories.forEach { category ->
-                            val summary = state.audit.summaries[category]
-                                ?: ExtensionCategorySummary(category, 0, 0, 0, 0)
-                            item(
-                                onClick = { navController.navigate(category.destination()) },
-                                headlineContent = { Text(stringResource(category.titleResource())) },
-                                supportingContent = {
-                                    Column {
-                                        Text(stringResource(category.descriptionResource()))
-                                        Text(
-                                            text = stringResource(
-                                                R.string.extensions_page_summary_metrics,
-                                                summary.totalCount,
-                                                summary.enabledCount,
-                                                summary.issueCount,
-                                                summary.assistantCount,
-                                            ),
-                                            color = if (summary.issueCount > 0) {
-                                                MaterialTheme.colorScheme.error
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
-                                    }
-                                },
-                                leadingContent = { Icon(category.icon(), null) },
-                                trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    CardGroup(
-                        title = {
-                            Text(
-                                stringResource(
-                                    R.string.extensions_page_health_title,
-                                    visibleIssues.distinctBy { it.itemKey }.size,
-                                )
-                            )
                         },
-                    ) {
-                        if (visibleIssues.isEmpty()) {
-                            item(
-                                headlineContent = { Text(stringResource(R.string.extensions_page_health_ok)) },
-                                leadingContent = {
-                                    Icon(
-                                        HugeIcons.CheckmarkCircle02,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                },
-                            )
-                        } else {
-                            visibleIssues.forEach { issue ->
-                                item(
-                                    onClick = { navController.navigate(issue.category.destination()) },
-                                    headlineContent = {
-                                        Text(
-                                            issue.itemTitle.ifBlank {
-                                                stringResource(R.string.extensions_page_unnamed_item)
-                                            },
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    },
-                                    supportingContent = { Text(stringResource(issue.kind.messageResource())) },
-                                    leadingContent = {
-                                        Icon(
-                                            HugeIcons.AlertCircle,
-                                            null,
-                                            tint = MaterialTheme.colorScheme.error,
-                                        )
-                                    },
-                                    trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
-                                )
-                            }
-                        }
-                    }
+                        leadingContent = { Icon(result.category.icon(), null) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                    )
+                }
+            }
+            if (results.isEmpty() && !state.checking) item {
+                Text(stringResource(R.string.extensions_page_search_empty))
+            }
+            val orphanIssues = issues.filter { issue ->
+                state.audit.searchItems.none { it.category == issue.category && it.key == issue.itemKey } &&
+                    (selectedCategory == null || selectedCategory == issue.category) &&
+                    (query.isBlank() || issue.itemTitle.contains(query.trim(), ignoreCase = true))
+            }
+            items(orphanIssues, key = { "issue:${it.category}:${it.itemKey}:${it.kind}" }) { issue ->
+                CardGroup {
+                    item(
+                        onClick = { navController.navigate(issue.category.destination()) },
+                        headlineContent = { Text(issue.itemTitle) },
+                        supportingContent = { Text(stringResource(issue.kind.messageResource()), color = MaterialTheme.colorScheme.error) },
+                    )
                 }
             }
         }
     }
 }
 
+private fun ExtensionSearchItem.destination(): Screen = when (kind) {
+    ExtensionItemKind.SKILL -> if (key.startsWith("skill:")) Screen.SkillDetail(title) else Screen.Skills
+    ExtensionItemKind.WORKSPACE -> Screen.WorkspaceDetail(key.removePrefix("workspace:"))
+    else -> Screen.ExtensionItem(kind.name, key)
+}
+
+private fun ExtensionIssueKind.isAdvisory() = this == ExtensionIssueKind.SETTING_CONFLICT ||
+    this == ExtensionIssueKind.SETTING_OVERLAP || this == ExtensionIssueKind.MUTUALLY_EXCLUSIVE_MODES
 @Composable
 private fun ExtensionModeSelector(
     selected: ExtensionManagementMode,

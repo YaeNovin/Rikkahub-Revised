@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.runtime.remember
+import coil3.request.ImageRequest
+import me.rerere.rikkahub.ui.components.richtext.IntrinsicSvgDecoderFactory
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,6 +44,7 @@ fun ImagePreviewDialog(
     images: List<String>,
     initialSizes: List<Size> = emptyList(),
     topEndAction: (@Composable () -> Unit)? = null,
+    badgePreview: Boolean = false,
     onDismissRequest: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -54,12 +59,20 @@ fun ImagePreviewDialog(
             usePlatformDefaultWidth = false
         )
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().then(if (badgePreview) Modifier.background(Color(0xFF202124)) else Modifier)) {
             ImagePager(
                 modifier = Modifier.fillMaxSize(),
                 pagerState = state,
                 imageLoader = { index ->
-                    val painter = rememberAsyncImagePainter(images[index])
+                    val request = remember(images[index], badgePreview) {
+                        ImageRequest.Builder(context).data(images[index]).apply {
+                            if (badgePreview) {
+                                decoderFactory(IntrinsicSvgDecoderFactory)
+                                memoryCacheKey("badge-preview:v3:${images[index]}")
+                            }
+                        }.build()
+                    }
+                    val painter = rememberAsyncImagePainter(request)
                     val painterState by painter.state.collectAsState()
                     val loadedSize = (painterState as? AsyncImagePainter.State.Success)
                         ?.painter
@@ -85,12 +98,14 @@ fun ImagePreviewDialog(
                             runCatching {
                                 toaster.show(context.getString(R.string.image_preview_saving))
                                 val imgUrl = images[state.currentPage]
-                                filesManager.saveMessageImage(context, imgUrl)
+                                if (badgePreview) me.rerere.rikkahub.ui.components.richtext.saveBadgeImage(context, imgUrl)
+                                else filesManager.saveMessageImage(context, imgUrl)
                                 toaster.show(
                                     message = context.getString(R.string.imggen_page_image_saved_success),
                                     type = ToastType.Success,
                                 )
                             }.onFailure {
+                                if (it is kotlinx.coroutines.CancellationException) throw it
                                 it.printStackTrace()
                                 toaster.show(
                                     message = context.formatUserFacingError(it),

@@ -34,6 +34,7 @@ fun AppearanceDropdownMenu(
         offset = offset,
         scrollState = scrollState,
         properties = properties,
+        shape = shape,
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,

@@ -57,7 +57,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import me.rerere.rikkahub.ui.components.ui.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.SheetValue
@@ -96,6 +96,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.GeminiImageGenerationOptions
 import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.GeminiSafetyThreshold
+import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
@@ -126,6 +127,7 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.model.ImageGenerationRequestState
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
@@ -300,11 +302,40 @@ private fun ImageGenScreen(
     val sequentialMaxImages by vm.sequentialMaxImages.collectAsStateWithLifecycle()
     val promptOptimizationMode by vm.promptOptimizationMode.collectAsStateWithLifecycle()
     val geminiImageOptions by vm.geminiImageOptions.collectAsStateWithLifecycle()
+    val requestState = ImageGenerationRequestState(
+        prompt = prompt,
+        size = size,
+        quality = quality,
+        outputFormat = outputFormat,
+        background = background,
+        outputCompression = outputCompression,
+        resolution = resolution,
+        thinkingLevel = thinkingLevel,
+        count = numberOfImages,
+        seed = seed,
+        steps = steps,
+        guidanceScale = guidanceScale,
+        negativePrompt = negativePrompt,
+        promptEnhancement = promptEnhancement,
+        promptEnhancementMode = promptEnhancementMode,
+        imageThinking = imageThinking,
+        watermark = watermark,
+        moderation = moderation,
+        inputFidelity = inputFidelity,
+        safetyTolerance = safetyTolerance,
+        sampler = sampler,
+        stylePreset = stylePreset,
+        sequentialImageGeneration = sequentialImageGeneration,
+        sequentialMaxImages = sequentialMaxImages,
+        promptOptimizationMode = promptOptimizationMode,
+        geminiOptions = geminiImageOptions,
+    )
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val currentGeneratedImages by vm.currentGeneratedImages.collectAsStateWithLifecycle()
     val referenceImages by vm.referenceImages.collectAsStateWithLifecycle()
     val settings by vm.settingsStore.settingsFlow.collectAsStateWithLifecycle()
-    val selectedModel = settings.findModelById(settings.imageGenerationModelId)
+    val selectedModel = settings.findModelById(settings.imageGenerationPageModelId)
+        ?.takeIf { it.type == ModelType.IMAGE }
     val selectedProvider = selectedModel?.findProvider(settings.providers)
     val selectedConstraints = if (selectedModel != null && selectedProvider != null) {
         vm.providerManager.imageGenerationConstraints(selectedProvider, selectedModel)
@@ -460,79 +491,19 @@ private fun ImageGenScreen(
                 initialValue = SheetValue.Hidden,
                 enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
             )
-            SettingsBottomSheet(
-                vm = vm,
-                numberOfImages = numberOfImages,
-                size = size,
-                maxOutputImages = maxOutputImages,
-                supportsOutputCount = selectedConstraints?.supportsOutputCount == true,
-                supportsSize = supportsSize,
-                supportedSizes = supportedSizes,
-                supportsCustomSize = selectedConstraints?.supportsCustomSize ?: true,
-                groupSizesByAspectRatio = selectedConstraints?.groupSizesByAspectRatio == true,
-                customSizeMultiple = selectedConstraints?.customSizeMultiple,
-                customSizeMaxDimension = selectedConstraints?.customSizeMaxDimension,
-                customSizeMinPixels = selectedConstraints?.customSizeMinPixels,
-                customSizeMaxPixels = selectedConstraints?.customSizeMaxPixels,
-                customSizeMaxAspectRatio = selectedConstraints?.customSizeMaxAspectRatio,
-                sizeRequestField = selectedConstraints?.sizeRequestField ?: "size",
-                quality = quality,
-                outputFormat = outputFormat,
-                background = background,
-                outputCompression = outputCompression,
-                resolution = resolution,
-                thinkingLevel = thinkingLevel,
-                seed = seed,
-                steps = steps,
-                guidanceScale = guidanceScale,
-                negativePrompt = negativePrompt,
-                promptEnhancement = promptEnhancement,
-                promptEnhancementMode = promptEnhancementMode,
-                imageThinking = imageThinking,
-                watermark = watermark,
-                moderation = moderation,
-                inputFidelity = inputFidelity,
-                safetyTolerance = safetyTolerance,
-                sampler = sampler,
-                stylePreset = stylePreset,
-                sequentialImageGeneration = sequentialImageGeneration,
-                sequentialMaxImages = sequentialMaxImages,
-                promptOptimizationMode = promptOptimizationMode,
-                geminiImageOptions = geminiImageOptions,
-                supportedQualityValues = selectedConstraints?.supportedQualityValues.orEmpty(),
-                supportedOutputFormats = selectedConstraints?.supportedOutputFormats.orEmpty(),
-                supportedBackgroundValues = selectedConstraints?.supportedBackgroundValues.orEmpty(),
-                supportsOutputCompression = selectedConstraints?.supportsOutputCompression == true,
-                supportedResolutionValues = selectedConstraints?.supportedResolutionValues.orEmpty(),
-                supportedThinkingValues = selectedConstraints?.supportedThinkingValues.orEmpty(),
-                seedRange = selectedConstraints?.seedRange,
-                stepsRange = selectedConstraints?.stepsRange,
-                defaultSteps = selectedConstraints?.defaultSteps,
-                guidanceScaleRange = selectedConstraints?.guidanceScaleRange,
-                defaultGuidanceScale = selectedConstraints?.defaultGuidanceScale,
-                guidanceScaleRequestField = selectedConstraints?.guidanceScaleRequestField,
-                supportsNegativePrompt = selectedConstraints?.supportsNegativePrompt == true,
-                promptEnhancementRequestField = selectedConstraints?.promptEnhancementRequestField,
-                supportedPromptEnhancementModes = selectedConstraints?.supportedPromptEnhancementModes.orEmpty(),
-                supportsImageThinking = selectedConstraints?.supportsImageThinking == true,
-                supportsWatermark = selectedConstraints?.supportsWatermark == true,
-                supportedModerationValues = selectedConstraints?.supportedModerationValues.orEmpty(),
-                supportedInputFidelityValues = selectedConstraints?.supportedInputFidelityValues.orEmpty(),
-                safetyToleranceRange = selectedConstraints?.safetyToleranceRange,
-                defaultSafetyTolerance = selectedConstraints?.defaultSafetyTolerance,
-                supportedSamplerValues = selectedConstraints?.supportedSamplerValues.orEmpty(),
-                supportedStylePresetValues = selectedConstraints?.supportedStylePresetValues.orEmpty(),
-                sequentialImageMax = selectedConstraints?.sequentialImageMax,
-                supportedPromptOptimizationModes = selectedConstraints?.supportedPromptOptimizationModes.orEmpty(),
-                supportsGeminiTextResponse = selectedConstraints?.supportsTextResponse == true,
-                supportsGeminiSafetySettings = selectedConstraints?.supportsSafetySettings == true,
-                supportsGeminiWebSearch = selectedConstraints?.supportsWebSearchGrounding == true,
-                supportsGeminiImageSearch = selectedConstraints?.supportsImageSearchGrounding == true,
+            ImageGenerationSettingsBottomSheet(
+                state = requestState,
+                constraints = selectedConstraints ?: ImageGenerationConstraints(
+                    supportsGeneration = false,
+                    supportsEdit = false,
+                    supportsPartialImages = false,
+                ),
+                onStateChange = vm::updateRequestState,
                 geminiModelId = geminiModelId,
                 geminiRequestChannel = geminiRequestChannel,
                 referenceImageCount = referenceImages.size,
                 sheetState = settingsSheetState,
-                onDismiss = { showSettingsSheet = false }
+                onDismiss = { showSettingsSheet = false },
             )
         }
     }
@@ -550,7 +521,8 @@ private fun InputBar(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val selectedModel = settings.findModelById(settings.imageGenerationModelId)
+    val selectedModel = settings.findModelById(settings.imageGenerationPageModelId)
+        ?.takeIf { it.type == ModelType.IMAGE }
     val selectedProvider = selectedModel?.findProvider(settings.providers)
     val selectedConstraints = if (selectedModel != null && selectedProvider != null) {
         vm.providerManager.imageGenerationConstraints(selectedProvider, selectedModel)
@@ -637,14 +609,14 @@ private fun InputBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ModelSelector(
-                modelId = settings.imageGenerationModelId,
+                modelId = settings.imageGenerationPageModelId,
                 providers = selectableProviders,
                 type = ModelType.IMAGE,
                 onlyIcon = true,
                 onSelect = { model ->
                     scope.launch {
                         vm.settingsStore.update { oldSettings ->
-                            oldSettings.copy(imageGenerationModelId = model.id)
+                            oldSettings.copy(imageGenerationPageModelId = model.id)
                         }
                     }
                 }
@@ -1522,85 +1494,93 @@ private fun isValidCustomImageSize(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SettingsBottomSheet(
-    vm: ImgGenVM,
-    numberOfImages: Int,
-    size: String,
-    maxOutputImages: Int,
-    supportsOutputCount: Boolean,
-    supportsSize: Boolean,
-    supportedSizes: Set<String>?,
-    supportsCustomSize: Boolean,
-    groupSizesByAspectRatio: Boolean,
-    customSizeMultiple: Int?,
-    customSizeMaxDimension: Int?,
-    customSizeMinPixels: Long?,
-    customSizeMaxPixels: Long?,
-    customSizeMaxAspectRatio: Int?,
-    sizeRequestField: String,
-    quality: String?,
-    outputFormat: String?,
-    background: String?,
-    outputCompression: Int,
-    resolution: String?,
-    thinkingLevel: String?,
-    seed: Long?,
-    steps: Int?,
-    guidanceScale: Float?,
-    negativePrompt: String,
-    promptEnhancement: Boolean?,
-    promptEnhancementMode: String?,
-    imageThinking: Boolean?,
-    watermark: Boolean?,
-    moderation: String?,
-    inputFidelity: String?,
-    safetyTolerance: Int?,
-    sampler: String?,
-    stylePreset: String?,
-    sequentialImageGeneration: Boolean?,
-    sequentialMaxImages: Int,
-    promptOptimizationMode: String?,
-    geminiImageOptions: GeminiImageGenerationOptions,
-    supportedQualityValues: Set<String>,
-    supportedOutputFormats: Set<String>,
-    supportedBackgroundValues: Set<String>,
-    supportsOutputCompression: Boolean,
-    supportedResolutionValues: Set<String>,
-    supportedThinkingValues: Set<String>,
-    seedRange: LongRange?,
-    stepsRange: IntRange?,
-    defaultSteps: Int?,
-    guidanceScaleRange: ClosedFloatingPointRange<Float>?,
-    defaultGuidanceScale: Float?,
-    guidanceScaleRequestField: String?,
-    supportsNegativePrompt: Boolean,
-    promptEnhancementRequestField: String?,
-    supportedPromptEnhancementModes: Set<String>,
-    supportsImageThinking: Boolean,
-    supportsWatermark: Boolean,
-    supportedModerationValues: Set<String>,
-    supportedInputFidelityValues: Set<String>,
-    safetyToleranceRange: IntRange?,
-    defaultSafetyTolerance: Int?,
-    supportedSamplerValues: Set<String>,
-    supportedStylePresetValues: Set<String>,
-    sequentialImageMax: Int?,
-    supportedPromptOptimizationModes: Set<String>,
-    supportsGeminiTextResponse: Boolean,
-    supportsGeminiSafetySettings: Boolean,
-    supportsGeminiWebSearch: Boolean,
-    supportsGeminiImageSearch: Boolean,
+internal fun ImageGenerationSettingsBottomSheet(
+    state: ImageGenerationRequestState,
+    constraints: ImageGenerationConstraints,
+    onStateChange: (ImageGenerationRequestState) -> Unit,
     geminiModelId: String?,
     geminiRequestChannel: ProviderRequestChannel?,
     referenceImageCount: Int,
     sheetState: SheetState,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    headerContent: (@Composable () -> Unit)? = null,
+    footerContent: (@Composable () -> Unit)? = null,
 ) {
+    val numberOfImages = state.count
+    val size = state.size
+    val quality = state.quality
+    val outputFormat = state.outputFormat
+    val background = state.background
+    val outputCompression = state.outputCompression
+    val resolution = state.resolution
+    val thinkingLevel = state.thinkingLevel
+    val seed = state.seed
+    val steps = state.steps
+    val guidanceScale = state.guidanceScale
+    val negativePrompt = state.negativePrompt
+    val promptEnhancement = state.promptEnhancement
+    val promptEnhancementMode = state.promptEnhancementMode
+    val imageThinking = state.imageThinking
+    val watermark = state.watermark
+    val moderation = state.moderation
+    val inputFidelity = state.inputFidelity
+    val safetyTolerance = state.safetyTolerance
+    val sampler = state.sampler
+    val stylePreset = state.stylePreset
+    val sequentialImageGeneration = state.sequentialImageGeneration
+    val sequentialMaxImages = state.sequentialMaxImages
+    val promptOptimizationMode = state.promptOptimizationMode
+    val geminiImageOptions = state.geminiOptions
+    val maxOutputImages = constraints.maxOutputImages.coerceAtLeast(1)
+    val supportsOutputCount = constraints.supportsOutputCount
+    val supportsSize = constraints.supportsSize
+    val supportedSizes = constraints.supportedSizes
+    val supportsCustomSize = constraints.supportsCustomSize
+    val groupSizesByAspectRatio = constraints.groupSizesByAspectRatio
+    val customSizeMultiple = constraints.customSizeMultiple
+    val customSizeMaxDimension = constraints.customSizeMaxDimension
+    val customSizeMinPixels = constraints.customSizeMinPixels
+    val customSizeMaxPixels = constraints.customSizeMaxPixels
+    val customSizeMaxAspectRatio = constraints.customSizeMaxAspectRatio
+    val sizeRequestField = constraints.sizeRequestField
+    val supportedQualityValues = constraints.supportedQualityValues
+    val supportedOutputFormats = constraints.supportedOutputFormats
+    val supportedBackgroundValues = constraints.supportedBackgroundValues
+    val supportsOutputCompression = constraints.supportsOutputCompression
+    val supportedResolutionValues = constraints.supportedResolutionValues
+    val supportedThinkingValues = constraints.supportedThinkingValues
+    val seedRange = constraints.seedRange
+    val stepsRange = constraints.stepsRange
+    val defaultSteps = constraints.defaultSteps
+    val guidanceScaleRange = constraints.guidanceScaleRange
+    val defaultGuidanceScale = constraints.defaultGuidanceScale
+    val guidanceScaleRequestField = constraints.guidanceScaleRequestField
+    val supportsNegativePrompt = constraints.supportsNegativePrompt
+    val promptEnhancementRequestField = constraints.promptEnhancementRequestField
+    val supportedPromptEnhancementModes = constraints.supportedPromptEnhancementModes
+    val supportsImageThinking = constraints.supportsImageThinking
+    val supportsWatermark = constraints.supportsWatermark
+    val supportedModerationValues = constraints.supportedModerationValues
+    val supportedInputFidelityValues = constraints.supportedInputFidelityValues
+    val safetyToleranceRange = constraints.safetyToleranceRange
+    val defaultSafetyTolerance = constraints.defaultSafetyTolerance
+    val supportedSamplerValues = constraints.supportedSamplerValues
+    val supportedStylePresetValues = constraints.supportedStylePresetValues
+    val sequentialImageMax = constraints.sequentialImageMax
+    val supportedPromptOptimizationModes = constraints.supportedPromptOptimizationModes
+    val supportsGeminiTextResponse = constraints.supportsTextResponse
+    val supportsGeminiSafetySettings = constraints.supportsSafetySettings
+    val supportsGeminiWebSearch = constraints.supportsWebSearchGrounding
+    val supportsGeminiImageSearch = constraints.supportsImageSearchGrounding
+
+    fun update(transform: ImageGenerationRequestState.() -> ImageGenerationRequestState) {
+        onStateChange(state.transform())
+    }
     var showGeminiParameterSummary by remember { mutableStateOf(false) }
     var showGeminiSafetySettings by remember { mutableStateOf(false) }
     LaunchedEffect(referenceImageCount, promptEnhancementMode) {
         if (referenceImageCount > 0 && promptEnhancementMode == "agent") {
-            vm.updatePromptEnhancementMode(null)
+            update { copy(promptEnhancementMode = null) }
         }
     }
     if (showGeminiParameterSummary && geminiModelId != null && geminiRequestChannel != null) {
@@ -1622,7 +1602,9 @@ private fun SettingsBottomSheet(
     if (showGeminiSafetySettings) {
         GeminiImageSafetyDialog(
             settings = geminiImageOptions.safetySettings,
-            onSettingsChange = vm::updateGeminiSafetySettings,
+            onSettingsChange = { safetySettings ->
+                update { copy(geminiOptions = geminiOptions.copy(safetySettings = safetySettings)) }
+            },
             onDismiss = { showGeminiSafetySettings = false },
         )
     }
@@ -1647,6 +1629,7 @@ private fun SettingsBottomSheet(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
+            headerContent?.invoke()
             SecondaryTabRow(selectedTabIndex = settingsPagerState.currentPage) {
                 listOf(
                     R.string.imggen_page_basic_options,
@@ -1688,7 +1671,9 @@ private fun SettingsBottomSheet(
                 ) {
                     OutlinedNumberInput(
                         value = numberOfImages,
-                        onValueChange = { vm.updateNumberOfImages(it.coerceAtMost(maxOutputImages)) },
+                        onValueChange = { value ->
+                            update { copy(count = value.coerceIn(1, maxOutputImages)) }
+                        },
                         modifier = Modifier.width(120.dp)
                     )
                 }
@@ -1743,7 +1728,7 @@ private fun SettingsBottomSheet(
                             if (ImageGenSize.AUTO.value in sizeOptions) {
                                 FilterChip(
                                     selected = size == ImageGenSize.AUTO.value,
-                                    onClick = { vm.updateSize(ImageGenSize.AUTO.value) },
+                                    onClick = { update { copy(size = ImageGenSize.AUTO.value) } },
                                     label = { Text(stringResource(R.string.imggen_page_model_default)) },
                                 )
                             }
@@ -1752,7 +1737,7 @@ private fun SettingsBottomSheet(
                                     selected = size in group.sizes,
                                     onClick = {
                                         selectedAspectRatio = group.aspectRatio
-                                        vm.updateSize(group.sizes.first())
+                                        update { copy(size = group.sizes.first()) }
                                     },
                                     label = { Text(group.aspectRatio) },
                                 )
@@ -1773,7 +1758,7 @@ private fun SettingsBottomSheet(
                                 group.sizes.forEach { sizeOption ->
                                     FilterChip(
                                         selected = size == sizeOption,
-                                        onClick = { vm.updateSize(sizeOption) },
+                                        onClick = { update { copy(size = sizeOption) } },
                                         label = { Text(sizeOption) },
                                     )
                                 }
@@ -1787,7 +1772,7 @@ private fun SettingsBottomSheet(
                             sizeOptions.forEach { sizeOption ->
                                 FilterChip(
                                     selected = size == sizeOption,
-                                    onClick = { vm.updateSize(sizeOption) },
+                                    onClick = { update { copy(size = sizeOption) } },
                                     label = {
                                         Text(
                                             if (sizeOption == ImageGenSize.AUTO.value) {
@@ -1826,7 +1811,7 @@ private fun SettingsBottomSheet(
                             value = customSizeText,
                             onValueChange = { value ->
                                 customSizeText = value
-                                vm.updateSize(value.trim())
+                                update { copy(size = value.trim()) }
                             },
                             label = { Text(stringResource(R.string.imggen_page_custom_size)) },
                             placeholder = { Text(stringResource(R.string.imggen_page_custom_size_example)) },
@@ -1859,7 +1844,7 @@ private fun SettingsBottomSheet(
                     title = stringResource(R.string.imggen_page_quality),
                     value = quality,
                     options = supportedQualityValues,
-                    onValueChange = vm::updateQuality,
+                    onValueChange = { value -> update { copy(quality = value) } },
                 )
             }
 
@@ -1868,7 +1853,16 @@ private fun SettingsBottomSheet(
                     title = stringResource(R.string.imggen_page_output_format),
                     value = outputFormat,
                     options = supportedOutputFormats,
-                    onValueChange = vm::updateOutputFormat,
+                    onValueChange = { value ->
+                        update {
+                            copy(
+                                outputFormat = value,
+                                background = background.takeUnless {
+                                    it == "transparent" && value !in setOf(null, "png", "webp")
+                                },
+                            )
+                        }
+                    },
                 )
             }
 
@@ -1882,7 +1876,7 @@ private fun SettingsBottomSheet(
                     },
                     value = resolution,
                     options = supportedResolutionValues,
-                    onValueChange = vm::updateResolution,
+                    onValueChange = { value -> update { copy(resolution = value) } },
                 )
             }
 
@@ -1892,7 +1886,7 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_gemini_thinking_desc),
                     value = thinkingLevel,
                     options = supportedThinkingValues,
-                    onValueChange = vm::updateThinkingLevel,
+                    onValueChange = { value -> update { copy(thinkingLevel = value) } },
                 )
             }
 
@@ -1940,7 +1934,7 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_moderation_desc),
                     value = moderation,
                     options = supportedModerationValues,
-                    onValueChange = vm::updateModeration,
+                    onValueChange = { value -> update { copy(moderation = value) } },
                 )
             }
 
@@ -1950,7 +1944,7 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_input_fidelity_desc),
                     value = inputFidelity,
                     options = supportedInputFidelityValues,
-                    onValueChange = vm::updateInputFidelity,
+                    onValueChange = { value -> update { copy(inputFidelity = value) } },
                 )
             }
 
@@ -1960,7 +1954,16 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_background_desc),
                     value = background,
                     options = supportedBackgroundValues,
-                    onValueChange = vm::updateBackground,
+                    onValueChange = { value ->
+                        update {
+                            copy(
+                                background = value,
+                                outputFormat = outputFormat.takeUnless {
+                                    value == "transparent" && it !in setOf(null, "png", "webp")
+                                },
+                            )
+                        }
+                    },
                 )
             }
 
@@ -1971,7 +1974,9 @@ private fun SettingsBottomSheet(
                 ) {
                     OutlinedNumberInput(
                         value = outputCompression,
-                        onValueChange = vm::updateOutputCompression,
+                        onValueChange = { value ->
+                            update { copy(outputCompression = value.coerceIn(0, 100)) }
+                        },
                         modifier = Modifier.width(120.dp),
                     )
                 }
@@ -2001,7 +2006,7 @@ private fun SettingsBottomSheet(
                         Switch(
                             checked = seed != null,
                             onCheckedChange = { enabled ->
-                                vm.updateSeed(if (enabled) range.first else null)
+                                update { copy(seed = if (enabled) range.first else null) }
                             },
                         )
                     },
@@ -2009,7 +2014,7 @@ private fun SettingsBottomSheet(
                     seed?.let { currentSeed ->
                         OutlinedNumberInput(
                             value = currentSeed,
-                            onValueChange = { vm.updateSeed(it.coerceIn(range)) },
+                            onValueChange = { value -> update { copy(seed = value.coerceIn(range)) } },
                             modifier = Modifier.fillMaxWidth(),
                             label = stringResource(R.string.imggen_page_seed),
                         )
@@ -2027,9 +2032,13 @@ private fun SettingsBottomSheet(
                         Switch(
                             checked = steps != null,
                             onCheckedChange = { enabled ->
-                                vm.updateSteps(
-                                    if (enabled) (defaultSteps ?: range.first).coerceIn(range) else null
-                                )
+                                update {
+                                    copy(
+                                        steps = if (enabled) {
+                                            (defaultSteps ?: range.first).coerceIn(range)
+                                        } else null
+                                    )
+                                }
                             },
                         )
                     },
@@ -2037,7 +2046,7 @@ private fun SettingsBottomSheet(
                     steps?.let { currentSteps ->
                         OutlinedNumberInput(
                             value = currentSteps,
-                            onValueChange = { vm.updateSteps(it.coerceIn(range)) },
+                            onValueChange = { value -> update { copy(steps = value.coerceIn(range)) } },
                             modifier = Modifier.fillMaxWidth(),
                             label = stringResource(R.string.imggen_page_steps),
                         )
@@ -2062,16 +2071,16 @@ private fun SettingsBottomSheet(
                         Switch(
                             checked = guidanceScale != null,
                             onCheckedChange = { enabled ->
-                                vm.updateGuidanceScale(
-                                    if (enabled) {
-                                        (defaultGuidanceScale ?: range.start).coerceIn(
-                                            range.start,
-                                            range.endInclusive,
-                                        )
-                                    } else {
-                                        null
-                                    }
-                                )
+                                update {
+                                    copy(
+                                        guidanceScale = if (enabled) {
+                                            (defaultGuidanceScale ?: range.start).coerceIn(
+                                                range.start,
+                                                range.endInclusive,
+                                            )
+                                        } else null
+                                    )
+                                }
                             },
                         )
                     },
@@ -2079,8 +2088,10 @@ private fun SettingsBottomSheet(
                     guidanceScale?.let { currentGuidance ->
                         OutlinedNumberInput(
                             value = currentGuidance,
-                            onValueChange = {
-                                vm.updateGuidanceScale(it.coerceIn(range.start, range.endInclusive))
+                            onValueChange = { value ->
+                                update {
+                                    copy(guidanceScale = value.coerceIn(range.start, range.endInclusive))
+                                }
                             },
                             modifier = Modifier.fillMaxWidth(),
                             label = stringResource(R.string.imggen_page_guidance_scale),
@@ -2105,13 +2116,13 @@ private fun SettingsBottomSheet(
                         Switch(
                             checked = safetyTolerance != null,
                             onCheckedChange = { enabled ->
-                                vm.updateSafetyTolerance(
-                                    if (enabled) {
-                                        (defaultSafetyTolerance ?: range.first).coerceIn(range)
-                                    } else {
-                                        null
-                                    }
-                                )
+                                update {
+                                    copy(
+                                        safetyTolerance = if (enabled) {
+                                            (defaultSafetyTolerance ?: range.first).coerceIn(range)
+                                        } else null
+                                    )
+                                }
                             },
                         )
                     },
@@ -2119,7 +2130,9 @@ private fun SettingsBottomSheet(
                     safetyTolerance?.let { currentTolerance ->
                         OutlinedNumberInput(
                             value = currentTolerance,
-                            onValueChange = { vm.updateSafetyTolerance(it.coerceIn(range)) },
+                            onValueChange = { value ->
+                                update { copy(safetyTolerance = value.coerceIn(range)) }
+                            },
                             modifier = Modifier.fillMaxWidth(),
                             label = stringResource(R.string.imggen_page_safety_tolerance),
                         )
@@ -2133,7 +2146,7 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_sampler_desc),
                     value = sampler,
                     options = supportedSamplerValues,
-                    onValueChange = vm::updateSampler,
+                    onValueChange = { value -> update { copy(sampler = value) } },
                 )
             }
 
@@ -2143,7 +2156,7 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_style_preset_desc),
                     value = stylePreset,
                     options = supportedStylePresetValues,
-                    onValueChange = vm::updateStylePreset,
+                    onValueChange = { value -> update { copy(stylePreset = value) } },
                 )
             }
 
@@ -2154,7 +2167,7 @@ private fun SettingsBottomSheet(
                 ) {
                     OutlinedTextField(
                         value = negativePrompt,
-                        onValueChange = vm::updateNegativePrompt,
+                        onValueChange = { value -> update { copy(negativePrompt = value) } },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
                         maxLines = 5,
@@ -2169,7 +2182,7 @@ private fun SettingsBottomSheet(
                     title = stringResource(R.string.imggen_page_prompt_enhancement),
                     description = stringResource(R.string.imggen_page_prompt_enhancement_desc),
                     value = promptEnhancement,
-                    onValueChange = vm::updatePromptEnhancement,
+                    onValueChange = { value -> update { copy(promptEnhancement = value) } },
                 )
             }
 
@@ -2190,7 +2203,7 @@ private fun SettingsBottomSheet(
                     ),
                     value = promptEnhancementMode,
                     options = availablePromptEnhancementModes,
-                    onValueChange = vm::updatePromptEnhancementMode,
+                    onValueChange = { value -> update { copy(promptEnhancementMode = value) } },
                 )
             }
 
@@ -2199,7 +2212,7 @@ private fun SettingsBottomSheet(
                     title = stringResource(R.string.imggen_page_image_thinking),
                     description = stringResource(R.string.imggen_page_image_thinking_desc),
                     value = imageThinking,
-                    onValueChange = vm::updateImageThinking,
+                    onValueChange = { value -> update { copy(imageThinking = value) } },
                 )
             }
 
@@ -2208,7 +2221,7 @@ private fun SettingsBottomSheet(
                     title = stringResource(R.string.imggen_page_sequential_generation),
                     description = stringResource(R.string.imggen_page_sequential_generation_desc),
                     value = sequentialImageGeneration,
-                    onValueChange = vm::updateSequentialImageGeneration,
+                    onValueChange = { value -> update { copy(sequentialImageGeneration = value) } },
                 )
                 if (sequentialImageGeneration == true) {
                     FormItem(
@@ -2219,8 +2232,8 @@ private fun SettingsBottomSheet(
                     ) {
                         OutlinedNumberInput(
                             value = sequentialMaxImages,
-                            onValueChange = {
-                                vm.updateSequentialMaxImages(it.coerceIn(1, maxImages))
+                            onValueChange = { value ->
+                                update { copy(sequentialMaxImages = value.coerceIn(1, maxImages)) }
                             },
                             modifier = Modifier.width(120.dp),
                         )
@@ -2234,7 +2247,7 @@ private fun SettingsBottomSheet(
                     description = stringResource(R.string.imggen_page_prompt_optimization_mode_desc),
                     value = promptOptimizationMode,
                     options = supportedPromptOptimizationModes,
-                    onValueChange = vm::updatePromptOptimizationMode,
+                    onValueChange = { value -> update { copy(promptOptimizationMode = value) } },
                 )
             }
 
@@ -2243,7 +2256,7 @@ private fun SettingsBottomSheet(
                     title = stringResource(R.string.imggen_page_watermark),
                     description = stringResource(R.string.imggen_page_watermark_desc),
                     value = watermark,
-                    onValueChange = vm::updateWatermark,
+                    onValueChange = { value -> update { copy(watermark = value) } },
                 )
             }
 
@@ -2256,7 +2269,11 @@ private fun SettingsBottomSheet(
                     tail = {
                         Switch(
                             checked = geminiImageOptions.includeTextResponse,
-                            onCheckedChange = vm::updateGeminiTextResponse,
+                            onCheckedChange = { enabled ->
+                                update {
+                                    copy(geminiOptions = geminiOptions.copy(includeTextResponse = enabled))
+                                }
+                            },
                         )
                     },
                 )
@@ -2272,7 +2289,11 @@ private fun SettingsBottomSheet(
                     tail = {
                         Switch(
                             checked = geminiImageOptions.webSearchGrounding,
-                            onCheckedChange = vm::updateGeminiWebSearch,
+                            onCheckedChange = { enabled ->
+                                update {
+                                    copy(geminiOptions = geminiOptions.copy(webSearchGrounding = enabled))
+                                }
+                            },
                         )
                     },
                 )
@@ -2288,7 +2309,11 @@ private fun SettingsBottomSheet(
                     tail = {
                         Switch(
                             checked = geminiImageOptions.imageSearchGrounding,
-                            onCheckedChange = vm::updateGeminiImageSearch,
+                            onCheckedChange = { enabled ->
+                                update {
+                                    copy(geminiOptions = geminiOptions.copy(imageSearchGrounding = enabled))
+                                }
+                            },
                         )
                     },
                 )
@@ -2322,6 +2347,7 @@ private fun SettingsBottomSheet(
                     }
                 }
             }
+            footerContent?.invoke()
         }
     }
 }

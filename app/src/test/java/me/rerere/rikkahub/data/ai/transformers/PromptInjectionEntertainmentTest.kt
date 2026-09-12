@@ -68,6 +68,7 @@ class PromptInjectionEntertainmentTest {
 
     @Test
     fun `triggered entry stays active then observes cooldown on a later match`() {
+        val originalUserMessage = UIMessage.user("event")
         val lorebookId = Uuid.random()
         val entry = PromptInjection.RegexInjection(
             name = "Random event",
@@ -81,7 +82,7 @@ class PromptInjectionEntertainmentTest {
         val assistant = Assistant(lorebookIds = setOf(lorebookId))
 
         val first = evaluateInjections(
-            messages = listOf(UIMessage.user("event")),
+            messages = listOf(originalUserMessage),
             assistant = assistant,
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook),
@@ -90,7 +91,7 @@ class PromptInjectionEntertainmentTest {
         assertEquals(LorebookEntryStatus.USED, first.diagnostics.entries.single().status)
 
         val sticky = evaluateInjections(
-            messages = listOf(UIMessage.user("event"), UIMessage.user("nothing")),
+            messages = listOf(originalUserMessage, UIMessage.user("nothing")),
             assistant = assistant,
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook),
@@ -101,7 +102,7 @@ class PromptInjectionEntertainmentTest {
 
         val cooldown = evaluateInjections(
             messages = listOf(
-                UIMessage.user("event"),
+                originalUserMessage,
                 UIMessage.user("nothing"),
                 UIMessage.user("event"),
             ),

@@ -66,9 +66,14 @@ class SkillDetailVM(
     fun saveFile(relativePath: String, content: String, onResult: (String?) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             if (relativePath == "SKILL.md") {
-                val name = SkillFrontmatterParser.parse(content)["name"]
+                val metadata = SkillFrontmatterParser.parse(content)
+                val name = metadata["name"]
                 if (name != skillName) {
                     withContext(Dispatchers.Main) { onResult("不允许修改技能名称（name 字段必须为 \"$skillName\"）") }
+                    return@launch
+                }
+                if (metadata["description"].isNullOrBlank()) {
+                    withContext(Dispatchers.Main) { onResult("技能描述（description）不能为空") }
                     return@launch
                 }
             }

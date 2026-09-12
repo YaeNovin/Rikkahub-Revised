@@ -41,6 +41,7 @@ import me.rerere.ai.provider.GeminiImageGenerationOptions
 import me.rerere.ai.provider.GeminiSafetySettings
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderRequestException
@@ -62,6 +63,10 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.model.ImageGenerationRequestState
+import me.rerere.rikkahub.data.model.constrained
+import me.rerere.rikkahub.data.model.toEditParams
+import me.rerere.rikkahub.data.model.toParams
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 import me.rerere.rikkahub.data.files.FileUtils
@@ -116,7 +121,39 @@ class ImgGenVM(
     val providerManager: ProviderManager,
     val genMediaRepository: GenMediaRepository,
     private val filesManager: FilesManager,
+    private val mediaService: me.rerere.rikkahub.data.ai.MediaGenerationService,
+    private val generationKeepAlive: me.rerere.rikkahub.service.GenerationKeepAlive,
 ) : AndroidViewModel(context) {
+    private fun requestState(promptOverride: String? = null): ImageGenerationRequestState =
+        ImageGenerationRequestState(
+            prompt = promptOverride ?: prompt.value,
+            size = size.value,
+            quality = quality.value,
+            outputFormat = outputFormat.value,
+            background = background.value,
+            outputCompression = outputCompression.value,
+            resolution = resolution.value,
+            thinkingLevel = thinkingLevel.value,
+            count = numberOfImages.value,
+            seed = seed.value,
+            steps = steps.value,
+            guidanceScale = guidanceScale.value,
+            negativePrompt = negativePrompt.value,
+            promptEnhancement = promptEnhancement.value,
+            promptEnhancementMode = promptEnhancementMode.value,
+            imageThinking = imageThinking.value,
+            watermark = watermark.value,
+            moderation = moderation.value,
+            inputFidelity = inputFidelity.value,
+            safetyTolerance = safetyTolerance.value,
+            sampler = sampler.value,
+            stylePreset = stylePreset.value,
+            sequentialImageGeneration = sequentialImageGeneration.value,
+            sequentialMaxImages = sequentialMaxImages.value,
+            promptOptimizationMode = promptOptimizationMode.value,
+            geminiOptions = geminiImageOptions.value,
+        )
+
     private val _prompt = MutableStateFlow("")
     val prompt: StateFlow<String> = _prompt
 
@@ -524,6 +561,35 @@ class ImgGenVM(
         _geminiImageOptions.value = _geminiImageOptions.value.copy(safetySettings = settings)
     }
 
+    fun updateRequestState(state: ImageGenerationRequestState) {
+        _prompt.value = state.prompt
+        _numberOfImages.value = state.count.coerceIn(1, 10)
+        _size.value = state.size
+        _quality.value = state.quality
+        _outputFormat.value = state.outputFormat
+        _background.value = state.background
+        _outputCompression.value = state.outputCompression.coerceIn(0, 100)
+        _resolution.value = state.resolution
+        _thinkingLevel.value = state.thinkingLevel
+        _seed.value = state.seed
+        _steps.value = state.steps
+        _guidanceScale.value = state.guidanceScale
+        _negativePrompt.value = state.negativePrompt
+        _promptEnhancement.value = state.promptEnhancement
+        _promptEnhancementMode.value = state.promptEnhancementMode
+        _imageThinking.value = state.imageThinking
+        _watermark.value = state.watermark
+        _moderation.value = state.moderation
+        _inputFidelity.value = state.inputFidelity
+        _safetyTolerance.value = state.safetyTolerance
+        _sampler.value = state.sampler
+        _stylePreset.value = state.stylePreset
+        _sequentialImageGeneration.value = state.sequentialImageGeneration
+        _sequentialMaxImages.value = state.sequentialMaxImages.coerceIn(1, 15)
+        _promptOptimizationMode.value = state.promptOptimizationMode
+        _geminiImageOptions.value = state.geminiOptions
+    }
+
     fun addReferenceImages(paths: List<String>) {
         if (_isGenerating.value) {
             deleteReferenceFiles(paths)
@@ -580,7 +646,8 @@ class ImgGenVM(
                 _currentGeneratedImages.value = emptyList()
 
                 val settings = settingsStore.settingsFlow.first()
-                val model = settings.findModelById(settings.imageGenerationModelId)
+                val model = settings.findModelById(settings.imageGenerationPageModelId)
+                    ?.takeIf { it.type == ModelType.IMAGE }
                     ?: throw IllegalStateException("No model selected")
 
                 val provider = model.findProvider(settings.providers)
@@ -592,38 +659,11 @@ class ImgGenVM(
                 }
 
                 val requestPrompt = _prompt.value
-                val params = ImageGenerationParams(
-                    model = model,
-                    prompt = requestPrompt,
-                    numOfImages = _numberOfImages.value.coerceAtMost(constraints.maxOutputImages),
-                    size = _size.value,
-                    quality = _quality.value,
-                    outputFormat = _outputFormat.value,
-                    background = _background.value,
-                    outputCompression = _outputCompression.value,
-                    resolution = _resolution.value,
-                    thinkingLevel = _thinkingLevel.value,
-                    seed = _seed.value,
-                    steps = _steps.value,
-                    guidanceScale = _guidanceScale.value,
-                    negativePrompt = _negativePrompt.value,
-                    promptEnhancement = _promptEnhancement.value,
-                    promptEnhancementMode = _promptEnhancementMode.value,
-                    imageThinking = _imageThinking.value,
-                    watermark = _watermark.value,
-                    moderation = _moderation.value,
-                    safetyTolerance = _safetyTolerance.value,
-                    sampler = _sampler.value,
-                    stylePreset = _stylePreset.value,
-                    sequentialImageGeneration = _sequentialImageGeneration.value,
-                    sequentialMaxImages = _sequentialMaxImages.value,
-                    promptOptimizationMode = _promptOptimizationMode.value,
-                    geminiOptions = _geminiImageOptions.value,
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies
-                )
+                val params = requestState(requestPrompt)
+                    .constrained(constraints)
+                    .toParams(model)
 
-                val images = providerClient.generateImage(provider, params)
+                val images = mediaService.generateImage(provider, params)
 
                 collectImageGenerationWithRetry(
                     settings = settings,
@@ -643,6 +683,7 @@ class ImgGenVM(
                 _isGenerating.value = false
             }
         }
+        cancelJob?.let(generationKeepAlive::track)
     }
 
     fun editImage() {
@@ -655,7 +696,8 @@ class ImgGenVM(
                 _currentGeneratedImages.value = emptyList()
 
                 val settings = settingsStore.settingsFlow.first()
-                val model = settings.findModelById(settings.imageGenerationModelId)
+                val model = settings.findModelById(settings.imageGenerationPageModelId)
+                    ?.takeIf { it.type == ModelType.IMAGE }
                     ?: throw IllegalStateException("No model selected")
 
                 val provider = model.findProvider(settings.providers)
@@ -668,40 +710,11 @@ class ImgGenVM(
 
                 val requestPrompt = _prompt.value
                 val sourceImages = _referenceImages.value.toList().take(constraints.maxReferenceImages)
-                val params = ImageEditParams(
-                    model = model,
-                    prompt = requestPrompt,
-                    images = sourceImages,
-                    numOfImages = _numberOfImages.value.coerceAtMost(constraints.maxOutputImages),
-                    size = _size.value,
-                    quality = _quality.value,
-                    outputFormat = _outputFormat.value,
-                    background = _background.value,
-                    outputCompression = _outputCompression.value,
-                    resolution = _resolution.value,
-                    thinkingLevel = _thinkingLevel.value,
-                    seed = _seed.value,
-                    steps = _steps.value,
-                    guidanceScale = _guidanceScale.value,
-                    negativePrompt = _negativePrompt.value,
-                    promptEnhancement = _promptEnhancement.value,
-                    promptEnhancementMode = _promptEnhancementMode.value,
-                    imageThinking = _imageThinking.value,
-                    watermark = _watermark.value,
-                    moderation = _moderation.value,
-                    inputFidelity = _inputFidelity.value,
-                    safetyTolerance = _safetyTolerance.value,
-                    sampler = _sampler.value,
-                    stylePreset = _stylePreset.value,
-                    sequentialImageGeneration = _sequentialImageGeneration.value,
-                    sequentialMaxImages = _sequentialMaxImages.value,
-                    promptOptimizationMode = _promptOptimizationMode.value,
-                    geminiOptions = _geminiImageOptions.value,
-                    customHeaders = model.customHeaders,
-                    customBody = model.customBodies
-                )
+                val params = requestState(requestPrompt)
+                    .constrained(constraints)
+                    .toEditParams(model, sourceImages)
 
-                val images = providerClient.editImage(provider, params)
+                val images = mediaService.editImage(provider, params)
 
                 collectImageGenerationWithRetry(
                     settings = settings,
@@ -723,6 +736,7 @@ class ImgGenVM(
                 _isGenerating.value = false
             }
         }
+        cancelJob?.let(generationKeepAlive::track)
     }
 
     fun cancelGeneration() {

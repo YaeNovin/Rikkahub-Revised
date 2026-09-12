@@ -69,7 +69,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import me.rerere.rikkahub.ui.components.ui.TopAppBar
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -174,7 +174,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     }
 
     Scaffold(
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -1092,6 +1092,7 @@ private fun ModelTypeSelector(
                                 ModelType.CHAT -> R.string.setting_provider_page_chat_model
                                 ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
                                 ModelType.IMAGE -> R.string.setting_provider_page_image_model
+                                ModelType.VIDEO -> R.string.setting_provider_page_video_model
                             }
                         )
                     )
@@ -1111,7 +1112,7 @@ private fun ModelModalitySelector(
     outputModalities: List<Modality>,
     onUpdateOutputModalities: (List<Modality>) -> Unit
 ) {
-    if (model.type == ModelType.CHAT) {
+    if (model.type == ModelType.CHAT || model.type == ModelType.EMBEDDING || model.type == ModelType.VIDEO) {
         Text(
             stringResource(R.string.setting_provider_page_input_modality),
             style = MaterialTheme.typography.titleSmall
@@ -1136,6 +1137,7 @@ private fun ModelModalitySelector(
                             when (modality) {
                                 Modality.TEXT -> R.string.setting_provider_page_text
                                 Modality.IMAGE -> R.string.setting_provider_page_image
+                                Modality.VIDEO -> R.string.setting_provider_page_video
                             }
                         )
                     )
@@ -1143,33 +1145,36 @@ private fun ModelModalitySelector(
             }
         }
 
-        Text(
-            stringResource(R.string.setting_provider_page_output_modality),
-            style = MaterialTheme.typography.titleSmall
-        )
-        MultiChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Modality.entries.forEachIndexed { index, modality ->
-                SegmentedButton(
-                    checked = modality in outputModalities,
-                    shape = SegmentedButtonDefaults.itemShape(index, Modality.entries.size),
-                    onCheckedChange = {
-                        if (it) {
-                            onUpdateOutputModalities(outputModalities + modality)
-                        } else {
-                            onUpdateOutputModalities(outputModalities - modality)
-                        }
-                    }
-                ) {
-                    Text(
-                        text = stringResource(
-                            when (modality) {
-                                Modality.TEXT -> R.string.setting_provider_page_text
-                                Modality.IMAGE -> R.string.setting_provider_page_image
+        if (model.type == ModelType.CHAT) {
+            Text(
+                stringResource(R.string.setting_provider_page_output_modality),
+                style = MaterialTheme.typography.titleSmall
+            )
+            MultiChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Modality.entries.forEachIndexed { index, modality ->
+                    SegmentedButton(
+                        checked = modality in outputModalities,
+                        shape = SegmentedButtonDefaults.itemShape(index, Modality.entries.size),
+                        onCheckedChange = {
+                            if (it) {
+                                onUpdateOutputModalities(outputModalities + modality)
+                            } else {
+                                onUpdateOutputModalities(outputModalities - modality)
                             }
+                        }
+                    ) {
+                        Text(
+                            text = stringResource(
+                                when (modality) {
+                                    Modality.TEXT -> R.string.setting_provider_page_text
+                                    Modality.IMAGE -> R.string.setting_provider_page_image
+                                    Modality.VIDEO -> R.string.setting_provider_page_video
+                                }
+                            )
                         )
-                    )
+                    }
                 }
             }
         }

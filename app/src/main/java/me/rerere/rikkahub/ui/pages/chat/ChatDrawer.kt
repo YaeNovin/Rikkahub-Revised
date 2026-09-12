@@ -217,6 +217,7 @@ fun ChatDrawerContent(
             },
             modifier = Modifier.fillMaxSize(),
             shape = RectangleShape,
+            backgroundRendering = me.rerere.rikkahub.ui.components.ui.IsolatedBackgroundRendering.INDEPENDENT,
         ) {
             Column(
                 modifier = Modifier
@@ -341,10 +342,6 @@ fun ChatDrawerContent(
                 },
             )
 
-            if (showUtilityActions) {
-                DrawerUtilityActions(onNavigate = onNavigate)
-            }
-
             // 助手选择器
             AssistantPicker(
                 settings = settings,
@@ -395,6 +392,7 @@ fun ChatDrawerContent(
                 DrawerUtilityMenu(
                     expanded = showUtilityActions,
                     onExpandedChange = { showUtilityActions = it },
+                    onNavigate = onNavigate,
                 )
 
                 DrawerAction(
@@ -716,67 +714,57 @@ fun ChatDrawerContent(
 private fun DrawerUtilityMenu(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-) {
-    DrawerAction(
-        icon = {
-            Icon(HugeIcons.Sparkles, "Menu")
-        },
-        label = {
-            Text(stringResource(R.string.menu))
-        },
-        onClick = { onExpandedChange(!expanded) },
-    )
-}
-
-@Composable
-private fun DrawerUtilityActions(
     onNavigate: (Screen) -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        DrawerUtilityAction(
-            icon = HugeIcons.LanguageCircle,
-            label = stringResource(R.string.chat_page_menu_ai_translator),
-            onClick = { onNavigate(Screen.Translator) },
+    Box {
+        DrawerAction(
+            icon = {
+                Icon(HugeIcons.Sparkles, stringResource(R.string.menu))
+            },
+            label = {
+                Text(stringResource(R.string.menu))
+            },
+            onClick = { onExpandedChange(!expanded) },
         )
-        DrawerUtilityAction(
-            icon = HugeIcons.Image02,
-            label = stringResource(R.string.chat_page_menu_image_generation),
-            onClick = { onNavigate(Screen.ImageGen) },
-        )
-    }
-}
-
-@Composable
-private fun DrawerUtilityAction(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        color = Color.Transparent,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+            modifier = Modifier.width(216.dp),
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.chat_page_menu_ai_translator)) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = HugeIcons.LanguageCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                },
+                onClick = {
+                    onExpandedChange(false)
+                    onNavigate(Screen.Translator)
+                },
             )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = HugeIcons.Image02,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                },
+                onClick = {
+                    onExpandedChange(false)
+                    onNavigate(Screen.ImageGen)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("视频生成") },
+                onClick = {
+                    onExpandedChange(false)
+                    onNavigate(Screen.VideoGen)
+                },
             )
         }
     }

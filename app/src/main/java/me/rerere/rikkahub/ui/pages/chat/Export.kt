@@ -401,7 +401,7 @@ private suspend fun exportToImage(
     options: ImageExportOptions = ImageExportOptions()
 ) {
     val filename = "chat-export-${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))}.png"
-    val composer = BitmapComposer(scope)
+    val composer = BitmapComposer()
     val activity = context.getActivity()
     if (activity == null) {
         withContext(Dispatchers.Main) {
@@ -414,7 +414,7 @@ private suspend fun exportToImage(
         return
     }
 
-    val bitmap = composer.composableToBitmap(
+    val bitmap = try { composer.composableToBitmap(
         activity = activity,
         width = 540.dp,
         screenDensity = density,
@@ -427,7 +427,13 @@ private suspend fun exportToImage(
                 )
             }
         }
-    )
+    ) } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, context.formatUserFacingError(error), Toast.LENGTH_LONG).show()
+        }
+        return
+    }
 
     try {
         val dir = context.appTempFolder
@@ -633,6 +639,8 @@ private fun ExportedChatMessage(
                             }
 
                             is UIMessagePart.Image -> {
+                                var imageLoading by remember(part.url) { mutableStateOf(true) }
+                                me.rerere.rikkahub.ui.components.ui.AwaitExportRender(imageLoading)
                                 AsyncImage(
                                     model = ImageRequest.Builder(context)
                                         .data(part.url)
@@ -640,6 +648,8 @@ private fun ExportedChatMessage(
                                         .crossfade(false)
                                         .build(),
                                     contentDescription = "Image",
+                                    onSuccess = { imageLoading = false },
+                                    onError = { imageLoading = false },
                                     modifier = Modifier
                                         .sizeIn(maxHeight = 300.dp)
                                         .clip(RoundedCornerShape(12.dp)),

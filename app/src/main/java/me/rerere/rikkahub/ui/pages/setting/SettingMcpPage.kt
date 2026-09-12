@@ -36,7 +36,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -167,10 +167,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                )
+                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),

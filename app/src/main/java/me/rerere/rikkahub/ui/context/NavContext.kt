@@ -6,6 +6,8 @@ import androidx.navigation3.runtime.NavKey
 import me.rerere.rikkahub.Screen
 
 class Navigator(private val backStack: MutableList<NavKey>) {
+    val currentScreen: NavKey? get() = backStack.lastOrNull()
+
     fun navigate(screen: Screen, builder: NavigateOptionsBuilder.() -> Unit = {}) {
         val options = NavigateOptionsBuilder().apply(builder)
 

@@ -77,6 +77,19 @@ suspend fun extractBackgroundForeground(
     }
 }
 
+internal suspend fun extractBackgroundSamples(context: Context, source: String, opacity: Float, base: Color): List<Color>? = withContext(Dispatchers.IO) {
+    val bitmap = decodeSampledBitmap(context, source) ?: return@withContext null
+    try {
+        buildList {
+            repeat(FOREGROUND_SAMPLE_ROWS) { row -> repeat(FOREGROUND_SAMPLE_COLUMNS) { column ->
+                val x = ((column + .5f) * bitmap.width / FOREGROUND_SAMPLE_COLUMNS).toInt().coerceIn(0, bitmap.width - 1)
+                val y = ((row + .5f) * bitmap.height / FOREGROUND_SAMPLE_ROWS).toInt().coerceIn(0, bitmap.height - 1)
+                add(compositeChatBackgroundColor(Color(bitmap.getPixel(x, y)), opacity, base, 0f))
+            } }
+        }
+    } finally { bitmap.recycle() }
+}
+
 private fun decodeSampledBitmap(context: Context, source: String): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     openImageStream(context, source)?.use { stream ->

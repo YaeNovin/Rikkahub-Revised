@@ -202,8 +202,9 @@ internal fun FilesPicker(
         // Extensions (Quick Messages + Prompt Injections + Skills)
         val effectiveModeIds = assistant.modeInjectionIds +
             if (assistant.allowConversationPromptInjection) conversation.modeInjectionIds else emptySet()
-        val effectiveLorebookIds = assistant.lorebookIds +
-            if (assistant.allowConversationPromptInjection) conversation.lorebookIds else emptySet()
+        val effectiveLorebookIds = (assistant.lorebookIds +
+            if (assistant.allowConversationPromptInjection) conversation.lorebookIds else emptySet()) -
+            if (assistant.allowConversationPromptInjection) conversation.disabledLorebookIds else emptySet()
         val modeAndLorebookCount = effectiveModeIds.size + effectiveLorebookIds.size
         val activeCount =
             assistant.quickMessageIds.size +
@@ -236,7 +237,9 @@ internal fun FilesPicker(
                 },
         )
 
-        if (onShowPromptDiagnostics != null) {
+        if (onShowPromptDiagnostics != null && hasEnabledPromptDiagnostics(
+                assistant, conversation, settings.modeInjections, settings.lorebooks,
+            )) {
             ListItem(
                 leadingContent = {
                     Icon(

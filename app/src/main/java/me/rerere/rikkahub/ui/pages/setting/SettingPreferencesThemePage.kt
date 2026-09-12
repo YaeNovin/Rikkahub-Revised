@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -33,6 +33,7 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
+import me.rerere.rikkahub.ui.hooks.rememberAmoledPureBlack
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -41,6 +42,7 @@ import org.koin.androidx.compose.koinViewModel
 fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var amoledDarkMode by rememberAmoledDarkMode()
+    var amoledPureBlack by rememberAmoledPureBlack()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val navController = LocalNavController.current
 
@@ -58,7 +60,7 @@ fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = CustomColors.scaffoldContainerColor
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -75,7 +77,7 @@ fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = settings.dynamicColor,
-                                onCheckedChange = { vm.updateSettings(settings.copy(dynamicColor = it)) },
+                                onCheckedChange = vm::selectDynamicColors,
                             )
                         },
                     )
@@ -95,6 +97,22 @@ fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                    if (amoledDarkMode) {
+                        item(
+                            headlineContent = {
+                                Text(stringResource(R.string.setting_display_page_amoled_pure_black_title))
+                            },
+                            supportingContent = {
+                                Text(stringResource(R.string.setting_display_page_amoled_pure_black_desc))
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = amoledPureBlack,
+                                    onCheckedChange = { amoledPureBlack = it },
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }

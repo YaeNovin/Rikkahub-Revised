@@ -3,6 +3,8 @@ package me.rerere.rikkahub.ui.components.richtext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 internal data class RailroadSpec(
@@ -21,7 +23,13 @@ internal fun normalizeRailroadSource(
     errorMessage: String = "Unable to render this content.",
 ): String {
     val trimmed = source.trim()
-    if (runCatching { Json.parseToJsonElement(trimmed) }.isSuccess) return trimmed
+    val json = runCatching { Json.parseToJsonElement(trimmed) }.getOrNull()
+    if (json is kotlinx.serialization.json.JsonObject || json is kotlinx.serialization.json.JsonArray) return trimmed
+    if (Regex("(?s)^\\s*(?:(?://[^\\n]*(?:\\n|$)|/\\*.*?\\*/)\\s*)*(?:new\\s+)?(?:Diagram|Stack)\\s*\\(").containsMatchIn(trimmed)) {
+        return runCatching { DiagramLiteralParser(trimmed).railroad() }.getOrElse {
+            buildJsonObject { put("rikkaRenderError", it.message ?: errorMessage) }
+        }.toString()
+    }
 
     val spec = runCatching { EbnfRailroadParser(trimmed).parse() }
         .getOrElse {
@@ -82,7 +90,8 @@ private class EbnfRailroadParser(source: String) {
 
     private fun parseSequence(stopSymbols: Set<String>): RailroadSpec? {
         val items = mutableListOf<RailroadSpec>()
-        while (!atEnd() && current().text !in stopSymbols) {
+        while (!atEnd() && !(current().kind == EbnfTokenKind.SYMBOL && current().text in stopSymbols)) {
+            if (current().kind == EbnfTokenKind.IDENTIFIER && peek().kind == EbnfTokenKind.ASSIGNMENT) break
             if (consumeSymbol(",")) continue
             val item = parsePostfix() ?: break
             items += item
@@ -183,10 +192,17 @@ private class EbnfTokenizer(private val source: String) {
             skipIgnored()
             if (index >= source.length) break
             when {
-                source.startsWith("::=", index) -> addAndAdvance(EbnfTokenKind.ASSIGNMENT, 3)
-                source.startsWith(":=", index) || source.startsWith("->", index) -> addAndAdvance(EbnfTokenKind.ASSIGNMENT, 2)
-                source[index] == '=' -> addAndAdvance(EbnfTokenKind.ASSIGNMENT, 1)
+                source.startsWith("::=", index) -> add(addAndAdvance(EbnfTokenKind.ASSIGNMENT, 3))
+                source.startsWith(":=", index) || source.startsWith("->", index) -> add(addAndAdvance(EbnfTokenKind.ASSIGNMENT, 2))
+                source[index] == '=' -> add(addAndAdvance(EbnfTokenKind.ASSIGNMENT, 1))
                 source[index] == '\'' || source[index] == '"' -> add(readString())
+                source[index] == '[' && source.indexOf(']', index + 1).let { end ->
+                    end > index && source.substring(index + 1, end).matches(Regex("\\^?[A-Za-z0-9]-[A-Za-z0-9]"))
+                } -> {
+                    val end = source.indexOf(']', index + 1) + 1
+                    add(EbnfToken(EbnfTokenKind.STRING, source.substring(index, end)))
+                    index = end
+                }
                 source[index].isLetterOrDigit() || source[index] == '_' || source[index] == '-' -> add(readIdentifier())
                 else -> add(EbnfToken(EbnfTokenKind.SYMBOL, source[index++].toString()))
             }
@@ -205,6 +221,11 @@ private class EbnfTokenizer(private val source: String) {
                 source.startsWith("//", index) -> {
                     val lineEnd = source.indexOf('\n', index + 2)
                     index = if (lineEnd >= 0) lineEnd + 1 else source.length
+                }
+                source.startsWith("/*", index) -> {
+                    val closing = source.indexOf("*/", index + 2)
+                    require(closing >= 0) { "Unterminated comment" }
+                    index = closing + 2
                 }
 
                 source[index] == '#' -> {

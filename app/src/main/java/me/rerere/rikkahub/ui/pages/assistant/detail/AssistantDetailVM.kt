@@ -23,6 +23,8 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.GradientBackgroundCustomColors
+import me.rerere.rikkahub.data.model.MemoryLifecycleState
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.model.withPromptSettingsFrom
@@ -58,6 +60,7 @@ class AssistantDetailVM(
 
     val settings: StateFlow<Settings> =
         settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
+    val memoryEditError = MutableStateFlow<String?>(null)
 
     val mcpServerConfigs = settingsStore
         .settingsFlow.map { settings ->
@@ -116,78 +119,54 @@ class AssistantDetailVM(
 
     fun updateTags(tagIds: List<Uuid>, tags: List<Tag>) {
         viewModelScope.launch {
-            val settings = settings.value
-            settingsStore.update(
-                settings = settings.copy(
-                    assistantTags = tags
+            settingsStore.update { current ->
+                current.copy(
+                    assistantTags = tags,
+                    assistants = current.assistants.map { if (it.id == assistantId) it.copy(tags = tagIds.toList()) else it },
                 )
-            )
-            update(
-                assistant.value.copy(
-                    tags = tagIds.toList()
-                )
-            )
-            Log.d(TAG, "updateTags: ${tagIds.joinToString(",")}")
+            }
             cleanupUnusedTags()
         }
     }
 
     fun cleanupUnusedTags() {
         viewModelScope.launch {
-            val settings = settings.value
-            val validTagIds = settings.assistantTags.map { it.id }.toSet()
-
-            // 清理 assistant 中的无效 tag id
-            val cleanedAssistants = settings.assistants.map { assistant ->
-                val validTags = assistant.tags.filter { tagId ->
-                    validTagIds.contains(tagId)
-                }
-                if (validTags.size != assistant.tags.size) {
-                    assistant.copy(tags = validTags)
-                } else {
-                    assistant
-                }
+            settingsStore.update { current ->
+                val validTagIds = current.assistantTags.map { it.id }.toSet()
+                val assistants = current.assistants.map { assistant -> assistant.copy(tags = assistant.tags.filter { it in validTagIds }) }
+                val usedIds = assistants.flatMap { it.tags }.toSet()
+                current.copy(assistants = assistants, assistantTags = current.assistantTags.filter { it.id in usedIds })
             }
+        }
+    }
 
-            // 获取清理后的 assistant 中使用的 tag id
-            val usedTagIds = cleanedAssistants.flatMap { it.tags }.toSet()
-
-            // 清理未使用的 tags
-            val cleanedTags = settings.assistantTags.filter { tag ->
-                usedTagIds.contains(tag.id)
+    fun update(assistant: Assistant, before: Assistant = this.assistant.value) {
+        viewModelScope.launch(Dispatchers.Default) {
+            if (assistant.id != assistantId || before.id != assistantId) return@launch
+            // Media may also be referenced by another assistant, a revision or the
+            // global background. Keep it for explicit file management after saving.
+            settingsStore.updateAssistantConfig(assistantId) { current ->
+                me.rerere.rikkahub.data.model.mergeAssistantEdits(before, assistant, current)
             }
+        }
+    }
 
-            // 检查是否需要更新
-            val needUpdateAssistants = cleanedAssistants != settings.assistants
-            val needUpdateTags = cleanedTags.size != settings.assistantTags.size
-
-            if (needUpdateAssistants || needUpdateTags) {
-                settingsStore.update(
-                    settings = settings.copy(
-                        assistants = cleanedAssistants,
-                        assistantTags = cleanedTags
+    fun updateGradientBackgroundCustomColors(
+        transform: (GradientBackgroundCustomColors) -> GradientBackgroundCustomColors,
+    ) {
+        viewModelScope.launch {
+            settingsStore.updateAssistantConfig(assistantId) { currentAssistant ->
+                currentAssistant.copy(
+                    gradientBackgroundCustomColors = transform(
+                        currentAssistant.gradientBackgroundCustomColors
                     )
                 )
             }
         }
     }
 
-    fun update(assistant: Assistant) {
-        viewModelScope.launch {
-            val settings = settings.value
-            settingsStore.update(
-                settings = settings.copy(
-                    assistants = settings.assistants.map {
-                        if (it.id == assistant.id) {
-                            checkAvatarDelete(old = it, new = assistant) // 删除旧头像
-                            checkBackgroundDelete(old = it, new = assistant) // 删除旧背景
-                            assistant
-                        } else {
-                            it
-                        }
-                    })
-            )
-        }
+    fun useAssistantBackground() {
+        viewModelScope.launch { settingsStore.updateAdvancedAppearance { it.copy(applyGlobalBackgroundToChat = false) } }
     }
 
     fun updatePromptSettings(draft: Assistant) {
@@ -222,12 +201,14 @@ class AssistantDetailVM(
                 settings = settings.value,
                 type = memory.type,
                 sourceConversationId = memory.sourceConversationId,
+                lifecycleState = memory.lifecycleState,
             )
         }
     }
 
     fun updateMemory(memory: AssistantMemory) {
         viewModelScope.launch {
+            try {
             val memoryAssistantId = if (assistant.value.useGlobalMemory) {
                 MemoryRepository.GLOBAL_MEMORY_ID
             } else {
@@ -239,7 +220,11 @@ class AssistantDetailVM(
                 content = memory.content,
                 settings = settings.value,
                 type = memory.type,
+                lifecycleState = memory.lifecycleState,
+                expectedRevision = memory.revision,
             )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { memoryEditError.value = error.message ?: "记忆保存失败" }
         }
     }
 
@@ -254,25 +239,4 @@ class AssistantDetailVM(
         }
     }
 
-    fun checkAvatarDelete(old: Assistant, new: Assistant) {
-        if (old.avatar is Avatar.Image && old.avatar != new.avatar) {
-            filesManager.deleteChatFiles(listOf(old.avatar.url.toUri()))
-        }
-    }
-
-    fun checkBackgroundDelete(old: Assistant, new: Assistant) {
-        val oldBackground = old.background
-        val newBackground = new.background
-
-        if (oldBackground != null && oldBackground != newBackground) {
-            try {
-                val oldUri = oldBackground.toUri()
-                if (oldUri.scheme == "content" || oldUri.scheme == "file") {
-                    filesManager.deleteChatFiles(listOf(oldUri))
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to delete background file: $oldBackground", e)
-            }
-        }
-    }
 }

@@ -37,6 +37,11 @@ fun rememberAmoledDarkMode(): MutableState<Boolean> {
     return rememberSharedPreferenceBoolean("amoledDark", false)
 }
 
+@Composable
+fun rememberAmoledPureBlack(): MutableState<Boolean> {
+    return rememberSharedPreferenceBoolean("amoledPureBlack", false)
+}
+
 private fun String?.toColorMode(): ColorMode {
     return ColorMode.entries.firstOrNull { it.name == this } ?: ColorMode.SYSTEM
 }

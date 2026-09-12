@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Tab
@@ -55,7 +55,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor
+        containerColor = CustomColors.scaffoldContainerColor
     ) { contentPadding ->
         Column(
             modifier = Modifier
@@ -64,7 +64,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         ) {
             SecondaryScrollableTabRow(
                 selectedTabIndex = pagerState.currentPage,
-                containerColor = CustomColors.topBarColors.containerColor,
+                containerColor = CustomColors.scaffoldContainerColor,
                 edgePadding = 4.dp,
             ) {
                 Tab(

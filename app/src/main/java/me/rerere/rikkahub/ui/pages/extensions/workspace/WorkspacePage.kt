@@ -19,7 +19,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -61,6 +61,7 @@ import org.koin.androidx.compose.koinViewModel
 fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
     val navController = LocalNavController.current
     val workspaces by vm.workspaces.collectAsStateWithLifecycle()
+    val operationError by vm.operationError.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<WorkspaceEntity?>(null) }
@@ -81,7 +82,7 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
             }
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -113,8 +114,7 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
             existingNames = workspaces.map { it.workspace.name.trim() }.toSet(),
             onDismiss = { showAddDialog = false },
             onConfirm = { name ->
-                vm.create(name)
-                showAddDialog = false
+                vm.create(name) { showAddDialog = false }
             },
         )
     }
@@ -129,9 +129,17 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
                 .toSet(),
             onDismiss = { editTarget = null },
             onConfirm = { name ->
-                vm.rename(workspace, name)
-                editTarget = null
+                vm.rename(workspace, name) { editTarget = null }
             },
+        )
+    }
+
+    if (operationError != null) {
+        AlertDialog(
+            onDismissRequest = { vm.operationError.value = null },
+            title = { Text("操作未完成") },
+            text = { Text(operationError.orEmpty()) },
+            confirmButton = { TextButton(onClick = { vm.operationError.value = null }) { Text("知道了") } },
         )
     }
 

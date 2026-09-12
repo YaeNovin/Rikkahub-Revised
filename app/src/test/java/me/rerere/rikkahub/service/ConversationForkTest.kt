@@ -34,6 +34,7 @@ class ConversationForkTest {
         val source = Conversation(
             assistantId = Uuid.random(),
             title = "Source conversation",
+            memoryMode = me.rerere.rikkahub.data.model.ConversationMemoryMode.RAG_ONLY,
             messageNodes = listOf(
                 targetNode,
                 MessageNode.of(UIMessage.assistant("answer")),
@@ -64,7 +65,9 @@ class ConversationForkTest {
         assertEquals(branchedAt, fork.branchedAt)
         assertEquals(branchedAt, fork.createAt)
         assertEquals(branchedAt, fork.updateAt)
+        assertEquals("分支•Source conversation", fork.title)
         assertEquals(source.title, fork.sourceConversationTitle)
+        assertEquals(source.memoryMode, fork.memoryMode)
     }
 
     @Test

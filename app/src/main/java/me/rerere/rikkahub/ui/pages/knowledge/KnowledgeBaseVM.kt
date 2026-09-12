@@ -57,6 +57,12 @@ class KnowledgeBaseVM(
         viewModelScope.launch { repository.updateBaseRagEnabled(id, enabled) }
     }
 
+    fun setBaseEmbeddingModel(id: String, modelId: Uuid?) {
+        viewModelScope.launch {
+            repository.updateBaseEmbeddingModel(id, modelId?.toString())
+        }
+    }
+
     fun deleteDocument(id: String) {
         viewModelScope.launch { repository.deleteDocument(id) }
     }

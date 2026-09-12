@@ -49,7 +49,7 @@ import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.modifier.reasoningFlow
 import me.rerere.rikkahub.utils.extractThinkingTitle
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -61,6 +61,9 @@ enum class ReasoningCardState(val expanded: Boolean) {
     Preview(true),
     Expanded(true),
 }
+
+internal fun shouldAnimateReasoningSummary(loading: Boolean, state: ReasoningCardState, effectsEnabled: Boolean): Boolean =
+    loading && state != ReasoningCardState.Expanded && effectsEnabled
 
 @Stable
 private class ReasoningState(
@@ -132,6 +135,7 @@ private fun ReasoningContent(
     val isPreview = expandState == ReasoningCardState.Preview
     val reasoningTextStyle = MaterialTheme.typography.bodySmall.copy(
         fontFamily = LocalTextStyle.current.fontFamily,
+        color = MaterialTheme.colorScheme.onSurface,
     )
     Column(
         modifier = Modifier
@@ -141,13 +145,14 @@ private fun ReasoningContent(
                     contentModifier
                         .graphicsLayer { alpha = 0.99f }
                         .drawWithCache {
+                            val edgeFraction = ((fadeHeight.takeIf { it.isFinite() } ?: 0f) / size.height.coerceAtLeast(1f)).coerceIn(0f, .5f)
                             val brush = Brush.verticalGradient(
                                 startY = 0f,
                                 endY = size.height,
                                 colorStops = arrayOf(
                                     0.0f to Color.Transparent,
-                                    (fadeHeight / size.height) to Color.Black,
-                                    (1 - fadeHeight / size.height) to Color.Black,
+                                    edgeFraction to Color.Black,
+                                    (1 - edgeFraction) to Color.Black,
                                     1.0f to Color.Transparent
                                 )
                             )
@@ -202,21 +207,24 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
     val chatFontFamily = LocalTextStyle.current.fontFamily
+    val animateSummary = shouldAnimateReasoningSummary(loading, state.expandState,
+        LocalSettings.current.advancedAppearanceSetting.enableRichContentPerformanceEffects)
 
     ControlledChainOfThoughtStep(
         expanded = state.expandState == ReasoningCardState.Expanded,
         onExpandedChange = { state.onExpandedChange(it, loading) },
+        headerModifier = Modifier.reasoningFlow(animateSummary),
         icon = {
             Icon(
                 imageVector = HugeIcons.Idea01,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.secondary,
+                tint = MaterialTheme.colorScheme.onSurface,
             )
         },
         label = {
             if (showThinkingTitle) {
-                ReasoningTitle(title = thinkingTitle!!)
+                ReasoningTitle(title = thinkingTitle!!, animate = animateSummary)
             } else {
                 Text(
                     text = stringResource(
@@ -224,8 +232,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat()
                     ),
                     style = MaterialTheme.typography.titleSmall.copy(fontFamily = chatFontFamily),
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.shimmer(isLoading = loading),
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
         },
@@ -234,8 +241,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 Text(
                     text = state.duration.toString(DurationUnit.SECONDS, 1),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = chatFontFamily),
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.shimmer(isLoading = loading),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
@@ -256,8 +262,13 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
 
 
 @Composable
-private fun ReasoningTitle(title: String) {
+private fun ReasoningTitle(title: String, animate: Boolean) {
     val chatFontFamily = LocalTextStyle.current.fontFamily
+    if (!animate) {
+        Text(title, style = MaterialTheme.typography.titleSmall.copy(fontFamily = chatFontFamily),
+            color = MaterialTheme.colorScheme.onSurface)
+        return
+    }
     AnimatedContent(
         targetState = title,
         transitionSpec = {
@@ -269,10 +280,9 @@ private fun ReasoningTitle(title: String) {
         Text(
             text = it,
             style = MaterialTheme.typography.titleSmall.copy(fontFamily = chatFontFamily),
-            color = MaterialTheme.colorScheme.secondary,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
-                .padding(horizontal = 4.dp)
-                .shimmer(true),
+                .padding(horizontal = 4.dp),
         )
     }
 }

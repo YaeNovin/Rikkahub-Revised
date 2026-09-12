@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -49,7 +49,9 @@ import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryLifecycleState
 import me.rerere.rikkahub.data.model.MemoryType
+import me.rerere.rikkahub.data.model.usesVectorMemory
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -72,24 +74,34 @@ fun AssistantMemoryPage(id: String) {
     val vm: AssistantDetailVM = koinViewModel(parameters = { parametersOf(id) })
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val memories by vm.memories.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val memoryEditError by vm.memoryEditError.collectAsStateWithLifecycle()
+    memoryEditError?.let { message -> AlertDialog(onDismissRequest = { vm.memoryEditError.value = null }, title = { Text("未能保存") },
+        text = { Text(message) }, confirmButton = { TextButton(onClick = { vm.memoryEditError.value = null }) { Text("关闭") } }) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var showMaintenance by remember { mutableStateOf(false) }
+    if (showMaintenance) AlertDialog(onDismissRequest = { showMaintenance = false }, title = { Text("记忆维护") },
+        text = { me.rerere.rikkahub.ui.pages.chat.ClearAllMemoryButton() },
+        confirmButton = { TextButton(onClick = { showMaintenance = false }) { Text("关闭") } })
 
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.assistant_page_tab_memory)) },
                 navigationIcon = { BackButton() },
+                actions = { TextButton(onClick = { showMaintenance = true }) { Text("清理") } },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         AssistantMemoryContent(
             innerPadding = innerPadding,
             assistant = assistant,
             memories = memories,
+            vectorOnly = settings.usesVectorMemory(),
             onUpdateAssistant = vm::update,
             onDeleteMemory = vm::deleteMemory,
             onAddMemory = vm::addMemory,
@@ -103,6 +115,7 @@ private fun AssistantMemoryContent(
     innerPadding: PaddingValues,
     assistant: Assistant,
     memories: List<AssistantMemory>,
+    vectorOnly: Boolean,
     onUpdateAssistant: (Assistant) -> Unit,
     onAddMemory: (AssistantMemory) -> Unit,
     onUpdateMemory: (AssistantMemory) -> Unit,
@@ -189,6 +202,30 @@ private fun AssistantMemoryContent(
                             }
                         }
                     }
+                    if (memory.id != 0 && memory.type == MemoryType.EPISODIC) {
+                        Text(
+                            text = stringResource(R.string.assistant_page_memory_lifecycle_label),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            MemoryLifecycleState.entries.forEachIndexed { index, state ->
+                                SegmentedButton(
+                                    selected = memory.lifecycleState == state,
+                                    onClick = { update(memory.copy(lifecycleState = state)) },
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index = index,
+                                        count = MemoryLifecycleState.entries.size,
+                                    ),
+                                ) {
+                                    Text(
+                                        lifecycleLabel(state),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     if (!assistant.enableEpisodicMemory) {
                         Text(
                             text = stringResource(R.string.assistant_page_episodic_memory_disabled_hint),
@@ -226,7 +263,10 @@ private fun AssistantMemoryContent(
             CardGroup {
                 item(
                     headlineContent = { Text(stringResource(R.string.assistant_page_memory)) },
-                    supportingContent = { Text(stringResource(R.string.assistant_page_memory_desc)) },
+                    supportingContent = { Text(stringResource(
+                        if (vectorOnly) R.string.setting_memory_vector_model_desc
+                        else R.string.assistant_page_memory_desc
+                    )) },
                     trailingContent = {
                         Switch(
                             checked = assistant.enableMemory,
@@ -238,17 +278,25 @@ private fun AssistantMemoryContent(
                 )
                 item(
                     headlineContent = { Text(stringResource(R.string.assistant_page_global_memory)) },
-                    supportingContent = { Text(stringResource(R.string.assistant_page_global_memory_desc)) },
+                    supportingContent = { Text(stringResource(
+                        if (vectorOnly) R.string.memory_vector_shared_unavailable
+                        else R.string.assistant_page_global_memory_desc
+                    )) },
                     trailingContent = {
                         Switch(
-                            checked = assistant.useGlobalMemory,
+                            checked = !vectorOnly && assistant.useGlobalMemory,
                             onCheckedChange = { enabled ->
                                 onUpdateAssistant(assistant.copy(useGlobalMemory = enabled))
                             },
-                            enabled = assistant.enableMemory,
+                            enabled = assistant.enableMemory && !vectorOnly,
                         )
                     },
                 )
+            }
+        }
+
+        item(key = "memory_context_sources") {
+            CardGroup(title = { Text(stringResource(R.string.assistant_page_memory_context_sources)) }) {
                 item(
                     headlineContent = { Text(stringResource(R.string.assistant_page_recent_chats)) },
                     supportingContent = { Text(stringResource(R.string.assistant_page_recent_chats_desc)) },
@@ -279,40 +327,35 @@ private fun AssistantMemoryContent(
         item(key = "advanced_memory_settings") {
             CardGroup(title = { Text(stringResource(R.string.assistant_page_advanced_memory)) }) {
                 item(
-                    headlineContent = { Text(stringResource(R.string.assistant_page_memory_mode_title)) },
-                    supportingContent = {
-                        Text(
-                            when {
-                                !assistant.enableMemory -> stringResource(R.string.assistant_page_memory_mode_disabled)
-                                assistant.enableMemoryRag -> stringResource(R.string.assistant_page_memory_mode_rag)
-                                else -> stringResource(R.string.assistant_page_memory_mode_basic)
-                            }
-                        )
-                    },
-                )
-                item(
                     headlineContent = { Text(stringResource(R.string.assistant_page_memory_rag)) },
-                    supportingContent = { Text(stringResource(R.string.assistant_page_memory_rag_desc)) },
+                    supportingContent = { Text(stringResource(
+                        if (vectorOnly) R.string.memory_vector_rag_automatic
+                        else R.string.assistant_page_memory_rag_desc
+                    )) },
                     trailingContent = {
                         Switch(
-                            checked = assistant.enableMemoryRag,
+                            checked = if (vectorOnly) assistant.enableMemory || assistant.enableMemoryRag
+                                else assistant.enableMemoryRag,
                             onCheckedChange = { enabled ->
                                 onUpdateAssistant(assistant.copy(enableMemoryRag = enabled))
                             },
-                            enabled = assistant.enableMemory,
+                            enabled = assistant.enableMemory && !vectorOnly,
                         )
                     },
                 )
                 item(
                     headlineContent = { Text(stringResource(R.string.assistant_page_episodic_memory)) },
-                    supportingContent = { Text(stringResource(R.string.assistant_page_episodic_memory_desc)) },
+                    supportingContent = { Text(stringResource(
+                        if (vectorOnly) R.string.memory_vector_episodic_unavailable
+                        else R.string.assistant_page_episodic_memory_desc
+                    )) },
                     trailingContent = {
                         Switch(
-                            checked = assistant.enableEpisodicMemory,
+                            checked = !vectorOnly && assistant.enableEpisodicMemory,
                             onCheckedChange = { enabled ->
                                 onUpdateAssistant(assistant.copy(enableEpisodicMemory = enabled))
                             },
-                            enabled = assistant.enableMemory,
+                            enabled = assistant.enableMemory && !vectorOnly,
                         )
                     },
                 )
@@ -446,6 +489,12 @@ private fun MemoryItem(
         if (memory.type == MemoryType.FACT) R.string.assistant_page_memory_filter_fact
         else R.string.assistant_page_memory_filter_episodic
     )
+    val lifecycleLabel = lifecycleLabel(memory.lifecycleState)
+    val lifecycleColor = when (memory.lifecycleState) {
+        MemoryLifecycleState.ACTIVE -> MaterialTheme.colorScheme.primary
+        MemoryLifecycleState.COMPLETED,
+        MemoryLifecycleState.SUPERSEDED -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     val createdAt = if (memory.createdAt > 0L) {
         stringResource(
             R.string.assistant_page_memory_created_at,
@@ -477,12 +526,8 @@ private fun MemoryItem(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "$typeLabel · #${memory.id}",
-                    color = if (memory.type == MemoryType.EPISODIC) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
+                    text = "$typeLabel · $lifecycleLabel · #${memory.id}",
+                    color = lifecycleColor,
                     style = MaterialTheme.typography.labelLarge,
                 )
                 Text(
@@ -512,3 +557,12 @@ private fun MemoryItem(
         }
     }
 }
+
+@Composable
+private fun lifecycleLabel(state: MemoryLifecycleState): String = stringResource(
+    when (state) {
+        MemoryLifecycleState.ACTIVE -> R.string.assistant_page_memory_lifecycle_active
+        MemoryLifecycleState.COMPLETED -> R.string.assistant_page_memory_lifecycle_completed
+        MemoryLifecycleState.SUPERSEDED -> R.string.assistant_page_memory_lifecycle_superseded
+    }
+)

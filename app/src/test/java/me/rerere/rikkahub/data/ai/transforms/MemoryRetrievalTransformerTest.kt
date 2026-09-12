@@ -1,7 +1,11 @@
 package me.rerere.rikkahub.data.ai.transforms
 
+import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.memory.ConversationMemoryRecord
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.MemoryType
+import me.rerere.rikkahub.data.model.MemoryLifecycleState
+import me.rerere.rikkahub.data.repository.isRetrievable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,10 +34,54 @@ class MemoryRetrievalTransformerTest {
         assertEquals(0f, applyEpisodicRecencyBoost(episode, 0f, nowMs), 0.0001f)
     }
 
-    private fun memory(type: MemoryType, createdAt: Long) = AssistantMemory(
+    @Test
+    fun `conversation retrieval excludes visible and future branch turns`() {
+        val visible = UIMessage.user("visible")
+        val eligible = UIMessage.user("eligible old turn")
+        val future = UIMessage.user("future branch turn")
+        val records = listOf(visible, eligible, future).mapIndexed { index, message ->
+            ConversationMemoryRecord(
+                id = "record-$index",
+                sourceMessageId = message.id.toString(),
+                ordinal = index,
+                content = message.toText(),
+                embedding = null,
+                embeddingModelId = null,
+                embeddingDimension = null,
+            )
+        }
+
+        val result = records.eligibleForRequest(
+            conversationMessages = listOf(visible, eligible),
+            requestMessages = listOf(visible),
+        )
+
+        assertEquals(listOf("eligible old turn"), result.map { it.content })
+    }
+
+    @Test
+    fun `only active memories are eligible for normal retrieval`() {
+        val memories = listOf(
+            memory(MemoryType.EPISODIC, nowMs, MemoryLifecycleState.ACTIVE),
+            memory(MemoryType.EPISODIC, nowMs, MemoryLifecycleState.COMPLETED),
+            memory(MemoryType.EPISODIC, nowMs, MemoryLifecycleState.SUPERSEDED),
+        )
+
+        assertEquals(
+            listOf(MemoryLifecycleState.ACTIVE),
+            memories.filter(AssistantMemory::isRetrievable).map { it.lifecycleState },
+        )
+    }
+
+    private fun memory(
+        type: MemoryType,
+        createdAt: Long,
+        lifecycleState: MemoryLifecycleState = MemoryLifecycleState.ACTIVE,
+    ) = AssistantMemory(
         id = 1,
         content = "memory",
         type = type,
         createdAt = createdAt,
+        lifecycleState = lifecycleState,
     )
 }

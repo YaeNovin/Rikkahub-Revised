@@ -26,13 +26,14 @@ import me.rerere.rikkahub.data.datastore.isGlobalBackgroundActive
 fun GlobalAppBackground(
     settings: Settings,
     modifier: Modifier = Modifier,
+    captureOnly: Boolean = false,
 ) {
     if (!settings.isGlobalBackgroundActive()) return
     val appearance = settings.advancedAppearanceSetting
     val capabilities = LocalAdvancedAppearanceCapabilities.current
     val pageSurfaceStyle = capabilities.effectiveSurfaceStyle(appearance.pageSurfaceStyle)
     val background = appearance.globalBackground ?: return
-    if (pageSurfaceStyle == BackgroundSurfaceStyle.OPAQUE) return
+    if (pageSurfaceStyle == BackgroundSurfaceStyle.OPAQUE && !captureOnly) return
     val pageBlurRadius = when (pageSurfaceStyle) {
         BackgroundSurfaceStyle.OPAQUE,
         BackgroundSurfaceStyle.TRANSLUCENT -> 0f
@@ -46,23 +47,19 @@ fun GlobalAppBackground(
             liquidGlassBlurRadius(appearance.pageLiquidGlassBlurRadius)
         )
     }
-    Box(modifier = modifier) {
+    Box(modifier = modifier.glassBackdropSource(LocalGlassBackdrop.current, visible = !captureOnly)) {
         BlurredBackgroundImage(
             background = background,
             opacity = appearance.globalBackgroundOpacity,
             blurRadius = pageBlurRadius,
-            overlayTopAlpha = 0.16f,
-            overlayBottomAlpha = 0.30f,
+            // Keep the same readability budget used by chat backgrounds. A
+            // weaker global scrim made icons and secondary text disappear on
+            // high-contrast images even though the foreground was selected
+            // correctly.
+            overlayTopAlpha = 0.28f,
+            overlayBottomAlpha = 0.42f,
             modifier = Modifier.fillMaxSize(),
         )
-        if (pageSurfaceStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
-            // Keep the page atmosphere distinct from plain transparency while
-            // leaving enough of the configured image visible underneath.
-            LiquidGlassSurfaceLayers(
-                modifier = Modifier.fillMaxSize(),
-                strength = 0.24f,
-            )
-        }
     }
 }
 
@@ -128,7 +125,7 @@ fun GlobalGlassTheme(
 }
 
 internal fun normalizedPageSurfaceOpacity(surfaceOpacity: Float): Float =
-    surfaceOpacity.coerceIn(0.35f, 1f)
+    finiteAppearanceValue(surfaceOpacity, 0.35f, 1f, 1f)
 
 @Composable
 fun unifiedOverlayContainerColor(): androidx.compose.ui.graphics.Color =
@@ -146,14 +143,18 @@ fun BlurredBackgroundImage(
     overlayTopAlpha: Float,
     overlayBottomAlpha: Float,
     modifier: Modifier = Modifier,
+    onImageLoaded: ((Boolean) -> Unit)? = null,
 ) {
-    val backgroundColor = MaterialTheme.colorScheme.background
+    val backgroundColor = (me.rerere.rikkahub.ui.theme.LocalBaseThemeColorScheme.current ?: MaterialTheme.colorScheme).background.copy(alpha = 1f)
     val safeBlurRadius = LocalAdvancedAppearanceCapabilities.current.limitBackgroundBlur(
         blurRadius.coerceIn(0f, MAX_GLOBAL_BACKGROUND_BLUR_RADIUS)
     )
     Box(modifier = modifier.clipToBounds()) {
         AsyncImage(
             model = background,
+            onLoading = { onImageLoaded?.invoke(false) },
+            onError = { onImageLoaded?.invoke(false) },
+            onSuccess = { onImageLoaded?.invoke(true) },
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -168,7 +169,7 @@ fun BlurredBackgroundImage(
                         Modifier
                     }
                 )
-                .alpha(opacity.coerceIn(0f, 1f)),
+                .alpha(finiteAppearanceValue(opacity, 0f, 1f, 1f)),
         )
         Box(
             modifier = Modifier

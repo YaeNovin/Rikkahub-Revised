@@ -180,7 +180,7 @@ internal fun buildExtensionAudit(
     val conflictingModeIds = if (settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT) {
         assistants.flatMap { assistant ->
             settings.modeInjections
-                .filter { it.id in assistant.modeInjectionIds && it.exclusiveGroup.isNotBlank() }
+                .filter { it.enabled && it.id in assistant.modeInjectionIds && it.exclusiveGroup.isNotBlank() }
                 .groupBy { it.exclusiveGroup.trim().lowercase() }
                 .values
                 .filter { it.size > 1 }
@@ -207,8 +207,8 @@ internal fun buildExtensionAudit(
             val entry: PromptInjection.RegexInjection,
             val key: String,
         )
-        val settingDeclarations = settings.lorebooks.flatMap { lorebook ->
-            lorebook.entries.flatMap { entry ->
+        val settingDeclarations = settings.lorebooks.filter { it.enabled }.flatMap { lorebook ->
+            lorebook.entries.filter { it.enabled }.flatMap { entry ->
                 entry.settingKeys.mapNotNull { key ->
                     key.trim().lowercase().takeIf(String::isNotEmpty)?.let {
                         SettingDeclaration(lorebook, entry, it)
@@ -282,25 +282,27 @@ internal fun buildExtensionAudit(
             lorebook.entries.map { it.id.toString() to it.name }
         )
         lorebook.entries.forEach { entry ->
-            validateInjection(entry, key, lorebook.name, ExtensionCategory.PROMPTS, issues)
+            val entryTitle = "${lorebook.name} / ${entry.name.ifBlank { entry.id.toString() }}"
+            validateInjection(entry, key, entryTitle, ExtensionCategory.PROMPTS, issues)
             if (entry.id.toString() in duplicateEntryIds) {
-                addIssue(ExtensionCategory.PROMPTS, key, lorebook.name, ExtensionIssueKind.DUPLICATE_NAME)
+                addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.DUPLICATE_NAME)
             }
-            if (!entry.constantActive && entry.keywords.none { it.isNotBlank() }) {
-                addIssue(ExtensionCategory.PROMPTS, key, lorebook.name, ExtensionIssueKind.MISSING_TRIGGER)
+            if (entry.enabled && !entry.constantActive && entry.keywords.none { it.isNotBlank() } &&
+                !(settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT && entry.keywordExpression.isNotBlank())) {
+                addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.MISSING_TRIGGER)
             }
-            if (entry.scanDepth < 1) {
-                addIssue(ExtensionCategory.PROMPTS, key, lorebook.name, ExtensionIssueKind.INVALID_SCAN_DEPTH)
+            if (entry.scanDepth < 0 || entry.scanDepth > 1000) {
+                addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.INVALID_SCAN_DEPTH)
             }
             if (entry.useRegex && entry.keywords.any { keyword ->
                     keyword.isNotBlank() && runCatching { Regex(keyword) }.isFailure
                 }
             ) {
-                addIssue(ExtensionCategory.PROMPTS, key, lorebook.name, ExtensionIssueKind.INVALID_REGEX)
+                addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.INVALID_REGEX)
             }
         }
         val entryText = lorebook.entries.joinToString("\n") {
-            "${it.name}\n${it.keywords.joinToString()}\n${it.content}"
+            "${it.name}\n${it.keywords.joinToString()}\n${it.keywordExpression}\n${it.settingKeys.joinToString()}\n${it.content}"
         }
         items += ExtensionSearchItem(
             category = ExtensionCategory.PROMPTS,

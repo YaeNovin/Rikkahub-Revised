@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Tab
@@ -59,7 +59,7 @@ fun AssistantExtensionsPage(id: String) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         Column(
             modifier = Modifier

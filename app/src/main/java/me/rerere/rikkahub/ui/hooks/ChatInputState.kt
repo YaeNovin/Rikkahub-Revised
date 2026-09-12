@@ -8,8 +8,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import me.rerere.ai.ui.UIMessagePart
 import kotlin.uuid.Uuid
+import me.rerere.rikkahub.data.model.ChatImageGenerationSettings
 
 class ChatInputState {
+    /** Conversation-local image options; reset when the ChatViewModel is discarded. */
+    var imageGenerationSettings by mutableStateOf(ChatImageGenerationSettings())
     val textContent = TextFieldState()
     var messageContent by mutableStateOf(listOf<UIMessagePart>())
     var editingMessage by mutableStateOf<Uuid?>(null)
@@ -25,6 +28,13 @@ class ChatInputState {
     }
 
     fun isEditing() = editingMessage != null
+
+    /** Leaves the current draft intact while removing conversation-specific edit metadata. */
+    fun cancelEditing() {
+        editingMessage = null
+        editingParts = null
+        editingAttachmentUrls = emptySet()
+    }
 
     fun setMessageText(text: String) {
         textContent.setTextAndPlaceCursorAtEnd(text)

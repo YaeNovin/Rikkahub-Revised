@@ -21,6 +21,30 @@ class ZoomableAsyncImageTest {
     }
 
     @Test
+    fun `generated wide image fits the chat image placeholder bounds`() {
+        assertEquals(
+            Size(320f, 80f),
+            inlineImageDisplaySizeDp(
+                intrinsicSize = Size(2048f, 512f),
+                maxWidthDp = 320f,
+                maxHeightDp = 320f,
+            ),
+        )
+    }
+
+    @Test
+    fun `generated tall image fits the chat image placeholder bounds`() {
+        assertEquals(
+            Size(80f, 320f),
+            inlineImageDisplaySizeDp(
+                intrinsicSize = Size(512f, 2048f),
+                maxWidthDp = 320f,
+                maxHeightDp = 320f,
+            ),
+        )
+    }
+
+    @Test
     fun `unknown image dimensions defer to the painter`() {
         assertEquals(Size.Unspecified, inlineImageDisplaySizeDp(Size.Unspecified))
     }

@@ -11,10 +11,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -76,6 +78,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
@@ -140,6 +143,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onToolCancel: ((toolCallId: String, reason: String) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val appSettings = LocalSettings.current
@@ -154,7 +158,7 @@ fun ChatMessage(
         fontSizeRatio = settings.fontSizeRatio,
         fontFamily = chatFontFamily,
         color = if (chatBackgroundActive) {
-            chatBackgroundForeground.copy(alpha = 0.96f)
+            chatBackgroundForeground
         } else {
             MaterialTheme.colorScheme.onSurface
         },
@@ -164,6 +168,7 @@ fun ChatMessage(
     var showSelectCopySheet by remember { mutableStateOf(false) }
     val navController = LocalNavController.current
     val context = LocalContext.current
+    val openWebPreview = me.rerere.rikkahub.ui.components.webview.rememberWebPreviewLauncher()
     val colorScheme = MaterialTheme.colorScheme
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -192,7 +197,10 @@ fun ChatMessage(
                 )
             }
         }
-        CompositionLocalProvider(LocalContentColor provides textStyle.color) {
+        CompositionLocalProvider(
+            LocalContentColor provides textStyle.color,
+            me.rerere.rikkahub.ui.components.richtext.LocalRichTextStreaming provides loading,
+        ) {
             ProvideTextStyle(textStyle) {
                 MessagePartsBlock(
                     assistant = assistant,
@@ -204,6 +212,7 @@ fun ChatMessage(
                     hazeState = hazeState,
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
+                    onToolCancel = onToolCancel,
                     onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
                 )
 
@@ -283,13 +292,11 @@ fun ChatMessage(
                     .joinToString("\n\n") { it.text }
                     .trim()
                 if (textContent.isNotBlank()) {
-                    val htmlContent = buildMarkdownPreviewHtml(
+                    openWebPreview { buildMarkdownPreviewHtml(
                         context = context,
                         markdown = textContent,
                         colorScheme = colorScheme
-                    )
-                    val contentId = WebViewContentCache.store(context.cacheDir, htmlContent)
-                    navController.navigate(Screen.WebView(contentId = contentId))
+                    ) }
                 }
             },
             onDismissRequest = {
@@ -370,9 +377,7 @@ private fun messageBubbleAppearance(
         ).dp
         Modifier.hazeBlur(
             input = HazeInput.Sources(requireNotNull(hazeState)),
-            style = HazeBlurStyle.Material3 {
-                blurRadius(blurRadius)
-            },
+            style = me.rerere.rikkahub.ui.components.ui.backgroundOnlyBlurStyle(blurRadius.value),
         )
     } else {
         Modifier
@@ -411,16 +416,7 @@ private fun messageBubbleAppearance(
                     0.86f,
                 )
             ),
-            border = BorderStroke(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.42f),
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
-                    )
-                ),
-            ),
+            border = me.rerere.rikkahub.ui.components.ui.liquidGlassBorder(strength = .6f),
             shadowElevation = 2.dp,
         )
     }
@@ -438,6 +434,7 @@ private fun MessagePartsBlock(
     loading: Boolean,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onToolCancel: ((toolCallId: String, reason: String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -454,6 +451,7 @@ private fun MessagePartsBlock(
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
     val partsState by rememberUpdatedState(parts)
+    val loadingState by rememberUpdatedState(loading)
 
     val handleClickCitation: (String) -> Unit = remember {
         handler@{ citationId ->
@@ -479,7 +477,7 @@ private fun MessagePartsBlock(
         snapshotFlow { partsState }
             .debounce(50.milliseconds)
             .collect { parts ->
-                if (parts.isNotEmpty() && loading && settings.displaySetting.enableMessageGenerationHapticEffect) {
+                if (parts.isNotEmpty() && loadingState && settings.displaySetting.enableMessageGenerationHapticEffect) {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
             }
@@ -496,9 +494,6 @@ private fun MessagePartsBlock(
                         modifier = Modifier.animateContentSize(),
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                        cardColors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-                        ),
                     ) { step ->
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {
@@ -519,6 +514,7 @@ private fun MessagePartsBlock(
                                         loading = loading && !step.tool.isExecuted,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
+                                        onToolCancel = onToolCancel,
                                     )
                                 }
                             }
@@ -546,14 +542,24 @@ private fun MessagePartsBlock(
                                 text = part.text,
                             ),
                         )
+                        val theme = me.rerere.rikkahub.ui.theme.LocalBaseThemeColorScheme.current
+                            ?: MaterialTheme.colorScheme
+                        val seed = me.rerere.rikkahub.ui.theme.currentTextPaletteSeed()
+                        val themeText = if (isUserMessage) theme.onPrimaryContainer else theme.onSurface
+                        val bubbleText = if (!settings.hasActiveChatBackground() && seed == null) themeText else
+                            me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
+                                bubbleAppearance.color, bubbleAppearance.color.alpha, themeText,
+                                me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground.current?.readability?.backgrounds
+                                    ?: listOf(theme.background.copy(alpha = 1f)), seed,
+                            )
+                        val bubbleTextStyle = androidx.compose.material3.LocalTextStyle.current.copy(color = bubbleText)
                         val textContent = @Composable {
                             if (isUserMessage) {
                                 Surface(
-                                    modifier = bubbleAppearance.modifier.then(
-                                        if (loading) Modifier else Modifier.animateContentSize()
-                                    ),
+                                    modifier = bubbleAppearance.modifier,
                                     shape = RoundedCornerShape(16.dp),
                                     color = bubbleAppearance.color,
+                                    contentColor = bubbleText,
                                     border = bubbleAppearance.border,
                                     shadowElevation = bubbleAppearance.shadowElevation,
                                     onClick = { onUserMessageClick?.invoke() },
@@ -565,6 +571,7 @@ private fun MessagePartsBlock(
                                         )
                                     ) {
                                         MarkdownBlock(
+                                            style = bubbleTextStyle,
                                             content = part.text.replaceRegexes(
                                                 assistant = assistant,
                                                 scope = AssistantAffectScope.USER,
@@ -577,11 +584,10 @@ private fun MessagePartsBlock(
                             } else {
                                 if (shouldRenderAssistantMessageBubble(settings)) {
                                     Surface(
-                                        modifier = bubbleAppearance.modifier.then(
-                                            if (loading) Modifier else Modifier.animateContentSize()
-                                        ),
+                                        modifier = bubbleAppearance.modifier,
                                         shape = RoundedCornerShape(16.dp),
                                         color = bubbleAppearance.color,
+                                        contentColor = bubbleText,
                                         border = bubbleAppearance.border,
                                         shadowElevation = bubbleAppearance.shadowElevation,
                                     ) {
@@ -592,6 +598,7 @@ private fun MessagePartsBlock(
                                             )
                                         ) {
                                             MarkdownBlock(
+                                                style = bubbleTextStyle,
                                                 content = part.text.replaceRegexes(
                                                     assistant = assistant,
                                                     scope = AssistantAffectScope.ASSISTANT,
@@ -609,46 +616,22 @@ private fun MessagePartsBlock(
                                             visual = true,
                                         ),
                                         onClickCitation = handleClickCitation,
-                                        modifier = if (loading) Modifier else Modifier.animateContentSize(),
+                                        modifier = Modifier,
                                     )
                                 }
                             }
                         }
 
-                        // 流式生成期间不启用 SelectionContainer：Markdown 在不断重渲染，
-                        // 内部可选择的 Text 会频繁注册/注销，与 Compose 选择工具栏在绘制阶段
-                        // 对 selectable 列表的排序产生并发修改，导致 ConcurrentModificationException。
-                        // 生成结束后内容稳定，再启用文本选择。
-                        if (loading) {
-                            textContent()
-                        } else {
-                            SelectionContainer {
-                                textContent()
-                            }
+                        CompositionLocalProvider(
+                            me.rerere.rikkahub.ui.components.richtext.LocalGitHubCardsEnabled provides
+                                (role == MessageRole.ASSISTANT),
+                        ) {
+                            StreamingSelectionContainer(streaming = loading, content = textContent)
                         }
                     }
 
                     is UIMessagePart.Video -> {
-                        Surface(
-                            tonalElevation = 2.dp,
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                intent.data = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    part.url.toUri().toFile()
-                                )
-                                val chooserIndent = Intent.createChooser(intent, null)
-                                context.startActivity(chooserIndent)
-                            },
-                            modifier = Modifier,
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
-                            Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                                Icon(HugeIcons.Video01, null)
-                            }
-                        }
+                        InlineVideo(part.url)
                     }
 
                     is UIMessagePart.Audio -> {
@@ -688,7 +671,9 @@ private fun MessagePartsBlock(
                     is UIMessagePart.Image -> {
                         val isImageLoading =
                             part.url.isBlank() || part.url.matches(Regex("^data:image/[^;]*;base64,\\s*$"))
-                        if (isImageLoading) {
+                        val isGeneratedImage = role == MessageRole.ASSISTANT &&
+                            model?.type == ModelType.IMAGE
+                        if (isImageLoading && !isGeneratedImage) {
                             Box(
                                 modifier = Modifier
                                     .size(72.dp)
@@ -696,6 +681,25 @@ private fun MessagePartsBlock(
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .shimmer(isLoading = true)
                             )
+                        } else if (isGeneratedImage) {
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.82f)
+                                    .widthIn(max = 320.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                ZoomableAsyncImage(
+                                    model = part.url,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .widthIn(max = maxWidth)
+                                        .heightIn(max = 320.dp)
+                                        .clip(MaterialTheme.shapes.medium),
+                                    respectIntrinsicSize = true,
+                                    maxDisplayWidthDp = maxWidth.value,
+                                    maxDisplayHeightDp = 320f,
+                                )
+                            }
                         } else {
                             ZoomableAsyncImage(
                                 model = part.url,

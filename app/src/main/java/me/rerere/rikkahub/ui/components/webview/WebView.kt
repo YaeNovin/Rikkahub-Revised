@@ -1,36 +1,32 @@
 package me.rerere.rikkahub.ui.components.webview
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.FrameLayout
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams
-import android.webkit.ConsoleMessage
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import android.webkit.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -63,6 +59,8 @@ private class ParentVerticalScrollTouchListener(
     private var downY = 0f
     private var minimumPageScale = Float.POSITIVE_INFINITY
     private var lockedOwner = WebViewGestureOwner.UNDECIDED
+
+    fun reset() { minimumPageScale = Float.POSITIVE_INFINITY; lockedOwner = WebViewGestureOwner.UNDECIDED }
 
     @Suppress("DEPRECATION")
     override fun onTouch(view: View, event: MotionEvent): Boolean {
@@ -120,73 +118,147 @@ private class ParentVerticalScrollTouchListener(
     }
 }
 
+
+private class RenderingWebView(context: Context) : WebView(context) {
+    val loads = WebViewLoadTracker()
+    val gesture = ParentVerticalScrollTouchListener(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    var injectedNames: Set<String> = emptySet()
+    private var injectedObjects: Map<String, Any> = emptyMap()
+    var released = false
+
+    @SuppressLint("JavascriptInterface")
+    fun updateInterfaces(interfaces: Map<String, Any>) {
+        if (interfaces == injectedObjects) return
+        (injectedNames - interfaces.keys).forEach(::removeJavascriptInterface)
+        interfaces.forEach { (name, instance) -> addJavascriptInterface(instance, name) }
+        injectedNames = interfaces.keys.toSet()
+        injectedObjects = interfaces.toMap()
+    }
+
+    fun release() {
+        if (released) return
+        released = true
+        setOnTouchListener(null)
+        runCatching { stopLoading() }
+        injectedNames.forEach { name -> runCatching { removeJavascriptInterface(name) } }
+        injectedNames = emptySet()
+        injectedObjects = emptyMap()
+        runCatching { webChromeClient = null }
+        runCatching { webViewClient = WebViewClient() }
+        runCatching { removeAllViews() }
+        runCatching { destroy() }
+    }
+}
+
+/** Keep the Compose layout node stable. WebView attachment/destruction must not
+ * mutate the view tree while Compose is placing or releasing an AndroidView. */
+private class RenderingWebViewHost(context: Context) : FrameLayout(context) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pending: Runnable? = null
+    private var latestUpdate: (RenderingWebViewHost.() -> Unit)? = null
+    private var disposed = false
+    var renderer: RenderingWebView? = null
+    var releaseRenderer: (RenderingWebView) -> Unit = { it.release() }
+
+    fun updateLater(update: RenderingWebViewHost.() -> Unit) {
+        if (disposed) return
+        latestUpdate = update
+        // Coalesce updates without moving the scheduled work to the back of
+        // the main queue on every recomposition/progress callback.
+        if (pending == null) pending = Runnable {
+            pending = null
+            val action = latestUpdate
+            latestUpdate = null
+            if (!disposed) action?.invoke(this)
+        }.also(mainHandler::post)
+    }
+
+    fun removeRenderer() {
+        renderer?.let { view ->
+            renderer = null
+            removeView(view)
+            releaseRenderer(view)
+        }
+    }
+
+    fun dispose() {
+        disposed = true
+        pending?.let(mainHandler::removeCallbacks)
+        pending = null
+        latestUpdate = null
+        mainHandler.post { removeRenderer() }
+    }
+}
+
 internal class MyWebChromeClient(private val state: WebViewState) : WebChromeClient() {
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
-        state.loadingProgress = newProgress / 100f
-    }
-
-    override fun onReceivedTitle(view: WebView?, title: String?) {
-        super.onReceivedTitle(view, title)
-        state.pageTitle = title
-    }
-
-    override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-        state.pushConsoleMessage(consoleMessage)
-        if (consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.ERROR || consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.WARNING) {
-            Log.e(
-                TAG,
-                "onConsoleMessage:  ${consoleMessage.message()}  ${consoleMessage.lineNumber()}  ${consoleMessage.sourceId()}"
-            )
+        if (state.webView === view) {
+            state.loadingProgress = (newProgress / 100f).coerceIn(0f, 1f)
+            if (newProgress >= 100) state.isLoading = false
         }
-        return super.onConsoleMessage(consoleMessage);
+    }
+    override fun onReceivedTitle(view: WebView?, title: String?) {
+        if (state.webView === view) state.pageTitle = title
+    }
+    override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+        state.pushConsoleMessage(message)
+        if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) Log.w(TAG, "Renderer: ${message.message()}")
+        return true
     }
 }
 
 internal class MyWebViewClient(private val state: WebViewState) : WebViewClient() {
-    override fun shouldInterceptRequest(
-        view: WebView,
-        request: WebResourceRequest
-    ): WebResourceResponse? {
-        return WebViewLocalAssets.intercept(view.context.applicationContext, request.url)
-            ?: super.shouldInterceptRequest(view, request)
-    }
+    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+        WebViewLocalAssets.intercept(view.context.applicationContext, request.url) ?: super.shouldInterceptRequest(view, request)
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-        super.onPageStarted(view, url, favicon)
+        if (state.webView !== view) return
+        (view as? RenderingWebView)?.gesture?.reset()
         state.isLoading = true
-        state.currentUrl = url // Update current URL
+        state.loadGeneration++
+        state.loadWarning = null
+        state.loadingProgress = 0f
+        state.currentUrl = url
     }
-
     override fun onPageFinished(view: WebView?, url: String?) {
-        super.onPageFinished(view, url)
+        if (view == null || state.webView !== view) return
         state.isLoading = false
-        state.loadingProgress = 0f // Reset progress when finished
-        state.pageTitle = view?.title // Update title
-        state.canGoBack = view?.canGoBack() == true
-        state.canGoForward = view?.canGoForward() == true
+        state.loadingProgress = 1f
+        state.pageTitle = view.title
+        state.currentUrl = url
+        state.canGoBack = view.canGoBack()
+        state.canGoForward = view.canGoForward()
+        if (state.restoreContent == state.content) {
+            val x = state.restoreX
+            val y = state.restoreY
+            view.post {
+                if (state.webView === view) view.scrollTo(x, y)
+            }
+            state.restoreContent = null
+        }
     }
-}
-
-private fun WebView.resetState(
-    interfaces: Map<String, Any>,
-    clearClients: Boolean = false,
-) {
-    stopLoading()
-    interfaces.forEach { (name, _) ->
-        removeJavascriptInterface(name)
+    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+        if (request.isForMainFrame && state.webView === view) {
+            state.isLoading = false
+            state.error = "页面加载失败（${error.errorCode}），可重试或返回查看源码。"
+        }
     }
-    if (clearClients) {
-        webChromeClient = null
-        webViewClient = WebViewClient()
+    override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+        if (request.isForMainFrame && state.webView === view) {
+            state.isLoading = false
+            state.error = "页面加载失败：HTTP ${response.statusCode}"
+        }
     }
-}
-
-private fun WebView.release(interfaces: Map<String, Any>) {
-    resetState(interfaces, clearClients = true)
-    loadUrl("about:blank")
-    clearHistory()
-    removeAllViews()
-    destroy()
+    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+        if (state.webView === view) {
+            state.webView = null
+            state.isLoading = false
+            state.error = "图形渲染进程已退出，点击重试重新加载。"
+        }
+        (view.parent as? ViewGroup)?.removeView(view)
+        (view as? RenderingWebView)?.release()
+        return true
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
@@ -200,263 +272,249 @@ fun WebView(
     onCreated: (WebView) -> Unit = {},
     onUpdated: (WebView) -> Unit = {},
 ) {
-    // Remember the clients based on the state
-    val webChromeClient = remember { MyWebChromeClient(state) }
-    val webViewClient = remember { MyWebViewClient(state) }
+    val chrome = remember(state) { MyWebChromeClient(state) }
+    val client = remember(state) { MyWebViewClient(state) }
     val hostView = LocalView.current
-    var nearViewport by remember(state, deferUntilVisible) {
-        mutableStateOf(!deferUntilVisible)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val loadingView = state.webView
+    val loadGeneration = state.loadGeneration
+    var showLoadingIndicator by remember(state) { mutableStateOf(false) }
+    LaunchedEffect(loadingView, loadGeneration, state.isLoading) {
+        showLoadingIndicator = false
+        if (state.isLoading) {
+            kotlinx.coroutines.delay(180)
+            showLoadingIndicator = true
+        }
     }
-
-    Box(
-        modifier = modifier.onGloballyPositioned { coordinates ->
-            if (deferUntilVisible) {
-                val bounds = coordinates.boundsInWindow()
-                val viewportHeight = hostView.height.toFloat().coerceAtLeast(1f)
-                val preloadDistance = viewportHeight * 0.75f
-                nearViewport = bounds.bottom >= -preloadDistance &&
-                    bounds.top <= viewportHeight + preloadDistance
+    LaunchedEffect(loadingView, loadGeneration, state.isLoading) {
+        if (loadingView == null || !state.isLoading) return@LaunchedEffect
+        kotlinx.coroutines.delay(WEB_PAGE_LOAD_TIMEOUT_MS)
+        if (shouldFinishStalledLoad(state.webView === loadingView, state.loadGeneration == loadGeneration, state.isLoading)) {
+            loadingView.stopLoading()
+            state.isLoading = false
+            state.loadingProgress = 1f
+            state.loadWarning = "部分网页资源加载超时，已保留当前内容。可重试或查看源码。"
+        }
+    }
+    val exportTracker = me.rerere.rikkahub.ui.components.ui.LocalExportRenderTracker.current
+    if (exportTracker != null) {
+        val exportToken = remember(state) { Any() }
+        DisposableEffect(exportTracker, state) {
+            exportTracker.begin(exportToken)
+            onDispose { exportTracker.complete(exportToken) }
+        }
+        LaunchedEffect(exportTracker, state) {
+            while (true) {
+                state.error?.let { exportTracker.fail(exportToken, it); return@LaunchedEffect }
+                val view = state.webView
+                if (view != null && state.loadingProgress >= 1f && !state.isLoading) {
+                    val status = kotlinx.coroutines.suspendCancellableCoroutine<String> { continuation ->
+                        view.evaluateJavascript("""(function() {
+                            if (window.__rikkaRenderStatus === 'error') return 'error';
+                            if (document.readyState !== 'complete' || window.__rikkaRenderStatus === 'loading') return 'loading';
+                            if (document.fonts && document.fonts.status !== 'loaded') return 'loading';
+                            if (Array.from(document.images).some(function(image) { return !image.complete; })) return 'loading';
+                            document.querySelectorAll('svg').forEach(function(svg) { if (svg.pauseAnimations) svg.pauseAnimations(); });
+                            if (document.getAnimations) document.getAnimations().forEach(function(animation) { animation.pause(); });
+                            return 'ready';
+                        })()""") { result -> if (continuation.isActive) continuation.resumeWith(Result.success(result)) }
+                    }
+                    if (status == "\"error\"") {
+                        exportTracker.fail(exportToken, "图形渲染失败，请检查图形源码")
+                        return@LaunchedEffect
+                    }
+                    if (status == "\"ready\"") {
+                        kotlinx.coroutines.suspendCancellableCoroutine<Unit> { continuation ->
+                            view.postVisualStateCallback(0L, object : WebView.VisualStateCallback() {
+                                override fun onComplete(requestId: Long) { if (continuation.isActive) continuation.resumeWith(Result.success(Unit)) }
+                            })
+                        }
+                        exportTracker.complete(exportToken)
+                        return@LaunchedEffect
+                    }
+                }
+                kotlinx.coroutines.delay(32)
             }
         }
-    ) {
-        if (!nearViewport) return@Box
-
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    layoutParams = LayoutParams(
-                        LayoutParams.MATCH_PARENT,
-                        LayoutParams.MATCH_PARENT
-                    )
-
-                    state.webView = this // Assign the WebView instance to the state
-
-                    if (transparentBackground) {
-                        setBackgroundColor(Color.TRANSPARENT)
+    }
+    var nearViewport by remember(state, deferUntilVisible) { mutableStateOf(!deferUntilVisible) }
+    var inViewport by remember(state) { mutableStateOf(false) }
+    var promoted by remember(state) { mutableStateOf<Long?>(null) }
+    val budgetId = remember(state) { InlineWebViewBudget.allocate() }
+    DisposableEffect(budgetId, deferUntilVisible, nearViewport, inViewport, promoted, state.error) {
+        if (deferUntilVisible && nearViewport && state.error == null) InlineWebViewBudget.priorities[budgetId] = promoted ?: if (inViewport) 0L else 1L
+        onDispose { InlineWebViewBudget.priorities.remove(budgetId) }
+    }
+    DisposableEffect(lifecycle, state) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> state.webView?.onResume()
+                Lifecycle.Event.ON_PAUSE -> state.webView?.onPause()
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    Box(modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
+        if (deferUntilVisible) {
+            val bounds = coordinates.boundsInWindow(clipBounds = false)
+            val height = hostView.height.toFloat().coerceAtLeast(1f)
+            val preload = height * .5f
+            nearViewport = bounds.width > 0 && bounds.bottom >= -preload && bounds.top <= height + preload
+            inViewport = bounds.width > 0 && bounds.bottom >= 0 && bounds.top <= height
+            if (!nearViewport) promoted = null
+        }
+    }) {
+        val error = state.error
+        val admitted = !deferUntilVisible || InlineWebViewBudget.allows(budgetId)
+        val active = nearViewport && admitted && error == null
+        key(state) {
+            AndroidView(
+                factory = { context ->
+                    RenderingWebViewHost(context).apply {
+                        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+                        releaseRenderer = { view ->
+                    if (state.webView === view) {
+                        if (!view.released) {
+                            state.restoreX = view.scrollX
+                            state.restoreY = view.scrollY
+                            state.restoreContent = view.loads.content
+                        }
+                        state.webView = null
                     }
-                    onCreated(this)
-                    if (preferParentVerticalScroll) {
-                        setOnTouchListener(
-                            ParentVerticalScrollTouchListener(
-                                touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
-                            )
-                        )
-                    }
-
-                    settings.javaScriptEnabled = true // Enable JavaScript
-                    settings.domStorageEnabled = true
-                    settings.allowContentAccess = true
-                    settings.apply(state.settings)
-                    // Keep native WebView gestures available for every preview:
-                    // pinch zoom, zoom-out and two-finger panning must not depend
-                    // on each individual renderer remembering these flags.
-                    settings.setSupportZoom(true)
-                    settings.builtInZoomControls = true
-                    settings.displayZoomControls = false
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
-
-                    // Use the created clients
-                    this.webChromeClient = webChromeClient
-                    this.webViewClient = webViewClient
-
-                    state.interfaces.forEach { (name, obj) ->
-                        addJavascriptInterface(obj, name)
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-            onRelease = {
-                if (state.webView === it) {
-                    state.webView = null
-                }
-                it.release(state.interfaces)
-                Log.d(TAG, "AndroidView: Releasing WebView")
-            },
-            update = { webView ->
-                state.webView = webView
-                if (transparentBackground) {
-                    webView.setBackgroundColor(Color.TRANSPARENT)
-                }
-                state.interfaces.forEach { (name, obj) ->
-                    webView.addJavascriptInterface(obj, name)
-                }
-                Log.d(TAG, "AndroidView: Updating WebView")
-                webView.webChromeClient = webChromeClient
-                webView.webViewClient = webViewClient
-
-                // Update settings that might change
-                webView.settings.javaScriptEnabled = state.javaScriptEnabled
-                webView.settings.apply(state.settings)
-                webView.settings.setSupportZoom(true)
-                webView.settings.builtInZoomControls = true
-                webView.settings.displayZoomControls = false
-                webView.settings.useWideViewPort = true
-                webView.settings.loadWithOverviewMode = true
-
-                when (val content = state.content) {
-                    is WebContent.Url -> {
-                        val url = content.url
-                        // Only load new URL if it's different from the current one or if the state forces reload
-                        // Also check if the webView's url is null or blank, which might happen initially
-                        val currentWebViewUrl = webView.url
-                        if (url.isNotEmpty() && (currentWebViewUrl.isNullOrBlank() || url != currentWebViewUrl || state.forceReload)) {
-                            webView.loadUrl(content.url, content.additionalHttpHeaders)
-                            state.forceReload = false // Reset force reload flag
+                    view.release()
                         }
                     }
-
-                    is WebContent.Data -> {
-                        if (content != state.lastLoadedData || state.forceReload) {
-                            webView.loadDataWithBaseURL(
-                                content.baseUrl,
-                                content.data,
-                                content.mimeType,
-                                content.encoding,
-                                content.historyUrl
-                            )
-                            state.lastLoadedData = content
+                },
+                modifier = Modifier.fillMaxSize(),
+                onRelease = { it.dispose() },
+                update = { host ->
+                    // Read snapshot state here so the update is observed, then
+                    // apply it on the next main-loop turn, outside layout.
+                    val content = state.content
+                    val forceReload = state.forceReload
+                    val interfaces = state.interfaces
+                    val javaScriptEnabled = state.javaScriptEnabled
+                    host.updateLater {
+                    if (!active) { removeRenderer(); return@updateLater }
+                    if (renderer?.released == true) removeRenderer()
+                    val view = renderer ?: RenderingWebView(context).also { created ->
+                        renderer = created
+                        created.settings.domStorageEnabled = true
+                        created.settings.allowContentAccess = true
+                        if (exportTracker != null) created.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                        created.setBackgroundColor(if (transparentBackground) Color.TRANSPARENT else Color.WHITE)
+                        state.webView = created
+                        addView(created, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+                        onCreated(created)
+                        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) created.onPause()
+                    }
+                    if (!view.released) {
+                        state.webView = view
+                        view.webChromeClient = chrome
+                        view.webViewClient = client
+                        view.setBackgroundColor(if (transparentBackground) Color.TRANSPARENT else Color.WHITE)
+                        view.setOnTouchListener(if (preferParentVerticalScroll) view.gesture else null)
+                        view.updateInterfaces(interfaces)
+                        view.settings.javaScriptEnabled = javaScriptEnabled
+                        view.settings.apply(state.settings)
+                        view.settings.setSupportZoom(true)
+                        view.settings.builtInZoomControls = true
+                        view.settings.displayZoomControls = false
+                        view.settings.useWideViewPort = true
+                        view.settings.loadWithOverviewMode = true
+                        if (view.loads.needsLoad(content, forceReload)) {
+                            view.gesture.reset()
+                            if (state.restoreContent != content) state.restoreContent = null
+                            state.isLoading = true
+                            state.loadWarning = null
+                            state.loadingProgress = 0f
+                            when (content) {
+                                is WebContent.Data -> view.loadDataWithBaseURL(content.baseUrl, content.data, content.mimeType, content.encoding, content.historyUrl)
+                                is WebContent.Url -> if (content == view.loads.content && forceReload) view.reload() else view.loadUrl(content.url, content.additionalHttpHeaders)
+                                WebContent.NavigatorOnly -> if (forceReload) view.reload() else state.isLoading = false
+                            }
+                            view.loads.loaded(content)
                             state.forceReload = false
                         }
+                        onUpdated(view)
                     }
-
-                    WebContent.NavigatorOnly -> {
-                        // NO-OP: State changes related to navigation are handled by the methods in WebViewState
                     }
-                }
-                onUpdated(webView)
-            }
-        )
-
-        // Loading Progress Indicator
-        if (state.isLoading) {
-            LinearProgressIndicator(
-                progress = { state.loadingProgress },
-                modifier = Modifier.fillMaxWidth()
+                },
             )
+        }
+        if (nearViewport && error != null) {
+            Column { Text(error); TextButton(onClick = state::reload) { Text("重试") } }
+        } else if (nearViewport && !admitted) {
+            TextButton(onClick = { promoted = InlineWebViewBudget.promote() }) { Text("加载图形") }
+        } else if (active && state.isLoading && showLoadingIndicator) LinearProgressIndicator(progress = { state.loadingProgress }, modifier = Modifier.fillMaxWidth())
+        if (active && state.loadWarning != null) {
+            androidx.compose.material3.Surface(modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter), tonalElevation = androidx.compose.ui.unit.Dp(2f)) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(state.loadWarning.orEmpty(), Modifier.weight(1f), style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = state::reload) { Text("重试") }
+                }
+            }
         }
     }
 }
 
-// --- State and Content Definition ---
 sealed class WebContent {
-    data class Url(
-        val url: String,
-        val additionalHttpHeaders: Map<String, String> = emptyMap(),
-        val clearHistory: Boolean = false
-    ) : WebContent()
-
-    data class Data(
-        val data: String,
-        val baseUrl: String? = null,
-        val encoding: String = "utf-8",
-        val mimeType: String? = null,
-        val historyUrl: String? = null
-    ) : WebContent()
-
+    data class Url(val url: String, val additionalHttpHeaders: Map<String, String> = emptyMap(), val clearHistory: Boolean = false) : WebContent()
+    data class Data(val data: String, val baseUrl: String? = null, val encoding: String = "utf-8", val mimeType: String? = null, val historyUrl: String? = null) : WebContent()
     data object NavigatorOnly : WebContent()
 }
 
-@Stable // Mark as Stable for better Compose performance
+@Stable
 class WebViewState(
     initialContent: WebContent = WebContent.NavigatorOnly,
-    val interfaces: Map<String, Any> = emptyMap(),
-    val settings: WebSettings.() -> Unit = {}
+    interfaces: Map<String, Any> = emptyMap(),
+    val settings: WebSettings.() -> Unit = {},
 ) {
-    // --- Content State ---
     var content: WebContent by mutableStateOf(initialContent)
-    internal var forceReload: Boolean by mutableStateOf(false) // Internal state to force URL reload if needed
-    internal var lastLoadedData: WebContent.Data? = null
-
-    // --- Loading State ---
-    var isLoading: Boolean by mutableStateOf(false)
-        internal set // Only WebViewClients should modify this
-    var loadingProgress: Float by mutableFloatStateOf(0f)
+    var interfaces: Map<String, Any> by mutableStateOf(interfaces)
         internal set
-
-    // --- Page Information ---
+    internal var forceReload by mutableStateOf(false)
+    internal var loadGeneration by mutableIntStateOf(0)
+    var loadWarning: String? by mutableStateOf(null)
+        internal set
+    internal var restoreContent: WebContent? = null
+    internal var restoreX = 0
+    internal var restoreY = 0
+    var error: String? by mutableStateOf(null)
+        internal set
+    var isLoading by mutableStateOf(false)
+        internal set
+    var loadingProgress by mutableFloatStateOf(0f)
+        internal set
     var pageTitle: String? by mutableStateOf(null)
         internal set
     var currentUrl: String? by mutableStateOf(null)
         internal set
-
-    // --- Navigation State ---
-    var canGoBack: Boolean by mutableStateOf(false)
+    var canGoBack by mutableStateOf(false)
         internal set
-    var canGoForward: Boolean by mutableStateOf(false)
+    var canGoForward by mutableStateOf(false)
         internal set
-
-    // --- Console Message ---
     var consoleMessages: List<ConsoleMessage> by mutableStateOf(emptyList())
         internal set
-
-    // --- Settings ---
-    var javaScriptEnabled: Boolean by mutableStateOf(true) // Example setting
-
-    // --- WebView Instance ---
-    // Hold the WebView instance internally to perform actions.
-    // Be cautious with this reference, ensure it doesn't leak context.
+    var javaScriptEnabled by mutableStateOf(true)
     internal var webView: WebView? by mutableStateOf(null)
-
-    // --- Public Actions ---
-
-    fun loadUrl(
-        url: String,
-        additionalHttpHeaders: Map<String, String> = emptyMap()
-    ) {
-        // Determine if reload is needed: same URL or explicit force flag set elsewhere
-        forceReload =
-            (content is WebContent.Url && (content as WebContent.Url).url == url) || forceReload
+    fun loadUrl(url: String, additionalHttpHeaders: Map<String, String> = emptyMap()) {
+        forceReload = content == WebContent.Url(url, additionalHttpHeaders)
+        error = null
         content = WebContent.Url(url, additionalHttpHeaders)
     }
-
-    fun loadData(
-        data: String,
-        baseUrl: String? = null,
-        encoding: String = "utf-8",
-        mimeType: String? = null,
-        historyUrl: String? = null
-    ) {
+    fun loadData(data: String, baseUrl: String? = null, encoding: String = "utf-8", mimeType: String? = null, historyUrl: String? = null) {
+        error = null
         content = WebContent.Data(data, baseUrl, encoding, mimeType, historyUrl)
     }
-
-    // --- Navigation Methods ---
-    fun goBack() {
-        webView?.goBack()
-    }
-
-    fun goForward() {
-        webView?.goForward()
-    }
-
-    fun reload() {
-        // Set forceReload flag for URL content type to ensure `update` block reloads
-        forceReload = true
-        // Trigger recomposition/update by changing the content reference slightly,
-        // even if the URL is the same. Assigning the same Url object might not trigger update.
-        // Or simply call webView?.reload() directly.
-        webView?.reload()
-        // If content is Data, reloading might mean re-setting the data.
-        if (content is WebContent.Data) {
-            // Re-assign to trigger update block if necessary
-            content = (content as WebContent.Data).copy()
-        }
-    }
-
-    fun stopLoading() {
-        webView?.stopLoading()
-    }
-
-    fun clearHistory() {
-        webView?.clearHistory()
-    }
-
-    fun pushConsoleMessage(message: ConsoleMessage) {
-        consoleMessages = consoleMessages + message
-        if (consoleMessages.size > 64) { // Limit to 64 messages
-            consoleMessages = consoleMessages.takeLast(64)
-        }
-    }
+    fun goBack() { webView?.goBack() }
+    fun goForward() { webView?.goForward() }
+    fun reload() { error = null; loadWarning = null; forceReload = true }
+    fun stopLoading() { webView?.stopLoading(); isLoading = false }
+    fun clearHistory() { webView?.clearHistory() }
+    fun pushConsoleMessage(message: ConsoleMessage) { consoleMessages = (consoleMessages + message).takeLast(64) }
 }
 
 @Composable
@@ -465,12 +523,13 @@ fun rememberWebViewState(
     additionalHttpHeaders: Map<String, String> = emptyMap(),
     interfaces: Map<String, Any> = emptyMap(),
     settings: WebSettings.() -> Unit = {},
-) = remember(url, additionalHttpHeaders) { // Use keys for better recomposition control
-    WebViewState(
-        initialContent = WebContent.Url(url, additionalHttpHeaders),
-        interfaces = interfaces,
-        settings = settings
-    )
+): WebViewState {
+    val currentSettings by rememberUpdatedState(settings)
+    val state = remember(url, additionalHttpHeaders) {
+        WebViewState(WebContent.Url(url, additionalHttpHeaders), interfaces, settings = { currentSettings(this) })
+    }
+    SideEffect { state.interfaces = interfaces }
+    return state
 }
 
 @Composable
@@ -482,10 +541,15 @@ fun rememberWebViewState(
     historyUrl: String? = null,
     interfaces: Map<String, Any> = emptyMap(),
     settings: WebSettings.() -> Unit = {},
-) = remember(data, baseUrl, encoding, mimeType, historyUrl) { // Use keys
-    WebViewState(
-        initialContent = WebContent.Data(data, baseUrl, encoding, mimeType, historyUrl),
-        interfaces = interfaces,
-        settings = settings
-    )
+): WebViewState {
+    val currentSettings by rememberUpdatedState(settings)
+    val state = remember(baseUrl, encoding, mimeType, historyUrl) {
+        WebViewState(WebContent.Data(data, baseUrl, encoding, mimeType, historyUrl), interfaces, settings = { currentSettings(this) })
+    }
+    SideEffect {
+        val next = WebContent.Data(data, baseUrl, encoding, mimeType, historyUrl)
+        if (state.content != next) { state.content = next; state.error = null }
+        state.interfaces = interfaces
+    }
+    return state
 }

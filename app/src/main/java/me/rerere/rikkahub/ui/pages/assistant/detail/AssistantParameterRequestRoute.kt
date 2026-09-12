@@ -6,10 +6,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.openai.isAlibabaModelStudioHost
+import me.rerere.ai.provider.providers.openai.isOfficialDeepSeekHost
+import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
+import me.rerere.ai.provider.providers.openai.resolveQwenModelParameterSupport
 import me.rerere.ai.provider.providers.claude.requestChannel as claudeRequestChannel
 import me.rerere.ai.provider.providers.google.requestChannel as googleRequestChannel
 import me.rerere.ai.provider.providers.openai.requestChannel as openAIRequestChannel
 import me.rerere.rikkahub.R
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal enum class ParameterWireProtocol {
     OPENAI_CHAT_COMPLETIONS,
@@ -63,6 +68,19 @@ internal fun ProviderSetting.parameterRequestRoute(
         }
     }
     return ParameterRequestRoute(protocol = protocol, endpoint = endpoint)
+}
+
+internal fun ProviderSetting.parameterRequestRouteForModel(modelId: String): ParameterRequestRoute {
+    if (this !is ProviderSetting.OpenAI) return parameterRequestRoute()
+    val host = baseUrl.toHttpUrlOrNull()?.host.orEmpty()
+    val endpointOverride = when {
+        resolveQwenModelParameterSupport(modelId).available && isAlibabaModelStudioHost(host) ->
+            ParameterEndpoint.ALIBABA_MODEL_STUDIO
+        resolveDeepSeekModelParameterSupport(modelId).available && isOfficialDeepSeekHost(host) ->
+            ParameterEndpoint.DEEPSEEK
+        else -> null
+    }
+    return parameterRequestRoute(endpointOverride)
 }
 
 @Composable

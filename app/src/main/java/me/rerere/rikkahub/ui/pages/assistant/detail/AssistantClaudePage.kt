@@ -12,7 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -93,7 +93,7 @@ fun AssistantClaudePage(id: String) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { innerPadding ->
         AssistantClaudeContent(
             innerPadding = innerPadding,
@@ -106,6 +106,7 @@ fun AssistantClaudePage(id: String) {
             supportsInferenceGeo = nativeProtocol && support.supportsInferenceGeo,
             supportsSampling = nativeProtocol && support.supportsSamplingParameters,
             supportsStructuredOutput = if (nativeProtocol) support.supportsStructuredOutput else enabled,
+            supportsForcedToolChoice = !nativeProtocol || support.supportsForcedToolChoice,
             route = route,
             openAICompatible = openAIChatCompatible,
             unavailableMessage = unavailableMessage,
@@ -125,6 +126,7 @@ private fun AssistantClaudeContent(
     supportsInferenceGeo: Boolean,
     supportsSampling: Boolean,
     supportsStructuredOutput: Boolean,
+    supportsForcedToolChoice: Boolean,
     route: ParameterRequestRoute?,
     openAICompatible: Boolean,
     unavailableMessage: String?,
@@ -204,9 +206,16 @@ private fun AssistantClaudeContent(
                 ClaudeSelectItem(
                     title = stringResource(R.string.assistant_claude_tool_choice),
                     description = stringResource(R.string.assistant_claude_tool_choice_desc),
-                    warning = stringResource(R.string.assistant_claude_tools_warning),
-                    options = ClaudeToolChoice.entries,
-                    selected = options.toolChoice,
+                    warning = stringResource(
+                        if (supportsForcedToolChoice) R.string.assistant_claude_tools_warning
+                        else R.string.assistant_claude_forced_tool_unsupported
+                    ),
+                    options = ClaudeToolChoice.entries.filter {
+                        supportsForcedToolChoice || it != ClaudeToolChoice.ANY
+                    },
+                    selected = if (
+                        !supportsForcedToolChoice && options.toolChoice == ClaudeToolChoice.ANY
+                    ) ClaudeToolChoice.AUTO else options.toolChoice,
                     enabled = enabled,
                     label = { it.displayName() },
                     onSelected = { value -> update { it.copy(toolChoice = value) } },

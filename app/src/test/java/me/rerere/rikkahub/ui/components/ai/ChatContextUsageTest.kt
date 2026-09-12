@@ -9,7 +9,7 @@ import org.junit.Test
 
 class ChatContextUsageTest {
     @Test
-    fun `uses provider prompt usage when it exceeds the lightweight local estimate`() {
+    fun `legacy provider usage is reported separately without assuming it is the current request`() {
         val usage = calculateChatContextUsage(
             messages = listOf(
                 UIMessage.user("A much longer request that would produce a different local estimate."),
@@ -20,7 +20,8 @@ class ChatContextUsageTest {
             capacityTokens = 32_768,
         )
 
-        assertEquals(12_370, usage.usedTokens)
+        assertEquals(12_345, usage.measuredInputTokens)
+        assertTrue(usage.usedTokens < 100)
         assertEquals(32_768, usage.capacityTokens)
         assertTrue(usage.isEstimated)
     }
@@ -48,7 +49,8 @@ class ChatContextUsageTest {
         )
 
         assertTrue(usage.isEstimated)
-        assertTrue(usage.usedTokens > 12_345)
+        assertEquals(12_345, usage.measuredInputTokens)
+        assertTrue(usage.usedTokens < 100)
     }
 
     @Test

@@ -1,12 +1,39 @@
 package me.rerere.rikkahub.ui.pages.log
 
 import android.content.ClipData
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.NavigationBarItem
+import me.rerere.hugeicons.stroke.ComputerTerminal01
+import me.rerere.hugeicons.stroke.Code
+import me.rerere.hugeicons.stroke.AiBrain01
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.hugeicons.stroke.Download01
+import me.rerere.hugeicons.stroke.Search01
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
+import me.rerere.rikkahub.ui.components.ui.Tooltip
+import org.koin.androidx.compose.koinViewModel
 import androidx.compose.ui.platform.ClipEntry
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,7 +47,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.Surface
+import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -60,8 +88,37 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun LogPage() {
-    var logs by remember { mutableStateOf(Logging.getRecentLogs()) }
+fun LogPage(vm: LogVM = koinViewModel()) {
+    val logs by vm.logs.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val message by vm.message.collectAsStateWithLifecycle()
+    var requestQuery by rememberSaveable { mutableStateOf("") }
+    var softwareQuery by rememberSaveable { mutableStateOf("") }
+    var requestFilter by rememberSaveable { mutableStateOf(LogFilter.ALL) }
+    var softwareFilter by rememberSaveable { mutableStateOf(LogFilter.ALL) }
+    val pager = rememberPagerState { 2 }
+    val scope = rememberCoroutineScope()
+    val requestLogs = remember(logs, requestQuery, requestFilter) {
+        filterLogs(logs.filter { it.section() == LogSection.REQUESTS }, requestFilter, requestQuery)
+    }
+    val softwareLogs = remember(logs, softwareQuery, softwareFilter) {
+        filterLogs(logs.filter { it.section() == LogSection.SOFTWARE }, softwareFilter, softwareQuery)
+    }
+    var confirmClear by remember { mutableStateOf(false) }
+    var exportLogs by remember { mutableStateOf<List<LogEntry>?>(null) }
+    var exportMode by remember { mutableStateOf(LogExportMode.REDACTED) }
+    val filteredLogs = if (pager.currentPage == 0) requestLogs else softwareLogs
+    val context = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> vm.export(context.contentResolver, uri) }
+    LaunchedEffect(message) {
+        message?.let {
+            snackbar.showSnackbar(context.getString(it))
+            vm.message.value = null
+        }
+    }
     var requestLoggingEnabled by remember { mutableStateOf(Logging.isRequestLoggingEnabled()) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -71,11 +128,18 @@ fun LogPage() {
                 title = { Text(stringResource(R.string.log_page_title)) },
                 navigationIcon = { BackButton() },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            Logging.clear()
-                            logs = Logging.getRecentLogs()
+                    TextButton(onClick = vm::openAnalysisHistory) { Text("分析历史") }
+                    Tooltip(tooltip = { Text(stringResource(R.string.log_page_export)) }) {
+                        IconButton(
+                            onClick = { exportLogs = filteredLogs.toList() },
+                            enabled = filteredLogs.isNotEmpty() && !busy,
+                        ) {
+                            Icon(HugeIcons.Download01, stringResource(R.string.log_page_export))
                         }
+                    }
+                    IconButton(
+                        onClick = { confirmClear = true },
+                        enabled = logs.isNotEmpty() && !busy,
                     ) {
                         Icon(
                             imageVector = HugeIcons.Delete01,
@@ -87,26 +151,106 @@ fun LogPage() {
                 colors = CustomColors.topBarColors,
             )
         },
+        bottomBar = {
+            BottomAppBar(containerColor = CustomColors.cardColorsOnSurfaceContainer.containerColor) {
+                LogSection.entries.forEachIndexed { index, section ->
+                    NavigationBarItem(
+                        selected = pager.currentPage == index,
+                        onClick = { scope.launch { pager.animateScrollToPage(index) } },
+                        icon = { Icon(if (section == LogSection.REQUESTS) HugeIcons.Code else HugeIcons.ComputerTerminal01, null) },
+                        label = { Text(stringResource(
+                            if (section == LogSection.REQUESTS) R.string.log_page_requests_tab
+                            else R.string.log_page_software_tab
+                        )) },
+                    )
+                }
+            }
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = CustomColors.scaffoldContainerColor,
     ) { contentPadding ->
-        UnifiedLogList(
-            logs = logs,
-            requestLoggingEnabled = requestLoggingEnabled,
-            onRequestLoggingChange = {
-                requestLoggingEnabled = it
-                Logging.setRequestLoggingEnabled(it)
-            },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-        )
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().padding(contentPadding)) { page ->
+            val section = LogSection.entries[page]
+            UnifiedLogList(
+                logs = if (page == 0) requestLogs else softwareLogs,
+                totalCount = logs.count { it.section() == section },
+                query = if (page == 0) requestQuery else softwareQuery,
+                onQueryChange = { if (page == 0) requestQuery = it else softwareQuery = it },
+                filter = if (page == 0) requestFilter else softwareFilter,
+                onFilterChange = { if (page == 0) requestFilter = it else softwareFilter = it },
+                section = section,
+                exporting = busy,
+                onExport = { exportLogs = listOf(it) },
+                onAnalyze = vm::prepareAnalysis,
+                requestLoggingEnabled = requestLoggingEnabled,
+                onRequestLoggingChange = {
+                    requestLoggingEnabled = it
+                    Logging.setRequestLoggingEnabled(it)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
+    LogAnalysisDialog(vm)
+    RikkaConfirmDialog(
+        show = confirmClear,
+        title = stringResource(R.string.log_page_clear),
+        text = { Text(stringResource(R.string.log_page_clear_confirmation)) },
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onDismiss = { confirmClear = false },
+        onConfirm = {
+            confirmClear = false
+            vm.clear()
+        },
+    )
+    RikkaConfirmDialog(
+        show = exportLogs != null,
+        title = stringResource(R.string.log_page_export),
+        text = {
+            Column {
+                Text(stringResource(R.string.log_page_export_confirmation, exportLogs?.size ?: 0))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.RadioButton(selected = exportMode == LogExportMode.REDACTED, onClick = { exportMode = LogExportMode.REDACTED })
+                    Text("脱敏日志")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.RadioButton(selected = exportMode == LogExportMode.FULL, onClick = { exportMode = LogExportMode.FULL })
+                    Text("完整日志（仍屏蔽密钥）")
+                }
+                if (exportMode == LogExportMode.FULL) Text("包含提示词、工具参数及模型回复，请确认分享范围。")
+            }
+        },
+        confirmText = stringResource(R.string.confirm),
+        dismissText = stringResource(R.string.cancel),
+        onDismiss = { exportLogs = null },
+        onConfirm = {
+            val snapshot = exportLogs.orEmpty()
+            exportLogs = null
+            vm.prepareExport(snapshot, exportMode)
+            try {
+                exportLauncher.launch("rikkahub-logs-${System.currentTimeMillis()}.json")
+            } catch (_: Exception) {
+                vm.cancelExport()
+                vm.message.value = R.string.log_page_export_failed
+            }
+        },
+    )
 }
 
 @Composable
 private fun UnifiedLogList(
     logs: List<LogEntry>,
+    totalCount: Int,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    filter: LogFilter,
+    onFilterChange: (LogFilter) -> Unit,
+    section: LogSection,
+    exporting: Boolean,
+    onExport: (LogEntry) -> Unit,
+    onAnalyze: (LogEntry) -> Unit,
     requestLoggingEnabled: Boolean,
     onRequestLoggingChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
@@ -115,46 +259,86 @@ private fun UnifiedLogList(
     val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
     val scope = rememberCoroutineScope()
     val sortedLogs = remember(logs) { logs.sortedByDescending { it.timestamp } }
+    val groups = remember(sortedLogs) { groupRequestLogs(sortedLogs) }
+    var expandedGroups by remember { mutableStateOf(emptySet<String>()) }
 
     LazyColumn(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(16.dp)
     ) {
-        item {
-            RequestLoggingSwitchCard(
-                enabled = requestLoggingEnabled,
-                onEnabledChange = onRequestLoggingChange
-            )
+        if (section == LogSection.REQUESTS) {
+            item {
+                RequestLoggingSwitchCard(
+                    enabled = requestLoggingEnabled,
+                    onEnabledChange = onRequestLoggingChange
+                )
+            }
+        }
+        item(key = "filters") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text(stringResource(R.string.log_page_search)) },
+                    leadingIcon = { Icon(HugeIcons.Search01, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    (if (section == LogSection.REQUESTS) listOf(LogFilter.ALL, LogFilter.ERRORS)
+                    else listOf(LogFilter.ALL, LogFilter.ERRORS, LogFilter.TEXT)).forEach { option ->
+                        FilterChip(
+                            selected = filter == option,
+                            onClick = { onFilterChange(option) },
+                            label = { Text(stringResource(when (option) {
+                                LogFilter.ALL -> R.string.log_page_filter_all
+                                LogFilter.ERRORS -> R.string.log_page_filter_errors
+                                LogFilter.REQUESTS -> R.string.log_page_filter_requests
+                                LogFilter.TEXT -> R.string.log_page_filter_text
+                            })) },
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.log_page_count, logs.size, totalCount),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    stringResource(R.string.log_page_retention),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (exporting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (logs.isEmpty()) Text(stringResource(R.string.log_page_empty))
+            }
         }
 
-        items(sortedLogs, key = { it.id }, contentType = { it.javaClass.simpleName }) { log ->
-            when (log) {
-                is LogEntry.RequestLog -> RequestLogCard(
-                    log = log,
-                    onClick = {
+        groups.forEach { group ->
+            val expanded = group.key in expandedGroups
+            if (group.entries.size > 1) {
+                item(key = group.key, contentType = "request-group") {
+                    RequestGroupHeader(group, expanded, onClick = {
+                        expandedGroups = if (expanded) expandedGroups - group.key else expandedGroups + group.key
+                    })
+                }
+            }
+            if (group.entries.size == 1 || expanded) {
+                items(group.entries, key = { it.id }, contentType = { it.javaClass.simpleName }) { log ->
+                    val openLog: () -> Unit = {
                         selectedLog = log
                         scope.launch { sheetState.show() }
                     }
-                )
-
-                is LogEntry.ProviderRequestLog -> ProviderRequestLogCard(
-                    log = log,
-                    onClick = {
-                        selectedLog = log
-                        scope.launch { sheetState.show() }
-                    },
-                )
-
-                is LogEntry.ErrorLog -> ErrorLogCard(
-                    log = log,
-                    onClick = {
-                        selectedLog = log
-                        scope.launch { sheetState.show() }
-                    },
-                )
-
-                is LogEntry.TextLog -> TextLogCard(log = log)
+                    when (log) {
+                        is LogEntry.RequestLog -> RequestLogCard(log, openLog)
+                        is LogEntry.ProviderRequestLog -> ProviderRequestLogCard(log, openLog)
+                        is LogEntry.ErrorLog -> ErrorLogCard(log, openLog)
+                        is LogEntry.TextLog -> TextLogCard(log, openLog)
+                    }
+                }
             }
         }
     }
@@ -164,12 +348,68 @@ private fun UnifiedLogList(
             onDismissRequest = { selectedLog = null },
             sheetState = sheetState
         ) {
+            TextButton(onClick = { onExport(log) }, enabled = !exporting) {
+                Icon(HugeIcons.Download01, null)
+                Text(stringResource(R.string.log_page_export_single))
+            }
+            if (log.isFailure()) {
+                TextButton(onClick = { onAnalyze(log) }) {
+                    Icon(HugeIcons.AiBrain01, null)
+                    Text(stringResource(R.string.log_page_ai_analysis))
+                }
+            }
             when (log) {
                 is LogEntry.RequestLog -> RequestLogDetail(log)
                 is LogEntry.ProviderRequestLog -> ProviderRequestLogDetail(log)
                 is LogEntry.ErrorLog -> ErrorLogDetail(log)
-                is LogEntry.TextLog -> Unit
+                is LogEntry.TextLog -> SelectionContainer {
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        item { DetailSection(stringResource(R.string.log_page_name), log.tag) }
+                        item { DetailSection(stringResource(R.string.log_page_time),
+                            SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date(log.timestamp))) }
+                        item { DetailSection(stringResource(R.string.log_page_technical_log), log.message) }
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun RequestGroupHeader(group: RequestLogGroup, expanded: Boolean, onClick: () -> Unit) {
+    val latest = group.entries.first() as LogEntry.ProviderRequestLog
+    val failures = group.entries.count { it.isFailure() }
+    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()) }
+    val methods = group.entries.filterIsInstance<LogEntry.ProviderRequestLog>()
+        .groupingBy { it.method.orEmpty().uppercase(Locale.ROOT) }.eachCount()
+        .entries.joinToString(" / ") { "${it.key}: ${it.value}" }
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(latest.provider, style = MaterialTheme.typography.titleSmall)
+            Text(latest.model, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                stringResource(R.string.log_page_group_count, group.entries.size, failures),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (failures > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+            Text("$methods · ${timeFormat.format(Date(latest.timestamp))}", style = MaterialTheme.typography.labelSmall)
+            group.entries.firstOrNull { it.isFailure() }?.let { failed ->
+                val reason = (failed as LogEntry.ProviderRequestLog).error
+                    ?: failed.responseCode?.let { "HTTP $it" }.orEmpty()
+                Text(reason, style = MaterialTheme.typography.bodySmall, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.error)
+            }
+            Text(
+                stringResource(if (expanded) R.string.log_page_group_collapse else R.string.log_page_group_expand),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
@@ -210,6 +450,12 @@ private fun ProviderRequestLogCard(log: LogEntry.ProviderRequestLog, onClick: ()
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = JetbrainsMono,
                 maxLines = 2,
+            )
+            Text(
+                text = log.provider,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = localizedProviderChannel(log.channel),
@@ -388,6 +634,9 @@ private fun ProviderHttpRequestDetails(log: LogEntry.ProviderRequestLog) {
                 )
             }
         }
+        log.responseBody?.let { body ->
+            FormattedResponseBody(body)
+        }
         if (log.responseHeaders.isNotEmpty()) {
             Text(
                 text = stringResource(R.string.log_page_response_headers),
@@ -395,6 +644,52 @@ private fun ProviderHttpRequestDetails(log: LogEntry.ProviderRequestLog) {
                 fontWeight = FontWeight.Bold,
             )
             log.responseHeaders.forEach { (key, value) -> HeaderItem(key, value) }
+        }
+    }
+}
+
+private enum class ResponseBodyFormat(val label: String) { JSON("JSON"), HTML("HTML/XML"), SSE("SSE"), TEXT("TEXT") }
+
+private fun responseBodyFormat(body: String): ResponseBodyFormat {
+    val value = body.trimStart()
+    if (runCatching { JsonInstantPretty.parseToJsonElement(body) }.isSuccess) return ResponseBodyFormat.JSON
+    if (value.startsWith("<") && value.contains('>')) return ResponseBodyFormat.HTML
+    if (body.lineSequence().any { it.trimStart().startsWith("data:") || it.trimStart().startsWith("event:") }) return ResponseBodyFormat.SSE
+    return ResponseBodyFormat.TEXT
+}
+
+private fun prettyMarkup(body: String): String = body
+    .replace(Regex(">\\s*<"), ">\\n<")
+    .lineSequence()
+    .flatMap { line -> line.trim().split(Regex("(?=<)|(?<=>)")) }
+    .map(String::trim)
+    .filter(String::isNotBlank)
+    .joinToString("\\n")
+
+@Composable
+private fun FormattedResponseBody(body: String) {
+    val format = remember(body) { responseBodyFormat(body) }
+    val parsed = remember(body) {
+        if (format == ResponseBodyFormat.JSON) runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull() else null
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("响应正文", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(format.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp,
+        ) {
+            if (parsed != null) {
+                JsonTree(json = parsed, modifier = Modifier.padding(8.dp), initialExpandLevel = 2)
+            } else {
+                val text = if (format == ResponseBodyFormat.HTML) prettyMarkup(body) else body.trim()
+                SelectionContainer {
+                    Text(text = text, modifier = Modifier.padding(10.dp).horizontalScroll(rememberScrollState()),
+                        fontFamily = JetbrainsMono, style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }
@@ -418,6 +713,7 @@ private fun localizedProviderChannel(value: String): String = when (value) {
 
 @Composable
 private fun localizedProviderOperation(value: String): String = when (value) {
+    ProviderRequestOperation.EMBEDDING.name -> "向量生成"
     ProviderRequestOperation.TEXT_GENERATION.name ->
         stringResource(R.string.log_page_operation_text)
     ProviderRequestOperation.STREAM_TEXT.name ->
@@ -426,6 +722,14 @@ private fun localizedProviderOperation(value: String): String = when (value) {
         stringResource(R.string.log_page_operation_image)
     ProviderRequestOperation.IMAGE_EDIT.name ->
         stringResource(R.string.log_page_operation_image_edit)
+    ProviderRequestOperation.VIDEO_GENERATION_CREATE.name ->
+        stringResource(R.string.log_page_operation_video_create)
+    ProviderRequestOperation.VIDEO_GENERATION_STATUS.name ->
+        stringResource(R.string.log_page_operation_video_status)
+    ProviderRequestOperation.VIDEO_GENERATION_CANCEL.name ->
+        stringResource(R.string.log_page_operation_video_cancel)
+    ProviderRequestOperation.VIDEO_GENERATION_DOWNLOAD.name ->
+        stringResource(R.string.log_page_operation_video_download)
     else -> value
 }
 
@@ -924,6 +1228,11 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                 }
             }
 
+            log.responseBody?.let { body ->
+                item {
+                    FormattedResponseBody(body)
+                }
+            }
             if (log.responseHeaders.isNotEmpty()) {
                 item {
                     HorizontalDivider()
@@ -977,11 +1286,11 @@ private fun HeaderItem(key: String, value: String) {
 }
 
 @Composable
-private fun TextLogCard(log: LogEntry.TextLog) {
+private fun TextLogCard(log: LogEntry.TextLog, onClick: () -> Unit) {
     val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         SelectionContainer {
@@ -1005,7 +1314,9 @@ private fun TextLogCard(log: LogEntry.TextLog) {
                 Text(
                     text = log.message,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = JetbrainsMono
+                    fontFamily = JetbrainsMono,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

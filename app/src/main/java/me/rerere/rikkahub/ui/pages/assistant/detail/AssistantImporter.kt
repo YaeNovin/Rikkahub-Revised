@@ -311,63 +311,7 @@ private suspend fun importAssistantFromUri(
 
 internal fun parseEmbeddedTavernLorebook(data: JsonObject, characterName: String): Lorebook? {
     val book = data["character_book"] as? JsonObject ?: return null
-    val rawEntries = when (val entries = book["entries"]) {
-        is JsonArray -> entries.toList()
-        is JsonObject -> entries.values.toList()
-        else -> emptyList()
-    }
-    val defaultScanDepth = book.int("scan_depth") ?: 4
-    val entries = rawEntries.mapNotNull { element ->
-        val entry = element as? JsonObject ?: return@mapNotNull null
-        val primary = entry.stringList("keys").ifEmpty { entry.stringList("key") }
-        val secondary = entry.stringList("secondary_keys").ifEmpty { entry.stringList("keysecondary") }
-        val constant = entry.bool("constant") ?: false
-        val content = entry.string("content").orEmpty()
-        if (content.isBlank() || (!constant && primary.isEmpty())) return@mapNotNull null
-        val selective = entry.bool("selective") == true && secondary.isNotEmpty()
-        val expression = if (selective) {
-            val primaryExpression = primary.toKeywordExpression("OR")
-            val secondaryLogic = entry.int("selective_logic") ?: entry.int("selectiveLogic") ?: 0
-            val secondaryExpression = when (secondaryLogic) {
-                1 -> "NOT (${secondary.toKeywordExpression("AND")})"
-                2 -> "NOT (${secondary.toKeywordExpression("OR")})"
-                3 -> secondary.toKeywordExpression("AND")
-                else -> secondary.toKeywordExpression("OR")
-            }
-            "($primaryExpression) AND ($secondaryExpression)"
-        } else {
-            primary.toKeywordExpression("OR")
-        }
-        val extensions = entry["extensions"] as? JsonObject
-        val probabilityEnabled = extensions?.bool("useProbability")
-            ?: extensions?.bool("use_probability")
-            ?: entry.bool("use_probability")
-            ?: false
-        val probability = extensions?.int("probability") ?: entry.int("probability") ?: 100
-        PromptInjection.RegexInjection(
-            name = entry.string("name")
-                ?: entry.string("comment")
-                ?: primary.firstOrNull().orEmpty(),
-            enabled = entry.bool("enabled") ?: !(entry.bool("disable") ?: false),
-            priority = entry.int("priority") ?: entry.int("insertion_order") ?: entry.int("order") ?: 100,
-            position = mapTavernPosition(entry["position"]),
-            injectDepth = entry.int("depth") ?: 4,
-            content = content,
-            keywords = primary,
-            keywordExpression = expression,
-            caseSensitive = entry.bool("case_sensitive") ?: entry.bool("caseSensitive") ?: false,
-            scanDepth = entry.int("scan_depth") ?: entry.int("scanDepth") ?: defaultScanDepth,
-            constantActive = constant,
-            triggerProbability = if (probabilityEnabled) probability.coerceIn(0, 100) else 100,
-        )
-    }
-    if (entries.isEmpty()) return null
-    return Lorebook(
-        name = book.string("name")?.takeIf(String::isNotBlank) ?: "$characterName World Book",
-        description = book.string("description").orEmpty(),
-        entries = entries,
-        tokenBudget = (book.int("token_budget") ?: 0).coerceAtLeast(0),
-    )
+    return me.rerere.rikkahub.data.export.decodeTavernLorebook(book, "$characterName 世界书")
 }
 
 private fun mapTavernPosition(value: JsonElement?): InjectionPosition {
