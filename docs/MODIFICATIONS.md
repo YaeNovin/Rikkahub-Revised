@@ -26,7 +26,8 @@ documented checks and bundled asset build can be reproduced.
 通用回归脚本与 KaTeX 构建适配器随源码保留，便于复现文档中的检查。
 
 逐条双语更新记录见 [2026-09-12 源码更新](changes-2026-09-12.md)，完整文档入口见
-[文档索引](../README.md)。这些源码更新尚未发布为新的正式 APK。
+[文档索引](../README.md)。本次源码已重新构建并刷新 `2.4.8-revised.7` Release 的 APK/AAB 资产；
+逐条中文后英文的发布说明见 [release-notes-2.4.8-revised.7.md](release-notes-2.4.8-revised.7.md)。
 
 ### Latest provider and interaction additions / 最新 Provider 与交互新增
 
@@ -73,11 +74,10 @@ documented checks and bundled asset build can be reproduced.
   WebView previews, image-generation settings, and Android compatibility paths;
   focused regression tests were added alongside the fixes.
   中文：修复聊天加载与流式恢复、富内容渲染、WebView 预览、生图设置及 Android 兼容性路径问题，并同步增加针对性回归测试。
-- English: Built and published the signed `2.4.8-revised.7` release from
-  commit `33caebdd`; the public release includes the ARM64 APK and bilingual
-  release notes.
-  中文：已基于提交 `33caebdd` 构建并发布签名正式版 `2.4.8-revised.7`；公开
-  Release 包含 ARM64 安装包和双语发布说明。
+- English: Rebuilt and refreshed the signed `2.4.8-revised.7` Release from the
+  current grouped source, with ARM64, x86_64, Universal APKs, an AAB, and checksums.
+  中文：已基于分组提交后的最新源码重新构建并刷新签名正式版 `2.4.8-revised.7`，
+  Release 包含 ARM64、x86_64、Universal APK、AAB 和校验文件。
 
 ## 2.4.8-revised.7 Release Notes / 发布说明
 

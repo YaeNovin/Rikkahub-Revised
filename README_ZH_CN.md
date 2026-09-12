@@ -47,10 +47,12 @@ Rikkahub Revised 的正式 APK 仅通过本仓库的
 | `app-arm64-v8a-release.apk` | 大多数现代 Android 手机和平板电脑 |
 | `app-x86_64-release.apk` | x86_64 模拟器及兼容设备 |
 | `app-universal-release.apk` | 同时包含 ARM64 与 x86_64 原生库的通用备用包 |
+| `app-release.aab` | 应用商店或分发平台使用的 App Bundle |
 
 Release 资产文件名可能包含版本后缀。例如当前 `.7` 版本发布的 ARM64 安装包为
 `app-arm64-v8a-release-2.4.8-revised.7.apk`；应用内更新功能会根据文件名识别设备 ABI。
 
+当前 `2.4.8-revised.7` Release 已包含三个 APK 架构包、AAB 和 `SHA256SUMS.txt`。
 应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
 APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
 流程中单独核验。
@@ -103,7 +105,7 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - 独立应用 ID、隔离的 URI Scheme 与 Provider Authority，以及默认关闭的
   Firebase 集成。
 
-### 2.4.8-revised.7 之后准备合入的未发布修改
+### 已包含在重新构建的 2.4.8-revised.7 包中的源码修改
 
 - 增加 DeepSeek V4.1-Flash 模型识别，支持规范名称 `deepseek-flash` 与旧别名，
   并补齐 1M 上下文、384K 输出上限、视觉输入、思考强度映射和工具调用保护。
@@ -114,8 +116,9 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - 增加按对话记忆控制、记忆生命周期、上下文统计、灵感卡片、聊天建议、请求日志
   格式化及外观/文字配色优化。
 
-这些修改已包含在当前源码分支中，但在完成新的 APK 构建、测试、签名和发布前，
-不会标记为新的正式版本。
+本次安装包基于分组提交后的最新源码重新构建，继续使用版本号 183 和原有正式版
+签名证书，支持覆盖更新。完整双语更新说明见
+[release-notes-2.4.8-revised.7.md](docs/release-notes-2.4.8-revised.7.md)。
 
 完整的修改记录、上游对比和发行要求见
 [MODIFICATIONS.md](docs/MODIFICATIONS.md)。

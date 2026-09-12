@@ -77,7 +77,9 @@ Before publishing an APK or AAB:
 - API: `https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest`
 - First tag/version: `v2.4.8-revised.1` / `2.4.8-revised.1`
 - Current tag/version: `2.4.8-revised.7`
-- Current APK asset: `app-arm64-v8a-release-2.4.8-revised.7.apk`
+- Current APK assets: `app-arm64-v8a-release.apk`, `app-x86_64-release.apk`, and `app-universal-release.apk`
+- Current App Bundle: `app-release.aab`
+- Current checksum asset: `SHA256SUMS.txt`
 - Historical tags may use the optional `v` prefix; the updater accepts both
   forms and compares the normalized version.
 

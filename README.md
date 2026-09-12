@@ -49,13 +49,15 @@ Official Rikkahub Revised APKs are published only through this repository's
 | `app-arm64-v8a-release.apk` | Most modern Android phones and tablets |
 | `app-x86_64-release.apk` | x86_64 emulators and compatible devices |
 | `app-universal-release.apk` | Universal fallback containing ARM64 and x86_64 native libraries |
+| `app-release.aab` | App-store or distribution-platform bundle |
 
 Release asset filenames may include the release version suffix. For example,
 the current `.7` release publishes
 `app-arm64-v8a-release-2.4.8-revised.7.apk`; the updater detects the device ABI
 from the asset name.
 
-The in-app updater reads the latest public release from this repository and
+The current `2.4.8-revised.7` Release contains the three APK variants, the AAB,
+and `SHA256SUMS.txt`. The in-app updater reads the latest public release from this repository and
 offers an APK compatible with the device ABI. Release descriptions contain only
 user-facing updates and fixes; package integrity and signing continuity are
 verified separately during publication.
@@ -125,7 +127,7 @@ or changes the following areas:
 - A separate application ID, isolated URI schemes and authorities, and
   opt-in Firebase integration.
 
-### Unreleased changes prepared after 2.4.8-revised.7
+### Source changes included in the refreshed 2.4.8-revised.7 package
 
 - Added DeepSeek V4.1-Flash model recognition through the canonical
   `deepseek-flash` name and legacy aliases, including 1M context, 384K output
@@ -140,8 +142,10 @@ or changes the following areas:
   context accounting, inspiration cards, chat suggestions, request-log
   formatting, and appearance/text-color improvements.
 
-These changes are included in the current source branch and are not a numbered
-release until a new APK is built, tested, signed, and published.
+The package was rebuilt from the current source after the grouped commits. It
+keeps version code 183 and the existing release certificate for in-place updates.
+The complete bilingual release notes are in
+[release-notes-2.4.8-revised.7.md](docs/release-notes-2.4.8-revised.7.md).
 
 For the auditable modification record, upstream comparison, and release
 requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).
