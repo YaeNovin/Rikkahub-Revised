@@ -20,3 +20,8 @@ local.properties
 *.p12
 *.pfx
 /release-signing/
+
+# Local QA/build caches and IDE metadata must never enter a release commit.
+/gradle-home-test/
+/common/gradle/
+/common/.idea/

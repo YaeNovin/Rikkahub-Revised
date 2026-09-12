@@ -42,10 +42,10 @@ object NotificationUtil {
      * 检查是否有通知权限
      */
     fun hasNotificationPermission(context: Context): Boolean {
-        return ActivityCompat.checkSelfPermission(
+        return NotificationManagerCompat.from(context).areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 || ActivityCompat.checkSelfPermission(
             context,
             Manifest.permission.POST_NOTIFICATIONS
-        ) == PackageManager.PERMISSION_GRANTED
+        ) == PackageManager.PERMISSION_GRANTED)
     }
 
     /**
@@ -71,8 +71,10 @@ object NotificationUtil {
         val notificationConfig = NotificationConfig().apply(config)
         val notification = buildNotification(context, channelId, notificationConfig)
 
-        NotificationManagerCompat.from(context).notify(notificationId, notification.build())
-        return true
+        return try {
+            NotificationManagerCompat.from(context).notify(notificationId, notification.build())
+            true
+        } catch (_: SecurityException) { false }
     }
 
     /**
@@ -105,7 +107,7 @@ object NotificationUtil {
             }
 
             // Android 15+ Live Update 支持
-            if (config.requestPromotedOngoing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            if (config.requestPromotedOngoing && Build.VERSION.SDK_INT >= 36) {
                 setRequestPromotedOngoing(true)
             }
 
