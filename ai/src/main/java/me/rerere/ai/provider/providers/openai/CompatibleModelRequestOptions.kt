@@ -13,15 +13,20 @@ import me.rerere.ai.provider.GeminiResponseMimeType
 import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.inferParameterFamily
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.registry.ModelRegistry
 
 internal fun JsonObjectBuilder.applyCompatibleGeminiChatOptions(params: TextGenerationParams) {
     if (params.model.inferParameterFamily() != ModelParameterFamily.GEMINI) return
     val options = params.geminiOptions
+    val rejectsPenalties = ModelRegistry.GEMINI_3_8_FLASH.match(params.model.parameterModelId())
 
     options.seed?.let { put("seed", it) }
     putStopSequences(options.stopSequences, maxCount = 5)
-    options.presencePenalty?.let { put("presence_penalty", it) }
-    options.frequencyPenalty?.let { put("frequency_penalty", it) }
+    if (!rejectsPenalties) {
+        options.presencePenalty?.let { put("presence_penalty", it) }
+        options.frequencyPenalty?.let { put("frequency_penalty", it) }
+    }
 
     when (options.responseMimeType) {
         GeminiResponseMimeType.JSON -> putCompatibleResponseFormat(

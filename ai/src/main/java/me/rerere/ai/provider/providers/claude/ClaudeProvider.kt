@@ -53,6 +53,7 @@ import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.provider.providers.PartGroup
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
+import me.rerere.ai.provider.providers.openai.isDeepSeekV4OrFlashModel
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.StreamChunk
@@ -478,7 +479,9 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val parameterModelId = params.model.parameterModelId()
         val support = resolveClaudeModelParameterSupport(parameterModelId)
         val deepSeekSupport = resolveDeepSeekModelParameterSupport(parameterModelId)
-        val maxTokens = params.maxTokens ?: 64_000
+        val maxTokens = (params.maxTokens ?: 64_000).coerceAtMost(
+            if (deepSeekSupport.available && isDeepSeekV4OrFlashModel(parameterModelId)) 393_216 else Int.MAX_VALUE
+        )
         val supportsReasoning = deepSeekSupport.available ||
             params.model.supportsReasoningCapability() ||
             support.supportsAdaptiveThinking || support.supportsManualThinking
@@ -512,9 +515,11 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         else -> null
                     }?.let { put("temperature", it) }
                 }
-                if (deepSeekSupport.available || support.supportsSamplingParameters) {
+                if (!deepSeekSupport.available && support.supportsSamplingParameters) {
                     params.topP?.takeIf { it in 0f..1f }?.let { put("top_p", it) }
                 }
+            } else if (deepSeekSupport.available) {
+                params.topP?.coerceIn(0.95f, 1f)?.let { put("top_p", it) }
             }
 
             put("stream", stream)
@@ -597,7 +602,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
             // 处理工具
             val useFunctionTools =
-                params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
+                (params.model.abilities.contains(ModelAbility.TOOL) || deepSeekSupport.available) &&
+                    params.tools.isNotEmpty()
             val toolDefinitions = buildList {
                 if (useFunctionTools) {
                     params.tools.forEach { tool ->

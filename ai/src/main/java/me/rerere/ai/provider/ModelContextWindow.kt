@@ -144,6 +144,7 @@ private fun JsonElement?.contextWindowTokenCountOrNull(): Int? {
 private fun knownOpenAIContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
+        id.startsWith("gpt-6") || id.startsWith("chatgpt-6") -> 1_050_000
         id.startsWith("gpt-5.4-mini") || id.startsWith("gpt-5.4-nano") -> 400_000
         id.startsWith("gpt-5.4") || id.startsWith("gpt-5.5") || id.startsWith("gpt-5.6") -> 1_050_000
         id.startsWith("gpt-5") -> 400_000
@@ -163,6 +164,7 @@ private fun knownOpenAIContextWindowTokens(modelId: String): Int? {
 private fun knownGoogleContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
+        id.startsWith("gemini-3.8-flash") -> 1_048_576
         id.startsWith("gemini-3.1-flash-image") -> 131_072
         id.startsWith("gemini-3-pro-image") -> 65_536
         id.startsWith("gemini-2.5-flash-image") -> 65_536
@@ -194,7 +196,9 @@ private fun knownQwenContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
         id.startsWith("qwen-long") -> 10_000_000
-        id.startsWith("qwen3.8-max") -> 1_000_000
+        id.startsWith("qwen3.8-max") || id.startsWith("qwen3-8-max") ||
+            id.startsWith("qwen3-8max") || id.startsWith("qwen3.8-flash") ||
+            id.startsWith("qwen3-8-flash") || id.startsWith("qwen3-8flash") -> 1_000_000
         id.startsWith("qwen3.7-") -> 1_000_000
         id.startsWith("qwen3.6-plus") || id.startsWith("qwen3.6-flash") -> 1_000_000
         id.startsWith("qwen3.6-max") -> 256_000
@@ -224,6 +228,7 @@ private fun knownQwenContextWindowTokens(modelId: String): Int? {
 private fun knownDeepSeekContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
+        id == "deepseek-flash" -> 1_000_000
         id.startsWith("deepseek-v4") -> 1_000_000
         id.startsWith("deepseek-v3") -> 128_000
         id.startsWith("deepseek-r1") || id == "deepseek-chat" || id == "deepseek-reasoner" -> 128_000
@@ -250,7 +255,9 @@ private fun knownDoubaoContextWindowTokens(modelId: String): Int? {
 
 private fun Set<String>.matchesPrefix(modelId: String): Boolean = any(modelId::startsWith)
 
-private fun String.normalizedModelId(): String = substringAfterLast('/').trim().lowercase()
+private fun String.normalizedModelId(): String =
+    substringAfterLast('/').substringAfterLast(':').trim().lowercase()
+        .normalizeCompactVendorModelId()
 
 private fun String.normalizedMetadataKey(): String = filter(Char::isLetterOrDigit).lowercase()
 

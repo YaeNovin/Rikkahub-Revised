@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -42,6 +43,9 @@ class QwenOptionsRequestTest {
     fun `recognizes Qwen aliases and excludes non chat models`() {
         listOf(
             "qwen3.8-max",
+            "qwen3.8-max-0902",
+            "qwen3.8-flash",
+            "Qwen38Flash",
             "Qwen/Qwen3.5-397B-A17B",
             "provider:qwen3-vl-plus",
             "qwq-plus",
@@ -64,6 +68,60 @@ class QwenOptionsRequestTest {
         assertFalse(isAlibabaModelStudioHost("api.openai.com"))
         assertTrue(resolveQwenModelParameterSupport("qwen3.7-plus").supportsJsonSchema)
         assertFalse(resolveQwenModelParameterSupport("qwen3.7-flash").supportsJsonSchema)
+        assertTrue(resolveQwenModelParameterSupport("qwen3.8-flash").supportsToolStream)
+        assertTrue(resolveQwenModelParameterSupport("qwen3.8-flash").supportsPreserveThinking)
+        assertTrue(resolveQwenModelParameterSupport("qwen3.8-max-0902").supportsHighResolutionVision)
+    }
+
+    @Test
+    fun `Alibaba Qwen 3 8 uses documented reasoning effort without a conflicting budget`() {
+        val body = buildChatRequest(
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "qwen3.8-max-0902",
+                    abilities = listOf(ModelAbility.REASONING),
+                ),
+                reasoningLevel = ReasoningLevel.XHIGH,
+            ),
+        )
+
+        assertEquals(true, body["enable_thinking"]?.jsonPrimitive?.boolean)
+        assertEquals("xhigh", body["reasoning_effort"]?.jsonPrimitive?.content)
+        assertFalse(body.containsKey("thinking_budget"))
+    }
+
+    @Test
+    fun `compact Qwen 3 8 alias uses the same official reasoning mapping`() {
+        val body = buildChatRequest(
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "Qwen38Flash",
+                    abilities = listOf(ModelAbility.REASONING),
+                ),
+                reasoningLevel = ReasoningLevel.HIGH,
+            ),
+        )
+
+        assertEquals(true, body["enable_thinking"]?.jsonPrimitive?.boolean)
+        assertEquals("xhigh", body["reasoning_effort"]?.jsonPrimitive?.content)
+        assertFalse(body.containsKey("thinking_budget"))
+    }
+
+    @Test
+    fun `Alibaba Qwen 3 8 can disable thinking without sending an effort`() {
+        val body = buildChatRequest(
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "qwen3.8-flash",
+                    abilities = listOf(ModelAbility.REASONING),
+                ),
+                reasoningLevel = ReasoningLevel.OFF,
+            ),
+        )
+
+        assertEquals(false, body["enable_thinking"]?.jsonPrimitive?.boolean)
+        assertFalse(body.containsKey("reasoning_effort"))
+        assertFalse(body.containsKey("thinking_budget"))
     }
 
     @Test

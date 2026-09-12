@@ -5,7 +5,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.provider.CustomBody
+import me.rerere.ai.provider.CustomHeader
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class JsonTest {
@@ -129,5 +132,43 @@ class JsonTest {
         assertEquals(2, result.size)
         assertEquals("value1", result["key1"]?.toString()?.trim('"'))
         assertEquals("value2", result["key2"]?.toString()?.trim('"'))
+    }
+
+    @Test
+    fun `mergeCustomBody ignores disabled entries and trims keys`() {
+        val result = JsonObject(emptyMap()).mergeCustomBody(
+            listOf(
+                CustomBody(" disabled ", JsonPrimitive("ignored"), enabled = false),
+                CustomBody(" active ", JsonPrimitive("value")),
+            )
+        )
+
+        assertEquals(setOf("active"), result.keys)
+        assertEquals("value", result["active"]?.toString()?.trim('"'))
+    }
+
+    @Test
+    fun `custom headers use last enabled value and ignore invalid syntax`() {
+        val headers = listOf(
+            CustomHeader("X-Mode", "assistant"),
+            CustomHeader("x-mode", "model"),
+            CustomHeader("X-Disabled", "ignored", enabled = false),
+            CustomHeader("Invalid Header", "ignored"),
+            CustomHeader("X-Newline", "invalid\nvalue"),
+            CustomHeader("X-Unicode", "\u4e2d\u6587"),
+        ).toHeaders()
+
+        assertEquals(listOf("model"), headers.values("X-Mode"))
+        assertEquals(null, headers["X-Disabled"])
+        assertEquals(null, headers["Invalid Header"])
+        assertEquals(null, headers["X-Newline"])
+        assertEquals(null, headers["X-Unicode"])
+    }
+
+    @Test
+    fun `custom header syntax validation follows HTTP token rules`() {
+        assertTrue(CustomHeader("X-Project_ID", "alpha\tbeta").hasValidHttpSyntax())
+        assertFalse(CustomHeader("X Project", "alpha").hasValidHttpSyntax())
+        assertFalse(CustomHeader("X-Project", "alpha\r\nbeta").hasValidHttpSyntax())
     }
 }

@@ -24,6 +24,7 @@ data class UIMessage(
     val usage: TokenUsage? = null,
     val translation: String? = null,
     val interrupted: Boolean = false,
+    val requestContext: RequestContextSnapshot? = null,
 ) {
     fun summaryAsText(maxLength: Int = Int.MAX_VALUE): String {
         val text = "[${role.name}]: " + parts.joinToString(separator = "\n") { part ->

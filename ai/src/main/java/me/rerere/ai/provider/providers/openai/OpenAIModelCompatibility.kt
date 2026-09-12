@@ -14,6 +14,7 @@ data class OpenAIModelParameterSupport(
     val supportsReasoningContext: Boolean,
     val supportsReasoningMode: Boolean,
     val supportsUltrafast: Boolean,
+    val requiresResponsesForToolCalling: Boolean,
 )
 
 fun resolveOpenAIModelParameterSupport(modelId: String): OpenAIModelParameterSupport {
@@ -21,16 +22,18 @@ fun resolveOpenAIModelParameterSupport(modelId: String): OpenAIModelParameterSup
     val retired = normalized.isRetiredOpenAITextModel()
     val isTextModel = normalized.isOpenAITextModel()
     val isGpt5 = GPT_5_SERIES.containsMatchIn(normalized)
-    val isGpt56 = GPT_5_6_SERIES.containsMatchIn(normalized)
+    val isGpt6 = GPT_6_SERIES.containsMatchIn(normalized)
+    val supportsPersistentReasoning = GPT_5_6_SERIES.containsMatchIn(normalized) || isGpt6
     return OpenAIModelParameterSupport(
         available = isTextModel && !retired,
         retired = retired,
-        supportsVerbosity = isTextModel && !retired && isGpt5,
-        supportsReasoningOptions = isTextModel && !retired && isGpt5,
-        supportsReasoningContext = isTextModel && !retired && isGpt56,
-        supportsReasoningMode = isTextModel && !retired && isGpt56,
+        supportsVerbosity = isTextModel && !retired && (isGpt5 || isGpt6),
+        supportsReasoningOptions = isTextModel && !retired && (isGpt5 || isGpt6),
+        supportsReasoningContext = isTextModel && !retired && supportsPersistentReasoning,
+        supportsReasoningMode = isTextModel && !retired && supportsPersistentReasoning,
         supportsUltrafast = normalized == "gpt-5.6-sol" ||
             normalized.startsWith("gpt-5.6-sol-"),
+        requiresResponsesForToolCalling = isTextModel && !retired && isGpt6,
     )
 }
 
@@ -47,11 +50,13 @@ internal fun String.normalizedOpenAIModelId(): String =
     substringAfterLast('/').trim().lowercase()
         .replace(Regex("[\\s_]+"), "-")
         .replace(Regex("^(gpt|chatgpt|o)(?=\\d)"), "$1-")
-        .replace(Regex("^chatgpt-(?=5(?:[.-]|$))"), "gpt-")
+        .replace(Regex("^chatgpt-(?=(?:5|6)(?:[.-]|$))"), "gpt-")
         .normalizeCompactVendorModelId()
 
 internal fun isOpenAIGpt5Model(modelId: String): Boolean =
-    GPT_5_SERIES.containsMatchIn(modelId.normalizedOpenAIModelId())
+    modelId.normalizedOpenAIModelId().let { normalized ->
+        GPT_5_SERIES.containsMatchIn(normalized) || GPT_6_SERIES.containsMatchIn(normalized)
+    }
 
 internal fun resolveOpenAIMaximumReasoningEffort(modelId: String): ReasoningLevel {
     return resolveOpenAIReasoningLevels(modelId)
@@ -62,6 +67,15 @@ internal fun resolveOpenAIMaximumReasoningEffort(modelId: String): ReasoningLeve
 internal fun resolveOpenAIReasoningLevels(modelId: String): List<ReasoningLevel> {
     val normalized = modelId.normalizedOpenAIModelId().replace('_', '-')
     return when {
+        GPT_6_SERIES.containsMatchIn(normalized) -> listOf(
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.HIGH,
+            ReasoningLevel.XHIGH,
+            ReasoningLevel.MAX,
+        )
+
         GPT_5_6_SERIES.containsMatchIn(normalized) -> listOf(
             ReasoningLevel.OFF,
             ReasoningLevel.AUTO,
@@ -118,7 +132,8 @@ private fun String.isOpenAITextModel(): Boolean {
     return OPENAI_REASONING_MODEL.containsMatchIn(this) ||
         startsWith("gpt-3.5-turbo") ||
         startsWith("gpt-4") ||
-        startsWith("gpt-5")
+        startsWith("gpt-5") ||
+        startsWith("gpt-6")
 }
 
 private fun String.isRetiredOpenAITextModel(): Boolean {
@@ -134,6 +149,7 @@ internal const val OPENAI_API_HOST = "api.openai.com"
 private val GPT_5_SERIES = Regex("^gpt-5(?:[.-]|$)")
 private val GPT_5_1_SERIES = Regex("^gpt-5[.-]1(?:[.-]|$)")
 private val GPT_5_6_SERIES = Regex("^gpt-5[.-]6(?:[.-]|$)")
+private val GPT_6_SERIES = Regex("^gpt-6(?:[.-]|$)")
 private val GPT_5_2_OR_LATER = Regex("^gpt-5[.-](?:[2-9]|\\d{2,})(?:[.-]|$)")
 private val OPENAI_REASONING_MODEL = Regex("^o(?:1|3|4)(?:[-.]|$)")
 

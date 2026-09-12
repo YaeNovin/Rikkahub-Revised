@@ -1,5 +1,7 @@
 package me.rerere.ai.provider.providers.google
 
+import me.rerere.ai.provider.toGoogleToolSchema
+
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -44,6 +46,7 @@ import me.rerere.ai.core.cappedBudget
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.CustomBody
+import me.rerere.ai.provider.EmbeddingImageInput
 import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.GeminiImageGenerationOptions
@@ -68,6 +71,7 @@ import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.resolveReasoningLevelSupport
 import me.rerere.ai.provider.supportsReasoningCapability
+import me.rerere.ai.provider.usesGoogleMultimodalEmbeddingApi
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.contextWindowTokensOrNull
@@ -155,7 +159,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
         return if (!providerSetting.vertexAI) {
-            "${providerSetting.baseUrl}/$path".toHttpUrl()
+            "${providerSetting.baseUrl.trimEnd('/')}/$path".toHttpUrl()
         } else if (providerSetting.useServiceAccount) {
             "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path".toHttpUrl()
         } else {
@@ -426,13 +430,39 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         providerSetting: ProviderSetting.Google,
         params: EmbeddingGenerationParams,
     ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
-        require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
+        require(params.input.isNotEmpty() || params.images.isNotEmpty()) {
+            "Embedding input cannot be empty"
+        }
+        require(params.input.none(String::isBlank)) {
+            "Embedding input cannot contain empty strings"
+        }
+        val supportsMultimodal = params.model.usesGoogleMultimodalEmbeddingApi()
+        require(params.images.isEmpty() || supportsMultimodal) {
+            "The selected Google embedding model does not support image inputs"
+        }
+        require(!providerSetting.vertexAI || params.images.isEmpty()) {
+            "Vertex AI image embeddings are not supported by this client"
+        }
+        val embeddingModelId = params.model.modelId.substringAfterLast('/').trim()
 
-        val requestBody = if (providerSetting.vertexAI) {
-            buildJsonObject {
+        // Gemini Embedding 2 accepts one Content containing multiple text and
+        // image parts and returns one aggregated vector. Its public API exposes
+        // embedContent (not the legacy batch endpoint).
+        val useSingleContentEndpoint = !providerSetting.vertexAI && (
+            params.images.isNotEmpty() || params.model.usesGoogleMultimodalEmbeddingApi()
+            )
+        val contents: List<Pair<String?, EmbeddingImageInput?>> =
+            params.input.map { it to null } + params.images.map { null to it }
+        require(contents.isNotEmpty()) { "Embedding input cannot be empty" }
+
+        val requestBody = when {
+            providerSetting.vertexAI -> buildJsonObject {
                 put("instances", buildJsonArray {
                     params.input.forEach { text ->
-                        add(buildJsonObject { put("content", text) })
+                        add(buildJsonObject {
+                            put("content", text)
+                            params.taskType?.apiValue?.let { put("task_type", it) }
+                        })
                     }
                 })
                 params.dimensions?.let { dimensions ->
@@ -441,21 +471,21 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     })
                 }
             }
-        } else if (params.input.size == 1) {
-            buildJsonObject {
-                put("model", "models/${params.model.modelId}")
-                put("content", embeddingContent(params.input.single()))
-                params.dimensions?.let { dimensions ->
-                    put("outputDimensionality", dimensions)
-                }
+            useSingleContentEndpoint -> buildJsonObject {
+                put("model", "models/$embeddingModelId")
+                put("content", embeddingContent(params.input, params.images))
+                params.taskType?.apiValue?.let { put("taskType", it) }
+                params.dimensions?.let { put("outputDimensionality", it) }
             }
-        } else {
-            buildJsonObject {
+            else -> buildJsonObject {
                 put("requests", buildJsonArray {
                     params.input.forEach { text ->
                         add(buildJsonObject {
-                            put("model", "models/${params.model.modelId}")
-                            put("content", embeddingContent(text))
+                            put("model", "models/$embeddingModelId")
+                            put("content", embeddingContent(listOf(text), emptyList()))
+                            params.taskType?.apiValue?.let { taskType ->
+                                put("taskType", taskType)
+                            }
                             params.dimensions?.let { dimensions ->
                                 put("outputDimensionality", dimensions)
                             }
@@ -465,59 +495,78 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }.mergeCustomBody(params.customBody)
 
-        val path = if (providerSetting.vertexAI) {
-            "publishers/google/models/${params.model.modelId}:predict"
-        } else if (params.input.size == 1) {
-            "models/${params.model.modelId}:embedContent"
-        } else {
-            "models/${params.model.modelId}:batchEmbedContents"
+        val path = when {
+            providerSetting.vertexAI -> "publishers/google/models/$embeddingModelId:predict"
+            useSingleContentEndpoint -> "models/$embeddingModelId:embedContent"
+            else -> "models/$embeddingModelId:batchEmbedContents"
         }
         val request = transformRequest(
             providerSetting = providerSetting,
             request = Request.Builder()
                 .url(buildUrl(providerSetting, path))
+                .tag(me.rerere.ai.provider.ProviderRequestDiagnostics::class.java, me.rerere.ai.provider.ProviderRequestDiagnostics(
+                    provider = providerSetting.name, model = embeddingModelId, channel = providerSetting.requestChannel(),
+                    operation = me.rerere.ai.provider.ProviderRequestOperation.EMBEDDING,
+                    parameters = mapOf("input.count" to params.input.size.toString()), requestId = params.requestId))
                 .headers(params.customHeaders.toHeaders())
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .configureReferHeaders(providerSetting.baseUrl)
                 .build()
         )
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
-        }
-        val body = json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject
-        val embeddings = if (providerSetting.vertexAI) {
-            body["predictions"]?.jsonArray.orEmpty().map { prediction ->
-                prediction.jsonObject["embeddings"]?.jsonObject?.get("values")?.jsonArray
-                    ?.map { it.jsonPrimitive.content.toFloat() }
-                    ?: error("No embedding values in Vertex response")
+        client.newCall(request).await().use { response ->
+            if (!response.isSuccessful) {
+                error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
             }
-        } else if (params.input.size == 1) {
-            listOf(
-                body["embedding"]?.jsonObject?.get("values")?.jsonArray
-                    ?.map { it.jsonPrimitive.content.toFloat() }
-                    ?: error("No embedding values in Google response")
+            val body = json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject
+            val embeddings = if (providerSetting.vertexAI) {
+                body["predictions"]?.jsonArray.orEmpty().map { prediction ->
+                    prediction.jsonObject["embeddings"]?.jsonObject?.get("values")?.jsonArray
+                        ?.map { it.jsonPrimitive.content.toFloat() }
+                        ?: error("No embedding values in Vertex response")
+                }
+            } else if (useSingleContentEndpoint) {
+                listOf(
+                    body["embedding"]?.jsonObject?.get("values")?.jsonArray
+                        ?.map { it.jsonPrimitive.content.toFloat() }
+                        ?: error("No embedding values in Google response")
+                )
+            } else {
+                body["embeddings"]?.jsonArray?.map { embedding ->
+                    embedding.jsonObject["values"]?.jsonArray
+                        ?.map { it.jsonPrimitive.content.toFloat() }
+                        ?: error("No embedding values in Google response")
+                } ?: error("No embeddings in Google response")
+            }
+            val expectedCount = if (useSingleContentEndpoint) 1 else params.input.size
+            require(embeddings.size == expectedCount) {
+                "Google returned ${embeddings.size} vectors for $expectedCount inputs"
+            }
+            val dimensions = embeddings.map { it.size }.distinct()
+            require(dimensions.size == 1 && dimensions.single() > 0) {
+                "Google returned inconsistent vector dimensions: $dimensions"
+            }
+            require(embeddings.flatten().all(Float::isFinite)) {
+                "Google returned a non-finite embedding vector"
+            }
+            EmbeddingGenerationResult(
+                model = embeddingModelId,
+                embeddings = embeddings,
             )
-        } else {
-            body["embeddings"]?.jsonArray?.map { embedding ->
-                embedding.jsonObject["values"]?.jsonArray
-                    ?.map { it.jsonPrimitive.content.toFloat() }
-                    ?: error("No embedding values in Google response")
-            } ?: error("No embeddings in Google response")
         }
-        require(embeddings.size == params.input.size) {
-            "Google returned ${embeddings.size} vectors for ${params.input.size} inputs"
-        }
-        EmbeddingGenerationResult(
-            model = params.model.modelId,
-            embeddings = embeddings,
-        )
     }
 
-    private fun embeddingContent(text: String) = buildJsonObject {
+    private fun embeddingContent(texts: List<String>, images: List<EmbeddingImageInput>) = buildJsonObject {
         put("parts", buildJsonArray {
-            add(buildJsonObject { put("text", text) })
+            texts.forEach { text -> add(buildJsonObject { put("text", text) }) }
+            images.forEach { image ->
+                add(buildJsonObject {
+                    put("inlineData", buildJsonObject {
+                        put("mimeType", image.mimeType)
+                        put("data", image.base64)
+                    })
+                })
+            }
         })
     }
 
@@ -732,6 +781,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         val parameterModelId = params.model.parameterModelId()
         val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(parameterModelId)
         val isGemini37Flash = ModelRegistry.GEMINI_3_7_FLASH.match(parameterModelId)
+        val isGemini38Flash = ModelRegistry.GEMINI_3_8_FLASH.match(parameterModelId)
         val reasoningLevel = resolveReasoningLevelSupport(
             params.model,
             ProviderSetting.Google(),
@@ -776,12 +826,15 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                             sequences.forEach { add(JsonPrimitive(it)) }
                         }
                     }
-                options.presencePenalty
-                    ?.takeIf { it >= -2f && it < 2f }
-                    ?.let { put("presencePenalty", it) }
-                options.frequencyPenalty
-                    ?.takeIf { it >= -2f && it < 2f }
-                    ?.let { put("frequencyPenalty", it) }
+                // Gemini 3.8 Flash rejects repetition penalties instead of ignoring them.
+                if (!isGemini38Flash) {
+                    options.presencePenalty
+                        ?.takeIf { it >= -2f && it < 2f }
+                        ?.let { put("presencePenalty", it) }
+                    options.frequencyPenalty
+                        ?.takeIf { it >= -2f && it < 2f }
+                        ?.let { put("frequencyPenalty", it) }
+                }
 
                 val schema = options.responseJsonSchema
                     .takeIf(String::isNotBlank)
@@ -811,8 +864,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                         ReasoningLevel.OFF -> {
                             if (isGemini3) {
-                                // Gemini 3.7 Flash rejects "minimal"; its lowest supported level is "low".
-                                put("thinkingLevel", if (isGemini37Flash) "low" else "minimal")
+                                // Gemini 3.7/3.8 Flash reject "minimal"; their lowest level is "low".
+                                put(
+                                    "thinkingLevel",
+                                    if (isGemini37Flash || isGemini38Flash) "low" else "minimal",
+                                )
                             } else if (!isGeminiPro) {
                                 put("thinkingBudget", 0)
                                 put("includeThoughts", false)
@@ -863,16 +919,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                     put(
                                         key = "parameters",
                                         element = json.encodeToJsonElement(tool.parameters())
-                                            .removeElements(
-                                                listOf(
-                                                    "const",
-                                                    "exclusiveMaximum",
-                                                    "exclusiveMinimum",
-                                                    "format",
-                                                    "additionalProperties",
-                                                    "enum",
-                                                )
-                                            )
+                                            .toGoogleToolSchema()
                                     )
                                 })
                             }
@@ -1174,7 +1221,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             message["role"]?.jsonPrimitive?.contentOrNull ?: "model"
         )
         val content = message["content"]?.jsonObject ?: error("No content")
-        val parts = content["parts"]?.jsonArray?.map { part ->
+        val parts = content["parts"]?.jsonArray?.mapNotNull { part ->
             parseMessagePart(part.jsonObject)
         } ?: emptyList()
 
@@ -1205,7 +1252,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         return chunks
     }
 
-    private fun parseMessagePart(jsonObject: JsonObject): UIMessagePart {
+    private fun parseMessagePart(jsonObject: JsonObject): UIMessagePart? {
         return when {
             jsonObject.containsKey("text") -> {
                 val thought = jsonObject["thought"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -1220,9 +1267,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             jsonObject.containsKey("functionCall") -> {
                 val functionCall = jsonObject["functionCall"] as? JsonObject
                     ?: error("Gemini functionCall must be a JSON object")
-                val toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull
+                val toolName = functionCall["name"]?.let { value ->
+                    runCatching { value.jsonPrimitive.contentOrNull }.getOrNull()
+                }
                     ?.takeIf { it.isNotBlank() }
-                    ?: error("Gemini functionCall.name is required")
+                // A few compatible endpoints emit an empty functionCall marker before the
+                // complete call. It is not executable on its own, so ignore it here instead of
+                // failing the entire non-streaming response.
+                    ?: return null
                 val functionCallId = functionCall["id"]?.jsonPrimitive?.contentOrNull
                     ?.takeIf { it.isNotBlank() }
                 UIMessagePart.Tool(
@@ -1230,7 +1282,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     // and is echoed only in the wire-level functionResponse.
                     toolCallId = Uuid.random().toString(),
                     toolName = toolName,
-                    input = functionCall["args"]?.let { if (it is JsonNull) "null" else it.toString() }
+                    input = functionCall["args"]?.let { if (it is JsonNull) "" else it.toString() }
                         .orEmpty(),
                     output = emptyList(),
                     metadata = GoogleThoughtMetadata(
@@ -1560,6 +1612,7 @@ internal fun buildGoogleRequestDiagnostics(
         }
 
     when (operation) {
+        ProviderRequestOperation.EMBEDDING -> Unit
         ProviderRequestOperation.IMAGE_GENERATION,
         ProviderRequestOperation.IMAGE_EDIT -> {
             val imageConfig = generationConfig?.get("imageConfig") as? JsonObject
@@ -1656,6 +1709,18 @@ internal fun buildGoogleRequestDiagnostics(
                 val threshold = setting.value("threshold") ?: return@forEach
                 parameters["safety.${category.removePrefix("HARM_CATEGORY_").lowercase()}"] = threshold
             }
+        }
+
+        ProviderRequestOperation.VIDEO_GENERATION_CREATE,
+        ProviderRequestOperation.VIDEO_GENERATION_STATUS,
+        ProviderRequestOperation.VIDEO_GENERATION_CANCEL,
+        ProviderRequestOperation.VIDEO_GENERATION_DOWNLOAD -> {
+            parameters["prompt.characters"] = contentParts.sumOf { part ->
+                (((part as? JsonObject)?.get("text")) as? JsonPrimitive)
+                    ?.contentOrNull
+                    ?.length
+                    ?: 0
+            }.toString()
         }
     }
 
@@ -1786,9 +1851,12 @@ internal fun inferGoogleModelType(
     supportedGenerationMethods: List<String>,
 ): ModelType? = when (inferModelTypeFromId(modelId)) {
     ModelType.IMAGE -> ModelType.IMAGE
+    ModelType.VIDEO -> ModelType.VIDEO
     ModelType.EMBEDDING -> ModelType.EMBEDDING
     ModelType.CHAT -> when {
-        "embedContent" in supportedGenerationMethods && "generateContent" !in supportedGenerationMethods ->
+        ("embedContent" in supportedGenerationMethods ||
+            "batchEmbedContents" in supportedGenerationMethods) &&
+            "generateContent" !in supportedGenerationMethods ->
             ModelType.EMBEDDING
         "generateContent" in supportedGenerationMethods -> ModelType.CHAT
         else -> null

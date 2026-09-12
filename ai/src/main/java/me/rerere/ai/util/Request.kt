@@ -11,12 +11,23 @@ import okhttp3.Request
 import okhttp3.ResponseBody
 import okhttp3.internal.http.RealResponseBody
 
+private val HTTP_HEADER_NAME = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+fun CustomHeader.hasValidHttpSyntax(): Boolean {
+    val normalizedName = name.trim()
+    return normalizedName.matches(HTTP_HEADER_NAME) && value.all { character ->
+        character == '\t' || character.code in 0x20..0x7e
+    }
+}
+
 fun List<CustomHeader>.toHeaders(): Headers {
     return Headers.Builder().apply {
         this@toHeaders
-            .filter { it.name.isNotBlank() }
-            .forEach {
-                add(it.name, it.value)
+            .filter { it.enabled && it.name.isNotBlank() && it.hasValidHttpSyntax() }
+            .forEach { header ->
+                // Custom configuration is layered assistant first, model second. Using set makes
+                // that precedence deterministic and prevents gateways from receiving duplicates.
+                set(header.name.trim(), header.value.trim())
             }
     }.build()
 }
@@ -46,21 +57,22 @@ fun ResponseBody.stringSafe(): String? {
 }
 
 fun JsonObject.mergeCustomBody(bodies: List<CustomBody>): JsonObject {
-    if (bodies.isEmpty()) return this
+    if (bodies.none { it.enabled && it.key.isNotBlank() }) return this
 
     val content = toMutableMap()
     bodies.forEach { body ->
-        if (body.key.isNotBlank()) {
+        val key = body.key.trim()
+        if (body.enabled && key.isNotBlank()) {
             // 如果已存在相同键且两者都是JsonObject，则需要递归合并
-            val existingValue = content[body.key]
+            val existingValue = content[key]
             val newValue = body.value
 
             if (existingValue is JsonObject && newValue is JsonObject) {
                 // 递归合并两个JsonObject
-                content[body.key] = mergeJsonObjects(existingValue, newValue)
+                content[key] = mergeJsonObjects(existingValue, newValue)
             } else {
                 // 直接替换或添加
-                content[body.key] = newValue
+                content[key] = newValue
             }
         }
     }

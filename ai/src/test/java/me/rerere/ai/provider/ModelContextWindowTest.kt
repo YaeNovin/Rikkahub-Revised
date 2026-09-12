@@ -65,6 +65,10 @@ class ModelContextWindowTest {
             empty.contextWindowTokensOrNull("gpt-5.6", ModelDiscoveryProtocol.OPENAI),
         )
         assertEquals(
+            1_050_000,
+            empty.contextWindowTokensOrNull("chatgpt-6-astra", ModelDiscoveryProtocol.OPENAI),
+        )
+        assertEquals(
             400_000,
             empty.contextWindowTokensOrNull("gpt-5.4-mini", ModelDiscoveryProtocol.OPENAI),
         )
@@ -102,11 +106,17 @@ class ModelContextWindowTest {
     fun `recognizes Qwen DeepSeek and Doubao models behind compatible providers`() {
         val expectedWindows = mapOf(
             "Qwen/Qwen3.8-Max" to 1_000_000,
+            "Qwen/Qwen3.8-Max-0902" to 1_000_000,
+            "Qwen38Flash" to 1_000_000,
+            "google/gemini-3.8-flash" to 1_048_576,
+            "openai/gpt-6-astra" to 1_050_000,
             "Qwen/Qwen3-32B" to 256_000,
             "qwen3-30b-a3b-thinking-2507" to 256_000,
             "qwen-max-latest" to 128_000,
             "qwen-long" to 10_000_000,
             "deepseek-ai/DeepSeek-V4-Pro" to 1_000_000,
+            "deepseek-flash" to 1_000_000,
+            "deepseek-v4.1-flash" to 1_000_000,
             "deepseek-ai/DeepSeek-V3.2-Exp" to 128_000,
             "deepseek-ai/DeepSeek-R1-0528" to 128_000,
             "doubao-seed-1-6-251015" to 256_000,

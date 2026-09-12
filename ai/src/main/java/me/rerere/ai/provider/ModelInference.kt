@@ -23,6 +23,13 @@ fun inferModelTypeFromId(modelId: String): ModelType {
         return ModelType.EMBEDDING
     }
 
+    if (
+        VIDEO_TOKEN.containsMatchIn(id) ||
+        VIDEO_MODEL_MARKERS.any(id::contains)
+    ) {
+        return ModelType.VIDEO
+    }
+
     val isGeminiImage = id.startsWith("gemini-") && IMAGE_TOKEN.containsMatchIn(id)
     val isGrokImage = id.startsWith("grok-") && IMAGE_TOKEN.containsMatchIn(id)
     if (
@@ -38,6 +45,7 @@ fun inferModelTypeFromId(modelId: String): ModelType {
 
 private val MODEL_TOKEN_SEPARATOR = Regex("[-_./]+")
 private val IMAGE_TOKEN = Regex("(?:^|[-_./])image(?:$|[-_./])")
+private val VIDEO_TOKEN = Regex("(?:^|[-_./])video(?:$|[-_./])")
 private val EMBEDDING_MODEL_TOKENS = setOf("bge", "e5", "gte")
 private val IMAGE_MODEL_MARKERS = listOf(
     "gpt-image",
@@ -65,4 +73,22 @@ private val IMAGE_MODEL_MARKERS = listOf(
     "ideogram",
     "recraft",
     "kandinsky",
+)
+private val VIDEO_MODEL_MARKERS = listOf(
+    "minimax-hailuo", "t2v-01", "i2v-01",
+    "as-sd2.0-", "video-ds-", "kling-v",
+    "video-generation",
+    "video_generation",
+    "text-to-video",
+    "image-to-video",
+    "veo-",
+    "sora-",
+    "seedance",
+    "kling-video",
+    "minimax-video",
+    "hailuo-video",
+    "wan2.1-t2v",
+    "wan2.1-i2v",
+    "wan2.2-t2v",
+    "wan2.2-i2v",
 )

@@ -52,6 +52,17 @@ class ReasoningLevelSupportTest {
             ReasoningLevel.XHIGH,
             resolveReasoningLevelSupport(reasoningModel("GPT54"), compatible).levels.last(),
         )
+        assertEquals(
+            listOf(
+                ReasoningLevel.AUTO,
+                ReasoningLevel.LOW,
+                ReasoningLevel.MEDIUM,
+                ReasoningLevel.HIGH,
+                ReasoningLevel.XHIGH,
+                ReasoningLevel.MAX,
+            ),
+            resolveReasoningLevelSupport(reasoningModel("ChatGPT 6-Astra"), compatible).levels,
+        )
     }
 
     @Test
@@ -71,6 +82,25 @@ class ReasoningLevelSupportTest {
             support.levels,
         )
         assertEquals(ReasoningLevel.HIGH, support.coerce(ReasoningLevel.MAX))
+    }
+
+    @Test
+    fun `Gemini 3_8 Flash excludes unsupported minimal thinking`() {
+        val support = resolveReasoningLevelSupport(
+            model = reasoningModel("google/gemini-3.8-flash"),
+            provider = ProviderSetting.Google(),
+        )
+
+        assertEquals(
+            listOf(
+                ReasoningLevel.AUTO,
+                ReasoningLevel.LOW,
+                ReasoningLevel.MEDIUM,
+                ReasoningLevel.HIGH,
+            ),
+            support.levels,
+        )
+        assertEquals(ReasoningLevel.LOW, support.coerce(ReasoningLevel.MINIMAL))
     }
 
     @Test
@@ -133,19 +163,21 @@ class ReasoningLevelSupportTest {
 
     @Test
     fun `Qwen compatible endpoint keeps model supported depth controls`() {
+        val provider = ProviderSetting.OpenAI(baseUrl = "https://compatible.example/v1")
         val qwen35 = resolveReasoningLevelSupport(
             model = reasoningModel("qwen3.5-72b"),
-            provider = ProviderSetting.OpenAI(baseUrl = "https://compatible.example/v1"),
+            provider = provider,
         )
         val qwen38 = resolveReasoningLevelSupport(
             model = reasoningModel("qwen3.8-max"),
-            provider = ProviderSetting.OpenAI(baseUrl = "https://compatible.example/v1"),
+            provider = provider,
         )
 
         assertTrue(ReasoningLevel.OFF in qwen35.levels)
         assertTrue(ReasoningLevel.MAX in qwen35.levels)
         assertEquals(
             listOf(
+                ReasoningLevel.OFF,
                 ReasoningLevel.AUTO,
                 ReasoningLevel.LOW,
                 ReasoningLevel.MEDIUM,
@@ -153,7 +185,36 @@ class ReasoningLevelSupportTest {
             ),
             qwen38.levels,
         )
+        assertEquals(
+            qwen38.levels,
+            resolveReasoningLevelSupport(
+                reasoningModel("qwen3.8-max-0902"),
+                provider,
+            ).levels,
+        )
         assertTrue(qwen35.compatibleEndpoint)
+    }
+
+    @Test
+    fun `Alibaba Qwen 3 8 exposes only documented native efforts`() {
+        val support = resolveReasoningLevelSupport(
+            model = reasoningModel("qwen3.8-flash"),
+            provider = ProviderSetting.OpenAI(
+                baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                ReasoningLevel.OFF,
+                ReasoningLevel.AUTO,
+                ReasoningLevel.LOW,
+                ReasoningLevel.MEDIUM,
+                ReasoningLevel.XHIGH,
+            ),
+            support.levels,
+        )
+        assertFalse(support.compatibleEndpoint)
     }
 
     @Test

@@ -55,7 +55,10 @@ class DeepSeekOptionsRequestTest {
             "deepseek-r1-0528",
             "deepseek-v4-flash-preview",
             "deepseek-v4-pro-preview",
+            "deepseek-v4.1-flash",
         ).forEach { assertTrue("model=$it", resolveDeepSeekModelParameterSupport(it).available) }
+        assertTrue(resolveDeepSeekModelParameterSupport("deepseek-flash").supportsReasoningEffort)
+        assertTrue(resolveDeepSeekModelParameterSupport("deepseek-flash").supportsVision)
 
         listOf(
             "deepseek-embedding",
@@ -65,7 +68,8 @@ class DeepSeekOptionsRequestTest {
         ).forEach { assertFalse("model=$it", resolveDeepSeekModelParameterSupport(it).available) }
 
         assertTrue(resolveDeepSeekModelParameterSupport("deepseek-v4-flash-vision-exp").supportsVision)
-        assertFalse(resolveDeepSeekModelParameterSupport("deepseek-v4-flash").supportsVision)
+        // The official legacy v4-flash alias is now served by V4.1-Flash and supports vision.
+        assertTrue(resolveDeepSeekModelParameterSupport("deepseek-v4-flash").supportsVision)
         assertTrue(
             Modality.IMAGE in ModelRegistry.MODEL_INPUT_MODALITIES.getData(
                 "deepseek-v4-flash-vision-exp"
@@ -81,7 +85,7 @@ class DeepSeekOptionsRequestTest {
             reasoningLevel = ReasoningLevel.HIGH,
         )
 
-        assertEquals("required", body["tool_choice"]?.jsonPrimitive?.content)
+        assertFalse(body.containsKey("tool_choice"))
         assertEquals(2, body["stop"]?.jsonArray?.size)
         assertEquals("json_object", body["response_format"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertEquals(true, body["logprobs"]?.jsonPrimitive?.boolean)
@@ -90,7 +94,7 @@ class DeepSeekOptionsRequestTest {
         assertEquals("enabled", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertEquals("high", body["reasoning_effort"]?.jsonPrimitive?.content)
         assertFalse(body.containsKey("temperature"))
-        assertFalse(body.containsKey("top_p"))
+        assertEquals(0.95f, body["top_p"]?.jsonPrimitive?.float)
     }
 
     @Test
@@ -101,7 +105,7 @@ class DeepSeekOptionsRequestTest {
         )
 
         assertEquals(0.7f, body["temperature"]?.jsonPrimitive?.float)
-        assertEquals(0.8f, body["top_p"]?.jsonPrimitive?.float)
+        assertFalse(body.containsKey("top_p"))
         assertEquals("disabled", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertFalse(body.containsKey("reasoning_effort"))
     }
@@ -129,7 +133,7 @@ class DeepSeekOptionsRequestTest {
         assertFalse(body["reasoning"]?.jsonObject?.containsKey("summary") == true)
         assertFalse(body.containsKey("include"))
         assertFalse(body.containsKey("temperature"))
-        assertFalse(body.containsKey("top_p"))
+        assertEquals(0.95f, body["top_p"]?.jsonPrimitive?.float)
         val image = body["input"]?.jsonArray
             ?.first()?.jsonObject
             ?.get("content")?.jsonArray

@@ -25,6 +25,7 @@ data class Model(
 enum class ModelType {
     CHAT,
     IMAGE,
+    VIDEO,
     EMBEDDING,
 }
 
@@ -32,6 +33,7 @@ enum class ModelType {
 enum class Modality {
     TEXT,
     IMAGE,
+    VIDEO,
 }
 
 @Serializable
@@ -57,5 +59,4 @@ sealed class BuiltInTools {
     @SerialName("image_generation")
     data object ImageGeneration : BuiltInTools()
 }
-
 

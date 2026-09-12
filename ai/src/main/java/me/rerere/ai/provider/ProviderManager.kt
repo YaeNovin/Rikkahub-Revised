@@ -5,6 +5,7 @@ import me.rerere.ai.provider.providers.claude.ClaudeProvider
 import me.rerere.ai.provider.providers.google.GoogleProvider
 import me.rerere.ai.provider.providers.openai.OpenAIProvider
 import okhttp3.OkHttpClient
+import me.rerere.ai.provider.providers.openai.miniMaxVideoSetting
 
 /**
  * Provider管理器，负责注册和获取Provider实例
@@ -63,4 +64,36 @@ class ProviderManager(client: OkHttpClient, context: Context) {
         model: Model,
     ): ImageGenerationConstraints = getProviderByType(setting)
         .imageGenerationConstraints(setting, model)
+
+    fun videoGenerationConstraints(
+        setting: ProviderSetting,
+        model: Model,
+    ): VideoGenerationConstraints {
+        val videoSetting = setting.miniMaxVideoSetting(model) ?: setting
+        return getProviderByType(videoSetting).videoGenerationConstraints(videoSetting, model)
+    }
+
+    suspend fun createVideoGenerationTask(
+        setting: ProviderSetting,
+        params: VideoGenerationParams,
+    ): VideoGenerationTaskSnapshot {
+        val videoSetting = setting.miniMaxVideoSetting(params.model) ?: setting
+        return getProviderByType(videoSetting).createVideoGenerationTask(videoSetting, params)
+    }
+
+    suspend fun getVideoGenerationTask(
+        setting: ProviderSetting,
+        model: Model,
+        taskId: String,
+    ): VideoGenerationTaskSnapshot {
+        val videoSetting = setting.miniMaxVideoSetting(model) ?: setting
+        return getProviderByType(videoSetting).getVideoGenerationTask(videoSetting, model, taskId)
+    }
+
+    suspend fun cancelVideoGenerationTask(
+        setting: ProviderSetting,
+        model: Model,
+        taskId: String,
+    ): Boolean = getProviderByType(setting)
+        .cancelVideoGenerationTask(setting, model, taskId)
 }

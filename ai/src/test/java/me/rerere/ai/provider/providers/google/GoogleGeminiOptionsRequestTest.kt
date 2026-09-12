@@ -152,6 +152,28 @@ class GoogleGeminiOptionsRequestTest {
     }
 
     @Test
+    fun `Gemini 3 8 omits rejected penalties and clamps minimal thinking`() {
+        val body = buildRequest(
+            modelId = "gemini-3.8-flash",
+            options = GeminiGenerationOptions(
+                presencePenalty = 0.25f,
+                frequencyPenalty = -0.5f,
+            ),
+            reasoningLevel = ReasoningLevel.MINIMAL,
+        )
+
+        val generation = body["generationConfig"]!!.jsonObject
+        assertFalse(generation.containsKey("temperature"))
+        assertFalse(generation.containsKey("topP"))
+        assertFalse(generation.containsKey("presencePenalty"))
+        assertFalse(generation.containsKey("frequencyPenalty"))
+        assertEquals(
+            "low",
+            generation["thinkingConfig"]!!.jsonObject["thinkingLevel"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
     fun `maps unsupported disabled reasoning to auto for Gemini 3 Pro`() {
         val body = buildRequest(
             modelId = "gemini-3.1-pro-preview",

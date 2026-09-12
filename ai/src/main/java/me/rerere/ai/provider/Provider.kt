@@ -66,6 +66,37 @@ interface Provider<T : ProviderSetting> {
     ): Flow<ImageGenerationItem> {
         error("Image edit is not supported")
     }
+
+    fun videoGenerationConstraints(
+        providerSetting: ProviderSetting,
+        model: Model,
+    ): VideoGenerationConstraints = VideoGenerationConstraints(
+        supportsGeneration = supports(ProviderCapability.VIDEO_GENERATION),
+        supportsCancellation = supports(ProviderCapability.VIDEO_CANCELLATION),
+    )
+
+    suspend fun createVideoGenerationTask(
+        providerSetting: ProviderSetting,
+        params: VideoGenerationParams,
+    ): VideoGenerationTaskSnapshot {
+        error("Video generation is not supported")
+    }
+
+    suspend fun getVideoGenerationTask(
+        providerSetting: ProviderSetting,
+        model: Model,
+        taskId: String,
+    ): VideoGenerationTaskSnapshot {
+        error("Video generation status is not supported")
+    }
+
+    suspend fun cancelVideoGenerationTask(
+        providerSetting: ProviderSetting,
+        model: Model,
+        taskId: String,
+    ): Boolean {
+        error("Video generation cancellation is not supported")
+    }
 }
 
 enum class ProviderCapability {
@@ -73,6 +104,8 @@ enum class ProviderCapability {
     IMAGE_GENERATION,
     IMAGE_EDIT,
     PARTIAL_IMAGES,
+    VIDEO_GENERATION,
+    VIDEO_CANCELLATION,
 }
 
 data class ImageGenerationConstraints(
@@ -136,10 +169,15 @@ enum class ProviderRequestChannel {
 }
 
 enum class ProviderRequestOperation {
+    EMBEDDING,
     TEXT_GENERATION,
     STREAM_TEXT,
     IMAGE_GENERATION,
     IMAGE_EDIT,
+    VIDEO_GENERATION_CREATE,
+    VIDEO_GENERATION_STATUS,
+    VIDEO_GENERATION_CANCEL,
+    VIDEO_GENERATION_DOWNLOAD,
 }
 
 data class ProviderRequestDiagnostics(
@@ -562,9 +600,18 @@ data class EmbeddingGenerationParams(
     val input: List<String>,
     val images: List<EmbeddingImageInput> = emptyList(),
     val dimensions: Int? = null,
+    /** Optional provider-specific task hint (for example Gemini retrieval query/document). */
+    val taskType: EmbeddingTaskType? = null,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
+    val requestId: String? = null,
 )
+
+@Serializable
+enum class EmbeddingTaskType(val apiValue: String) {
+    RETRIEVAL_QUERY("RETRIEVAL_QUERY"),
+    RETRIEVAL_DOCUMENT("RETRIEVAL_DOCUMENT"),
+}
 
 @Serializable
 data class EmbeddingImageInput(
@@ -581,14 +628,61 @@ data class EmbeddingGenerationResult(
 @Serializable
 data class CustomHeader(
     val name: String,
-    val value: String
+    val value: String,
+    val enabled: Boolean = true,
 )
 
 @Serializable
 data class CustomBody(
     val key: String,
-    val value: JsonElement
+    val value: JsonElement,
+    val enabled: Boolean = true,
 )
 
+private fun Model.normalizedModelId(): String = modelId.substringAfterLast('/').trim()
+
+/**
+ * Volcano Ark's multimodal embedding endpoint is separate from the OpenAI-compatible
+ * text endpoint.  Keep this check based on the model id so it also works when the
+ * provider is configured through a proxy or an endpoint id is not available.
+ */
 fun Model.usesVolcengineMultimodalEmbeddingApi(): Boolean =
-    modelId.startsWith("doubao-embedding-vision", ignoreCase = true)
+    normalizedModelId().startsWith("doubao-embedding-vision", ignoreCase = true)
+
+/**
+ * Text Doubao embedding models use the Ark text endpoint. The documented request
+ * limit is up to 256 input strings, with each string limited to 100000 UTF-8 bytes.
+ */
+fun Model.usesVolcengineTextEmbeddingApi(): Boolean {
+    val normalized = normalizedModelId()
+    return normalized.startsWith("doubao-embedding", ignoreCase = true) &&
+        !usesVolcengineMultimodalEmbeddingApi()
+}
+
+/** Vision embedding dimensions were added in the 250615 model revision. */
+fun Model.supportsVolcengineMultimodalDimensions(): Boolean {
+    val normalized = normalizedModelId().lowercase()
+    if (!normalized.startsWith("doubao-embedding-vision-")) return false
+    val revision = normalized.substringAfterLast('-').toIntOrNull() ?: return false
+    return revision >= 250615
+}
+
+/**
+ * Vision models released from 250615 onward accept an arbitrary mixture of
+ * text, image, and video input items. Older revisions are kept conservative by
+ * callers because their multimodal batching contract is not guaranteed.
+ */
+fun Model.supportsVolcengineMultimodalBatchInput(): Boolean {
+    val normalized = normalizedModelId().lowercase()
+    if (!normalized.startsWith("doubao-embedding-vision-")) return false
+    val revision = normalized.substringAfterLast('-').toIntOrNull() ?: return false
+    return revision >= 250615
+}
+
+/**
+ * Gemini Embedding 2 is Google's native multimodal embedding model.  Keep the
+ * check on the normalized model id so it also works for preview aliases and
+ * provider proxies that return a `models/...` name.
+ */
+fun Model.usesGoogleMultimodalEmbeddingApi(): Boolean =
+    normalizedModelId().startsWith("gemini-embedding-2", ignoreCase = true)

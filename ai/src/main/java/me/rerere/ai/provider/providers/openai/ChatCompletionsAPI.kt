@@ -42,6 +42,7 @@ import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.inferParameterFamily
+import me.rerere.ai.provider.normalizeCompactVendorModelId
 import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.resolveReasoningLevelSupport
 import me.rerere.ai.provider.supportsReasoningCapability
@@ -89,6 +90,7 @@ private fun String.normalizedReasoningModelId(): String =
         .replace(Regex("^(gemini|claude|gpt|chatgpt|grok)(?=\\d)"), "$1-")
         .replace(Regex("^(qwq|qvq)(?=\\d)"), "$1-")
         .replace(Regex("^deepseek(?=[rv]?\\d)"), "deepseek-")
+        .normalizeCompactVendorModelId()
 
 private fun String.isQwenFamily(): Boolean =
     startsWith("qwen") || startsWith("qwq") || startsWith("qvq")
@@ -102,7 +104,7 @@ private fun String.isQwenThinkingOnlyModel(): Boolean =
 
 private fun String.isDeepSeekFamily(): Boolean = startsWith("deepseek")
 
-private fun String.isDeepSeekV4Model(): Boolean = startsWith("deepseek-v4")
+private fun String.isDeepSeekV4Model(): Boolean = startsWith("deepseek-v4") || this == "deepseek-flash"
 
 private fun String.isDeepSeekThinkingOnlyModel(): Boolean =
     startsWith("deepseek-r1") || this == "deepseek-reasoner"
@@ -132,6 +134,17 @@ private fun ReasoningLevel.volcengineReasoningEffort(): String = when (this) {
     ReasoningLevel.MAX -> "high"
     ReasoningLevel.OFF,
     ReasoningLevel.AUTO -> error("Reasoning effort requires an explicit enabled level")
+}
+
+private fun ReasoningLevel.qwen38ReasoningEffort(): String = when (this) {
+    ReasoningLevel.MINIMAL,
+    ReasoningLevel.LOW -> "low"
+    ReasoningLevel.MEDIUM -> "medium"
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH,
+    ReasoningLevel.MAX -> "xhigh"
+    ReasoningLevel.OFF,
+    ReasoningLevel.AUTO -> error("Qwen reasoning effort requires an explicit enabled level")
 }
 
 private val REASONING_MODEL_SEPARATOR = Regex("[\\s._]+")
@@ -321,7 +334,10 @@ class ChatCompletionsAPI(
         val parameterFamily = params.model.inferParameterFamily() ?: ModelParameterFamily.OPENAI
         val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
         val useFunctionTools =
-            params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
+            (params.model.abilities.contains(ModelAbility.TOOL) ||
+                resolveDeepSeekModelParameterSupport(parameterModelId).available) &&
+                params.tools.isNotEmpty() &&
+                !(host == OPENAI_API_HOST && modelSupport.requiresResponsesForToolCalling)
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
@@ -337,9 +353,18 @@ class ChatCompletionsAPI(
 
             if (isModelAllowTemperature(params)) {
                 if (params.temperature != null) put("temperature", params.temperature)
-                if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null && !params.usesQwenStructuredOutput()) {
+            val deepSeekSupport = resolveDeepSeekModelParameterSupport(parameterModelId)
+            params.topP?.let { topP ->
+                when {
+                    deepSeekSupport.available && params.reasoningLevel.isEnabled ->
+                        put("top_p", topP.coerceIn(0.95f, 1f))
+                    deepSeekSupport.available -> Unit // ignored by DeepSeek in non-thinking mode
+                    else -> put("top_p", topP)
+                }
+            }
+            val deepSeekMaxTokens = params.deepSeekMaxOutputTokens()
+            if ((deepSeekMaxTokens != null || params.maxTokens != null) && !params.usesQwenStructuredOutput()) {
                 val tokenLimitKey = if (
                     ModelRegistry.OPENAI_O_MODELS.match(params.model.modelId) ||
                     isOpenAIGpt5Model(params.model.modelId) ||
@@ -349,7 +374,7 @@ class ChatCompletionsAPI(
                 } else {
                     "max_tokens"
                 }
-                put(tokenLimitKey, params.maxTokens)
+                put(tokenLimitKey, deepSeekMaxTokens ?: params.maxTokens)
             }
 
             if (modelSupport.available || parameterFamily == ModelParameterFamily.OPENAI) {
@@ -437,6 +462,12 @@ class ChatCompletionsAPI(
                                     level != ReasoningLevel.AUTO
                                 ) {
                                     put("reasoning_effort", level.effort)
+                                }
+                            }
+                            modelId.startsWith("qwen3-8") -> {
+                                put("enable_thinking", level.isEnabled)
+                                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                                    put("reasoning_effort", level.qwen38ReasoningEffort())
                                 }
                             }
                             modelId.isQwenThinkingOnlyModel() -> {
@@ -596,7 +627,14 @@ class ChatCompletionsAPI(
                         when {
                             modelId.startsWith("qwen3-8") -> {
                                 if (level != ReasoningLevel.AUTO) {
-                                    put("reasoning_effort", level.effort)
+                                    put(
+                                        "reasoning_effort",
+                                        if (level == ReasoningLevel.OFF) {
+                                            ReasoningLevel.OFF.effort
+                                        } else {
+                                            level.qwen38ReasoningEffort()
+                                        },
+                                    )
                                 }
                             }
 

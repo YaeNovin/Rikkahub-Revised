@@ -50,6 +50,7 @@ class ClaudeOptionsRequestTest {
             "claude-opus-4-8",
             "claude-opus-5",
             "claude-fable-5",
+            "claude-fable-5-1",
             "anthropic/claude-sonnet-4-6",
             "anthropic.claude-opus-4-6-v1:0",
             "claude-3-7-sonnet-20250219",
@@ -121,6 +122,53 @@ class ClaudeOptionsRequestTest {
 
         assertEquals("adaptive", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertEquals("omitted", body["thinking"]?.jsonObject?.get("display")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `Fable 5 1 keeps required adaptive thinking enabled`() {
+        val body = buildRequest(
+            model = Model(modelId = "claude-fable-5-1"),
+            reasoningLevel = ReasoningLevel.OFF,
+            options = fullOptions(),
+        )
+
+        assertEquals("adaptive", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `Fable 5 1 maps unsupported forced tool use to auto`() {
+        val support = resolveClaudeModelParameterSupport("claude-fable-5-1")
+        val body = buildRequest(
+            model = Model(
+                modelId = "claude-fable-5-1",
+                abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+            ),
+            tools = listOf(testTool()),
+            options = fullOptions(),
+        )
+
+        assertFalse(support.supportsForcedToolChoice)
+        assertEquals("auto", body["tool_choice"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+        assertEquals(
+            true,
+            body["tool_choice"]?.jsonObject?.get("disable_parallel_tool_use")?.jsonPrimitive?.boolean,
+        )
+    }
+
+    @Test
+    fun `Fable 5 keeps forced tool use available`() {
+        val support = resolveClaudeModelParameterSupport("claude-fable-5")
+        val body = buildRequest(
+            model = Model(
+                modelId = "claude-fable-5",
+                abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+            ),
+            tools = listOf(testTool()),
+            options = fullOptions(),
+        )
+
+        assertTrue(support.supportsForcedToolChoice)
+        assertEquals("any", body["tool_choice"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
     }
 
     @Test

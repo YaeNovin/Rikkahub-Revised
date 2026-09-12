@@ -45,7 +45,7 @@ internal fun JsonObjectBuilder.applyClaudeRequestOptions(
         options.topK?.takeIf { it > 0 }?.let { put("top_k", it) }
     }
     if (hasTools) {
-        buildClaudeToolChoice(params)?.let { put("tool_choice", it) }
+        buildClaudeToolChoice(params, support)?.let { put("tool_choice", it) }
     }
 
     val outputConfig = buildJsonObject {
@@ -163,10 +163,19 @@ internal fun JsonObject.claudeRequestDiagnostics(
     )
 }
 
-private fun buildClaudeToolChoice(params: TextGenerationParams): JsonObject? {
+private fun buildClaudeToolChoice(
+    params: TextGenerationParams,
+    support: ClaudeModelParameterSupport,
+): JsonObject? {
     val options = params.claudeOptions
     val disableParallel = options.parallelToolCalls.disableParallelToolUse
-    val type = options.toolChoice.apiValue ?: if (disableParallel != null) "auto" else return null
+    val requestedType = options.toolChoice.apiValue
+    val type = when {
+        requestedType == "any" && !support.supportsForcedToolChoice -> "auto"
+        requestedType != null -> requestedType
+        disableParallel != null -> "auto"
+        else -> return null
+    }
     return buildJsonObject {
         put("type", type)
         if (type != "none") disableParallel?.let { put("disable_parallel_tool_use", it) }

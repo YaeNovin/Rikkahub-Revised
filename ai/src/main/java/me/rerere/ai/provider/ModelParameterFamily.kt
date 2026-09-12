@@ -94,10 +94,12 @@ private val OPENAI_FAMILY = Regex("(?:^|[^a-z0-9])(?:gpt(?:[-._]?\\d)?|chatgpt|o
 /** Normalizes compact aliases frequently returned by compatible model catalogs. */
 internal fun String.normalizeCompactVendorModelId(): String =
     lowercase()
+        .replace(Regex("^(gpt|chatgpt|gemini|grok)(?=\\d)"), "$1-")
         .replace(
             Regex("^claude-?(\\d)(\\d+)-(opus|sonnet|haiku|fable|mythos)"),
             "claude-$3-$1-$2",
         )
         .replace(Regex("^(gpt|chatgpt|gemini|grok)-?(\\d)(\\d+)"), "$1-$2-$3")
         .replace(Regex("^qwen-?(\\d)(\\d+)"), "qwen$1-$2")
+        .replace(Regex("^((?:gpt|chatgpt|gemini|grok)-\\d+(?:-\\d+)?)(?=[a-z])"), "$1-")
         .replace(Regex("^deepseek-?([rv])(\\d+)"), "deepseek-$1$2")

@@ -74,6 +74,25 @@ class CompatibleModelRequestOptionsTest {
     }
 
     @Test
+    fun `Gemini 3 8 compatible request omits rejected penalties`() {
+        val body = buildRequest(
+            model = Model(modelId = "google/gemini-3.8-flash"),
+            params = { model ->
+                TextGenerationParams(
+                    model = model,
+                    geminiOptions = GeminiGenerationOptions(
+                        presencePenalty = 0.2f,
+                        frequencyPenalty = 0.3f,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(body.containsKey("presence_penalty"))
+        assertFalse(body.containsKey("frequency_penalty"))
+    }
+
+    @Test
     fun `maps Claude common options and omits Anthropic-only fields`() {
         val tool = Tool(
             name = "lookup",

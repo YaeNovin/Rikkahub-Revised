@@ -249,7 +249,8 @@ class ResponseAPI(
         val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
         val deepSeekSupport = resolveDeepSeekModelParameterSupport(parameterModelId)
         val useFunctionTools =
-            params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
+            (params.model.abilities.contains(ModelAbility.TOOL) || deepSeekSupport.available) &&
+                params.tools.isNotEmpty()
         val hasAnyTools = useFunctionTools || params.model.tools.isNotEmpty()
         val toolCount = (if (useFunctionTools) params.tools.size else 0) + params.model.tools.size
         return buildJsonObject {
@@ -259,9 +260,16 @@ class ResponseAPI(
 
             if (isModelAllowTemperature(params)) {
                 if (params.temperature != null) put("temperature", params.temperature)
-                if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
+            params.topP?.let { topP ->
+                when {
+                    deepSeekSupport.available && params.reasoningLevel.isEnabled ->
+                        put("top_p", topP.coerceIn(0.95f, 1f))
+                    deepSeekSupport.available -> Unit
+                    else -> put("top_p", topP)
+                }
+            }
+            params.deepSeekMaxOutputTokens()?.let { put("max_output_tokens", it) }
 
             if (modelSupport.available || parameterFamily == ModelParameterFamily.OPENAI) {
                 params.openAIOptions.verbosity.apiValue
@@ -276,12 +284,14 @@ class ResponseAPI(
                     }
                     ?.let { put("service_tier", it) }
                 if (hasAnyTools) {
-                    params.openAIOptions.parallelToolCalls.apiValue?.let {
-                        put("parallel_tool_calls", it)
+                    if (!deepSeekSupport.available) {
+                        params.openAIOptions.parallelToolCalls.apiValue?.let {
+                            put("parallel_tool_calls", it)
+                        }
                     }
                     params.openAIOptions.toolChoice.apiValue?.let { put("tool_choice", it) }
                 }
-                if (params.model.tools.isNotEmpty()) {
+                if (params.model.tools.isNotEmpty() && !deepSeekSupport.available) {
                     params.openAIOptions.maxToolCalls
                         ?.takeIf { it > 0 }
                         ?.let { put("max_tool_calls", it) }
@@ -346,6 +356,9 @@ class ResponseAPI(
                                 put("type", "function")
                                 put("name", tool.name)
                                 put("description", tool.description)
+                                // ask_user has type-specific optional fields. Do not normalize
+                                // every field to required (including hidden question parameters).
+                                if (tool.name == me.rerere.ai.ui.AskUserProtocol.TOOL_NAME) put("strict", false)
                                 put(
                                     "parameters",
                                     json.encodeToJsonElement(

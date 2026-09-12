@@ -51,7 +51,7 @@ class DeepSeekAnthropicOptionsRequestTest {
         assertEquals(2, body["stop_sequences"]?.jsonArray?.size)
         assertEquals("test-user_1", body["metadata"]?.jsonObject?.get("user_id")?.jsonPrimitive?.content)
         assertFalse(body.containsKey("temperature"))
-        assertFalse(body.containsKey("top_p"))
+        assertEquals(0.95f, body["top_p"]?.jsonPrimitive?.float)
         assertFalse(body.containsKey("response_format"))
         assertFalse(body.containsKey("logprobs"))
         assertFalse(body.containsKey("top_logprobs"))
@@ -67,7 +67,7 @@ class DeepSeekAnthropicOptionsRequestTest {
 
         assertEquals("disabled", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertEquals(1.7f, body["temperature"]?.jsonPrimitive?.float)
-        assertEquals(0.8f, body["top_p"]?.jsonPrimitive?.float)
+        assertFalse(body.containsKey("top_p"))
         assertFalse(body.containsKey("output_config"))
     }
 
@@ -81,7 +81,7 @@ class DeepSeekAnthropicOptionsRequestTest {
         assertEquals("enabled", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertFalse(body.containsKey("output_config"))
         assertFalse(body.containsKey("temperature"))
-        assertFalse(body.containsKey("top_p"))
+        assertEquals(0.95f, body["top_p"]?.jsonPrimitive?.float)
     }
 
     @Test

@@ -15,6 +15,7 @@ data class ClaudeModelParameterSupport(
     val supportsInferenceGeo: Boolean,
     val supportsSamplingParameters: Boolean,
     val supportsStructuredOutput: Boolean,
+    val supportsForcedToolChoice: Boolean,
 )
 
 fun resolveClaudeModelParameterSupport(modelId: String): ClaudeModelParameterSupport {
@@ -23,7 +24,7 @@ fun resolveClaudeModelParameterSupport(modelId: String): ClaudeModelParameterSup
     val family = model?.family
     val version = model?.version
     val available = CLAUDE_MODEL_MARKER.containsMatchIn(normalized) && when (family) {
-        "fable" -> version == ClaudeVersion(5)
+        "fable" -> version?.major == 5
         "mythos" -> version?.major == 5 || "preview" in normalized
         "sonnet" -> version == ClaudeVersion(3, 7) ||
             version == ClaudeVersion(4) ||
@@ -59,7 +60,7 @@ fun resolveClaudeModelParameterSupport(modelId: String): ClaudeModelParameterSup
         available = available,
         supportsAdaptiveThinking = supportsAdaptiveThinking,
         requiresAdaptiveThinking = supportsAdaptiveThinking &&
-            family == "fable" && version == ClaudeVersion(5),
+            family == "fable" && version?.major == 5,
         supportsManualThinking = supportsManualThinking,
         supportsEffort = supportsEffort,
         supportsXHighEffort = supportsXHighEffort,
@@ -70,6 +71,9 @@ fun resolveClaudeModelParameterSupport(modelId: String): ClaudeModelParameterSup
         supportsInferenceGeo = supportsAdaptiveThinking,
         supportsSamplingParameters = available && version == ClaudeVersion(4, 6),
         supportsStructuredOutput = available,
+        supportsForcedToolChoice = available && !(
+            (family == "fable" || family == "mythos") && version == ClaudeVersion(5, 1)
+            ),
     )
 }
 

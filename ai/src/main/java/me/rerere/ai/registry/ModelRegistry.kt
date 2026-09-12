@@ -89,6 +89,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val GPT_6 = defineModel {
+        tokens("gpt|chatgpt", "6")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val GEMINI_20_FLASH = defineModel {
         tokens("gemini", "2", "0", "flash")
         visionInput()
@@ -144,6 +150,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    val GEMINI_3_8_FLASH = defineModel {
+        tokens("gemini", "3", "8", "flash")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     val GEMINI_3_1_PRO_PREVIEW = defineModel {
         tokens("gemini", "3", "1", "pro", "preview")
         visionInput()
@@ -190,6 +202,7 @@ object ModelRegistry {
             GEMINI_3_PRO,
             GEMINI_3_FLASH,
             GEMINI_3_7_FLASH,
+            GEMINI_3_8_FLASH,
             GEMINI_3_1_PRO_PREVIEW,
             GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS,
             GEMINI_3_PRO_IMAGE,
@@ -288,6 +301,20 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    // DeepSeek 官方 V4.1-Flash 模型名为 deepseek-flash；V4.1-Flash
+    // 及旧的 v4-flash 别名均支持视觉输入和工具调用。
+    private val DEEPSEEK_V4_1_FLASH = defineModel {
+        tokens("deepseek", "v", "4", "1", "flash")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val DEEPSEEK_FLASH = defineModel {
+        tokens("deepseek", "flash")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val DEEPSEEK_V4_FLASH = defineModel {
         tokens("deepseek", "v", "4", "flash")
         toolReasoningAbility()
@@ -352,6 +379,13 @@ object ModelRegistry {
 
     private val QWEN_3_8_MAX = defineModel {
         tokens("qwen", "3", "8", "max")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val QWEN_3_8_FLASH = defineModel {
+        tokens("qwen", "3", "8", "flash")
+        visionInput()
         toolReasoningAbility()
     }
 
@@ -563,6 +597,7 @@ object ModelRegistry {
         GPT_5_4_NANO,
         GPT_5_5,
         GPT_5_6,
+        GPT_6,
         GEMINI_20_FLASH,
         GEMINI_2_5_FLASH,
         GEMINI_2_5_PRO,
@@ -571,6 +606,7 @@ object ModelRegistry {
         GEMINI_NANO_BANANA,
         GEMINI_3_PRO,
         GEMINI_3_7_FLASH,
+        GEMINI_3_8_FLASH,
         GEMINI_3_FLASH,
         GEMINI_3_1_PRO_PREVIEW,
         GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS,
@@ -590,6 +626,8 @@ object ModelRegistry {
         DEEPSEEK_R1_MODEL,
         DEEPSEEK_REASONER,
         DEEPSEEK_V4_FLASH_VISION_EXP,
+        DEEPSEEK_V4_1_FLASH,
+        DEEPSEEK_FLASH,
         DEEPSEEK_V4_FLASH,
         DEEPSEEK_V4_PRO,
         DEEPSEEK_V3_1,
@@ -602,6 +640,7 @@ object ModelRegistry {
         QWEN_3_6_MAX,
         QWEN_3_7_MAX,
         QWEN_3_8_MAX,
+        QWEN_3_8_FLASH,
         SEEDREAM_IMAGE,
         DOUBAO_1_6,
         DOUBAO_1_8,
@@ -646,10 +685,10 @@ object ModelRegistry {
     }
 
     val MODEL_OUTPUT_MODALITIES = ModelData { modelId ->
-        val fallback = if (MODEL_TYPE.getData(modelId) == ModelType.IMAGE) {
-            listOf(Modality.IMAGE)
-        } else {
-            listOf(Modality.TEXT)
+        val fallback = when (MODEL_TYPE.getData(modelId)) {
+            ModelType.IMAGE -> listOf(Modality.IMAGE)
+            ModelType.VIDEO -> listOf(Modality.VIDEO)
+            else -> listOf(Modality.TEXT)
         }
         resolveModalities(modelId, fallback = fallback) { it.outputModalities }
     }
@@ -693,7 +732,7 @@ object ModelRegistry {
         return if (modalities.isEmpty()) {
             fallback
         } else {
-            listOf(Modality.TEXT, Modality.IMAGE).filter { it in modalities }
+            listOf(Modality.TEXT, Modality.IMAGE, Modality.VIDEO).filter { it in modalities }
         }
     }
 

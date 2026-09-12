@@ -29,6 +29,14 @@ sealed class ToolApprovalState {
     @Serializable
     @SerialName("answered")
     data class Answered(val answer: String) : ToolApprovalState()
+
+    @Serializable
+    @SerialName("cancelled")
+    data class Cancelled(val reason: String = "") : ToolApprovalState()
+
+    @Serializable
+    @SerialName("expired")
+    data class Expired(val reason: String = "") : ToolApprovalState()
 }
 
 fun ToolApprovalState.canResumeToolExecution(): Boolean {
@@ -36,6 +44,8 @@ fun ToolApprovalState.canResumeToolExecution(): Boolean {
         ToolApprovalState.Approved -> true
         is ToolApprovalState.Denied -> true
         is ToolApprovalState.Answered -> true
+        is ToolApprovalState.Cancelled -> true
+        is ToolApprovalState.Expired -> true
         ToolApprovalState.Auto,
         ToolApprovalState.Pending,
             -> false

@@ -36,6 +36,7 @@ internal fun String.normalizedQwenModelId(): String =
     substringAfterLast('/').substringAfterLast(':').trim().lowercase()
         .replace(Regex("[\\s_]+"), "-")
         .replace(Regex("^(qwq|qvq)(?=\\d)"), "$1-")
+        .replace(Regex("^qwen-?(\\d)(\\d+)[-_.]?(max|flash)(?=[-_.]|$)"), "qwen$1-$2-$3")
         .normalizeCompactVendorModelId()
 
 private fun String.isQwenFamily(): Boolean =
@@ -60,12 +61,12 @@ private val QWEN_TOOL_STREAM_MODELS = listOf(
     Regex("^qwen3[.-](?:7|8)-max(?:[-.]|$)"),
     Regex("^qwen3[.-](?:6|7)-plus(?:[-.]|$)"),
     Regex("^qwen3[.-]5-plus(?:[-.]|$)"),
-    Regex("^qwen3[.-](?:6|7)-flash(?:[-.]|$)"),
+    Regex("^qwen3[.-](?:6|7|8)-flash(?:[-.]|$)"),
     Regex("^qwen3[.-]5-flash(?:[-.]|$)"),
 )
 
 private val QWEN_PRESERVE_THINKING_MODELS = listOf(
-    Regex("^qwen3[.-]8-max(?:[-.]|$)"),
+    Regex("^qwen3[.-]8-(?:max|flash)(?:[-.]|$)"),
     Regex("^qwen3[.-](?:6|7)-(?:max|plus|flash)(?:[-.]|$)"),
 )
 

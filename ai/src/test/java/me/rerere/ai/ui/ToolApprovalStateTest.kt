@@ -10,6 +10,8 @@ class ToolApprovalStateTest {
         assertTrue(ToolApprovalState.Approved.canResumeToolExecution())
         assertTrue(ToolApprovalState.Denied("no").canResumeToolExecution())
         assertTrue(ToolApprovalState.Answered("""{"answers":{"q1":"yes"}}""").canResumeToolExecution())
+        assertTrue(ToolApprovalState.Cancelled("no").canResumeToolExecution())
+        assertTrue(ToolApprovalState.Expired("old").canResumeToolExecution())
     }
 
     @Test

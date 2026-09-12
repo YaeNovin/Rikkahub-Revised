@@ -35,6 +35,11 @@ internal class GoogleStreamDecoder(
     private var finished = false
     private var toolSequence = 0
     private val providerToolIds = mutableMapOf<String, String>()
+    private val providerToolNames = mutableMapOf<String, String>()
+    // Some Gemini-compatible relays split a function call across parts and omit `name` from
+    // continuation parts. Keep the most recent nameless-provider call available for merging.
+    private var lastToolCallId: String? = null
+    private var lastToolName: String? = null
 
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
@@ -82,11 +87,11 @@ internal class GoogleStreamDecoder(
 
     private fun parseMessage(content: JsonObject, groundingMetadata: JsonObject?): UIMessage = UIMessage(
         role = MessageRole.ASSISTANT,
-        parts = content["parts"]?.jsonArray?.map { parsePart(it.jsonObject) }.orEmpty(),
+        parts = content["parts"]?.jsonArray?.mapNotNull { parsePart(it.jsonObject) }.orEmpty(),
         annotations = parseAnnotations(groundingMetadata),
     )
 
-    private fun parsePart(part: JsonObject): UIMessagePart = when {
+    private fun parsePart(part: JsonObject): UIMessagePart? = when {
         part.containsKey("text") -> {
             val text = part["text"]?.jsonPrimitive?.contentOrNull ?: ""
             if (part["thought"]?.jsonPrimitive?.booleanOrNull == true) {
@@ -98,19 +103,41 @@ internal class GoogleStreamDecoder(
         part.containsKey("functionCall") -> {
             val functionCall = part["functionCall"] as? JsonObject
                 ?: error("Gemini functionCall must be a JSON object")
-            val toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull
+            val explicitToolName = functionCall["name"]?.let { value ->
+                runCatching { value.jsonPrimitive.contentOrNull }.getOrNull()
+            }
                 ?.takeIf { it.isNotBlank() }
-                ?: error("Gemini functionCall.name is required")
-            val functionCallId = functionCall["id"]?.jsonPrimitive?.contentOrNull
+            val functionCallId = functionCall["id"]?.let { value ->
+                runCatching { value.jsonPrimitive.contentOrNull }.getOrNull()
+            }
                 ?.takeIf { it.isNotBlank() }
+            val toolCallId = when {
+                functionCallId != null -> providerToolIds.getOrPut(functionCallId) {
+                    "$responseId:tool-${++toolSequence}"
+                }
+                explicitToolName == null -> lastToolCallId
+                else -> "$responseId:tool-${++toolSequence}"
+            }
+            val toolName = explicitToolName ?: if (functionCallId != null) {
+                providerToolNames[functionCallId]
+            } else {
+                lastToolName
+            }
+            // A nameless part without an earlier call is not actionable. Compatible relays have
+            // been observed to emit an empty functionCall marker before the actual named part;
+            // dropping that marker prevents a spurious empty ask_user invocation.
+            if (toolCallId == null || toolName.isNullOrBlank()) return null
+            if (functionCallId != null) providerToolNames[functionCallId] = toolName
+            lastToolCallId = toolCallId
+            lastToolName = toolName
             UIMessagePart.Tool(
                 // Gemini 3 supplies a stable ID that must be echoed in functionResponse.
                 // For older models, keep a local ID but leave functionCallId null.
-                toolCallId = functionCallId?.let { providerToolIds.getOrPut(it) {
-                    "$responseId:tool-${++toolSequence}"
-                } } ?: "$responseId:tool-${++toolSequence}",
+                toolCallId = toolCallId,
                 toolName = toolName,
-                input = functionCall["args"]?.let { if (it is JsonNull) "null" else it.toString() }
+                // A null args marker is an empty incremental fragment, not literal input. Treating
+                // it as the string "null" would corrupt the following JSON args fragment.
+                input = functionCall["args"]?.let { if (it is JsonNull) "" else it.toString() }
                     .orEmpty(),
                 output = emptyList(),
                 metadata = GoogleThoughtMetadata(

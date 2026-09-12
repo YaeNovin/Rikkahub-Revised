@@ -61,7 +61,7 @@ fun resolveReasoningLevelSupport(
 private fun resolveGoogleReasoningLevelSupport(model: Model): ReasoningLevelSupport {
     val id = model.normalizedReasoningModelId()
     val levels = when {
-        id.startsWith("gemini-3-7-flash") -> listOf(
+        id.startsWith("gemini-3-7-flash") || id.startsWith("gemini-3-8-flash") -> listOf(
             ReasoningLevel.AUTO,
             ReasoningLevel.LOW,
             ReasoningLevel.MEDIUM,
@@ -211,13 +211,25 @@ private fun resolveOpenAIChannelReasoningLevelSupport(
 }
 
 private fun resolveAlibabaReasoningLevelSupport(normalized: String): ReasoningLevelSupport = when {
+    normalized.startsWith("qwen3-8") -> ReasoningLevelSupport(
+        levels = listOf(
+            ReasoningLevel.OFF,
+            ReasoningLevel.AUTO,
+            ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM,
+            ReasoningLevel.XHIGH,
+        ),
+        modelSpecific = true,
+        compatibleEndpoint = false,
+    )
+
     normalized.isDeepSeekThinkingOnlyModel() -> ReasoningLevelSupport(
         levels = listOf(ReasoningLevel.AUTO),
         modelSpecific = true,
         compatibleEndpoint = false,
     )
 
-    normalized.startsWith("deepseek-v4") -> ReasoningLevelSupport(
+    (normalized.startsWith("deepseek-v4") || normalized == "deepseek-flash") -> ReasoningLevelSupport(
         levels = listOf(
             ReasoningLevel.OFF,
             ReasoningLevel.AUTO,
@@ -256,7 +268,7 @@ private fun resolveDeepSeekReasoningLevelSupport(normalized: String): ReasoningL
         compatibleEndpoint = false,
     )
 
-    normalized.startsWith("deepseek-v4") -> ReasoningLevelSupport(
+    (normalized.startsWith("deepseek-v4") || normalized == "deepseek-flash") -> ReasoningLevelSupport(
         levels = listOf(
             ReasoningLevel.OFF,
             ReasoningLevel.AUTO,
@@ -312,6 +324,7 @@ private fun resolveCompatibleReasoningLevelSupport(model: Model): ReasoningLevel
 
 private fun resolveQwenModelReasoningLevels(normalized: String): List<ReasoningLevel> = when {
     normalized.startsWith("qwen3-8") -> listOf(
+        ReasoningLevel.OFF,
         ReasoningLevel.AUTO,
         ReasoningLevel.LOW,
         ReasoningLevel.MEDIUM,
@@ -341,7 +354,7 @@ private fun resolveQwenModelReasoningLevels(normalized: String): List<ReasoningL
 }
 
 private fun resolveDeepSeekModelReasoningLevels(normalized: String): List<ReasoningLevel> = when {
-    normalized.startsWith("deepseek-v4") -> listOf(
+    (normalized.startsWith("deepseek-v4") || normalized == "deepseek-flash") -> listOf(
         ReasoningLevel.OFF,
         ReasoningLevel.AUTO,
         ReasoningLevel.LOW,

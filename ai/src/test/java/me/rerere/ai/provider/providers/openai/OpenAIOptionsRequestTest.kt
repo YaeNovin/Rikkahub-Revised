@@ -155,6 +155,24 @@ class OpenAIOptionsRequestTest {
     }
 
     @Test
+    fun `GPT 6 Astra omits tools from official Chat Completions`() {
+        val body = buildChatRequest(
+            messages = listOf(UIMessage.user("hello")),
+            params = gpt56Params().copy(
+                model = Model(
+                    modelId = "gpt-6-astra",
+                    abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+                ),
+            ),
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1"),
+        )
+
+        assertFalse(body.containsKey("tools"))
+        assertFalse(body.containsKey("parallel_tool_calls"))
+        assertFalse(body.containsKey("tool_choice"))
+    }
+
+    @Test
     fun `active GPT text models are supported and retired or specialized models are excluded`() {
         listOf(
             "gpt-4o",
@@ -163,9 +181,27 @@ class OpenAIOptionsRequestTest {
             "gpt-5-2025-08-07",
             "gpt-5.4",
             "openai/gpt-5.6-sol",
+            "gpt-6-astra",
+            "ChatGPT 6-Astra",
         ).forEach {
             assertTrue("model=$it", resolveOpenAIModelParameterSupport(it).available)
         }
+        val astra = resolveOpenAIModelParameterSupport("ChatGPT 6-Astra")
+        assertTrue(astra.supportsVerbosity)
+        assertTrue(astra.supportsReasoningContext)
+        assertTrue(astra.supportsReasoningMode)
+        assertTrue(astra.requiresResponsesForToolCalling)
+        assertEquals(
+            listOf(
+                ReasoningLevel.AUTO,
+                ReasoningLevel.LOW,
+                ReasoningLevel.MEDIUM,
+                ReasoningLevel.HIGH,
+                ReasoningLevel.XHIGH,
+                ReasoningLevel.MAX,
+            ),
+            resolveOpenAIReasoningLevels("gpt-6-astra"),
+        )
         listOf(
             "gpt-4.5-preview",
             "gpt-5.3-chat-latest",

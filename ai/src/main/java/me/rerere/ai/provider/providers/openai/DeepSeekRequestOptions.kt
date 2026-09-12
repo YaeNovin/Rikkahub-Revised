@@ -18,7 +18,11 @@ internal fun JsonObjectBuilder.applyDeepSeekChatOptions(
     val options = params.deepSeekOptions
 
     if (hasFunctionTools) {
-        options.toolChoice.apiValue?.let { put("tool_choice", it) }
+        // DeepSeek documents auto/none in thinking mode; required and named
+        // choices require thinking to be disabled and otherwise return 400.
+        options.toolChoice.apiValue
+            ?.takeUnless { params.reasoningLevel.isEnabled && it == "required" }
+            ?.let { put("tool_choice", it) }
     }
     options.stopSequences.normalizedDeepSeekStopSequences()
         .takeIf(List<String>::isNotEmpty)
@@ -56,6 +60,12 @@ internal fun TextGenerationParams.deepSeekImageDetail(): String? =
     deepSeekOptions.imageDetail.apiValue
         ?.takeIf { resolveDeepSeekModelParameterSupport(model.parameterModelId()).supportsVision }
 
+/** DeepSeek V4.1-Flash documents a 384K maximum output for Chat Completions. */
+internal fun TextGenerationParams.deepSeekMaxOutputTokens(): Int? =
+    maxTokens?.coerceAtMost(DEEPSEEK_MAX_OUTPUT_TOKENS.takeIf {
+        isDeepSeekV4OrFlashModel(model.parameterModelId())
+    } ?: Int.MAX_VALUE)
+
 private fun buildDeepSeekResponseFormat(format: DeepSeekResponseFormat): JsonObject? =
     format.apiValue?.let { type -> buildJsonObject { put("type", type) } }
 
@@ -66,3 +76,4 @@ private fun String.normalizedDeepSeekUserId(): String? =
     trim().takeIf { it.isNotEmpty() && DEEPSEEK_USER_ID.matches(it) }
 
 private val DEEPSEEK_USER_ID = Regex("[A-Za-z0-9_-]{1,512}")
+private const val DEEPSEEK_MAX_OUTPUT_TOKENS = 393_216

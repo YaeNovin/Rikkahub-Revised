@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -29,15 +30,26 @@ import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderCapability
+import me.rerere.ai.provider.ProviderRequestDiagnostics
+import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.VideoGenerationConstraints
+import me.rerere.ai.provider.VideoGenerationParams
+import me.rerere.ai.provider.VideoGenerationTaskSnapshot
+import me.rerere.ai.provider.VideoReferenceImage
+import me.rerere.ai.provider.constrained
 import me.rerere.ai.provider.contextWindowTokensOrNull
 import me.rerere.ai.provider.inferModelTypeFromId
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.usesVolcengineMultimodalEmbeddingApi
+import me.rerere.ai.provider.supportsVolcengineMultimodalDimensions
+import me.rerere.ai.provider.supportsVolcengineMultimodalBatchInput
+import me.rerere.ai.provider.usesVolcengineTextEmbeddingApi
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ImageGenSize
 import me.rerere.ai.ui.ImageGenerationItem
@@ -61,9 +73,11 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.FilterOutputStream
 import java.io.InputStream
 import java.util.Base64
+import java.net.URLConnection
 
 private const val TAG = "OpenAIProvider"
 
@@ -85,6 +99,12 @@ class OpenAIProvider(
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
+            if (providerSetting.additionalVideoRoute(Model(modelId = "kling-v1-6", type = ModelType.VIDEO)) == VideoRoute.KLING) {
+                return@withContext listOf("kling-v1", "kling-v1-6", "kling-v2-master", "kling-v2-1", "kling-v2-5-turbo", "kling-v2-6").map {
+                    Model(modelId = it, displayName = it, type = ModelType.VIDEO,
+                        inputModalities = listOf(Modality.TEXT, Modality.IMAGE), outputModalities = listOf(Modality.VIDEO))
+                }
+            }
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models")
@@ -191,15 +211,51 @@ class OpenAIProvider(
         require(params.input.isNotEmpty() || params.images.isNotEmpty()) {
             "Embedding input cannot be empty"
         }
-        require(params.images.isEmpty() || params.model.usesVolcengineMultimodalEmbeddingApi()) {
+        require(params.input.none(String::isBlank)) {
+            "Embedding input cannot contain empty strings"
+        }
+        val configuredModelId = params.model.modelId.trim()
+        val modelId = configuredModelId.substringAfterLast('/').trim()
+        val isVolcengineArk = providerSetting.baseUrl.isVolcengineArkBaseUrl()
+        val modelSupportsImages = params.model.usesVolcengineMultimodalEmbeddingApi() ||
+            Modality.IMAGE in params.model.inputModalities
+        val usesMultimodalEndpoint = params.model.usesVolcengineMultimodalEmbeddingApi() ||
+            (isVolcengineArk && params.model.type == ModelType.EMBEDDING &&
+                (modelSupportsImages || params.images.isNotEmpty()))
+        val usesVolcengineTextEndpoint = params.model.usesVolcengineTextEmbeddingApi() ||
+            (isVolcengineArk && params.model.type == ModelType.EMBEDDING && !usesMultimodalEndpoint)
+        require(params.images.isEmpty() || usesMultimodalEndpoint) {
             "The selected embedding model does not support image inputs"
+        }
+        if (usesMultimodalEndpoint) {
+            if (!params.model.supportsVolcengineMultimodalBatchInput() &&
+                modelId.startsWith("doubao-embedding-vision", ignoreCase = true)
+            ) {
+                require(params.input.size + params.images.size <= 2) {
+                    "This Volcano Ark vision model revision accepts at most two input items"
+                }
+            }
+        }
+        if (isVolcengineArk || usesVolcengineTextEndpoint || usesMultimodalEndpoint) {
+            require(params.input.all { it.toByteArray(Charsets.UTF_8).size <= VOLCENGINE_MAX_INPUT_BYTES }) {
+                "Volcano Ark embedding input must be at most 100000 UTF-8 bytes per text"
+            }
         }
 
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
-        val usesMultimodalEndpoint = params.model.usesVolcengineMultimodalEmbeddingApi()
+        // Ark accepts a plain Model ID or Endpoint ID. Normalise a copied
+        // `models/...` path while retaining slash-qualified IDs for other
+        // OpenAI-compatible providers.
+        val requestModelId = if (isVolcengineArk) modelId else configuredModelId
         val requestBody = json.encodeToString(
             buildJsonObject {
-                put("model", params.model.modelId)
+                put("model", requestModelId)
+                // Ark documents this field explicitly. Keep it off for unrelated
+                // OpenAI-compatible endpoints because some proxies reject unknown
+                // optional fields; custom bodies may still provide their own value.
+                if (usesMultimodalEndpoint) {
+                    put("encoding_format", "float")
+                }
                 if (usesMultimodalEndpoint) {
                     putJsonArray("input") {
                         params.input.forEach { text ->
@@ -217,6 +273,12 @@ class OpenAIProvider(
                             })
                         }
                     }
+                } else if (usesVolcengineTextEndpoint) {
+                    // Ark's text embedding API documents String or Array input. Always
+                    // use the array form so batches and single-item requests behave alike.
+                    putJsonArray("input") {
+                        params.input.forEach { add(JsonPrimitive(it)) }
+                    }
                 } else if (params.input.size == 1) {
                     put("input", params.input.first())
                 } else {
@@ -224,51 +286,219 @@ class OpenAIProvider(
                         params.input.forEach { add(JsonPrimitive(it)) }
                     }
                 }
-                if (!usesMultimodalEndpoint) params.dimensions?.let { put("dimensions", it) }
+                if (!usesMultimodalEndpoint && !usesVolcengineTextEndpoint) {
+                    params.dimensions?.let { put("dimensions", it) }
+                } else if (usesMultimodalEndpoint && params.model.supportsVolcengineMultimodalDimensions()) {
+                    params.dimensions?.let { dimensions ->
+                        require(dimensions == 1024 || dimensions == 2048) {
+                            "Volcano Ark multimodal dimensions must be 1024 or 2048"
+                        }
+                        put("dimensions", dimensions)
+                    }
+                }
             }.mergeCustomBody(params.customBody)
         )
 
+        val endpoint = if (usesMultimodalEndpoint) {
+            "embeddings/multimodal"
+        } else {
+            "embeddings"
+        }
         val request = Request.Builder()
             .url(
-                if (usesMultimodalEndpoint) {
-                    "${providerSetting.baseUrl}/embeddings/multimodal"
-                } else {
-                    "${providerSetting.baseUrl}/embeddings"
-                }
+                "${providerSetting.baseUrl.trimEnd('/')}/$endpoint"
             )
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .tag(me.rerere.ai.provider.ProviderRequestDiagnostics::class.java, me.rerere.ai.provider.ProviderRequestDiagnostics(
+                provider = providerSetting.name, model = configuredModelId, channel = providerSetting.requestChannel(),
+                operation = me.rerere.ai.provider.ProviderRequestOperation.EMBEDDING,
+                parameters = mapOf("input.count" to params.input.size.toString()), requestId = params.requestId))
             .build()
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
-        }
+        client.newCall(request).await().use { response ->
+            if (!response.isSuccessful) {
+                error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
+            }
 
-        val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val data = when (val dataElement = bodyJson["data"]) {
-            is JsonArray -> dataElement
-            is JsonObject -> JsonArray(listOf(dataElement))
-            else -> error("No embedding data in response")
-        }
-        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
+            val bodyStr = response.body?.string() ?: ""
+            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+            val data = when (val dataElement = bodyJson["data"]) {
+                is JsonArray -> dataElement
+                is JsonObject -> JsonArray(listOf(dataElement))
+                else -> error("No embedding data in response")
+            }
+            val responseModel = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: configuredModelId
 
-        val embeddings = data.sortedBy { embeddingJson ->
-            embeddingJson.jsonObject["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                ?: Int.MAX_VALUE
-        }.map { embeddingJson ->
-            val embeddingArray = embeddingJson.jsonObject["embedding"]?.jsonArray
-                ?: error("No embedding in response")
-            embeddingArray.map { it.jsonPrimitive.content.toFloat() }
-        }
+            val embeddings = data.sortedBy { embeddingJson ->
+                embeddingJson.jsonObject["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: Int.MAX_VALUE
+            }.map { embeddingJson ->
+                parseEmbeddingVector(
+                    embeddingJson.jsonObject["embedding"]
+                        ?: error("No embedding in response")
+                )
+            }
+            val expectedCount = if (usesMultimodalEndpoint) 1 else params.input.size
+            require(embeddings.size == expectedCount) {
+                "Embedding provider returned ${embeddings.size} vectors for $expectedCount inputs"
+            }
+            require(embeddings.all { it.isNotEmpty() && it.all(Float::isFinite) }) {
+                "Embedding provider returned an empty or invalid vector"
+            }
 
-        EmbeddingGenerationResult(
-            model = model,
-            embeddings = embeddings
+            EmbeddingGenerationResult(
+                model = responseModel,
+                embeddings = embeddings
+            )
+        }
+    }
+
+    override fun videoGenerationConstraints(
+        providerSetting: ProviderSetting,
+        model: Model,
+    ): VideoGenerationConstraints {
+        val openAISetting = providerSetting as? ProviderSetting.OpenAI
+            ?: return VideoGenerationConstraints(supportsGeneration = false)
+        if (openAISetting.miniMaxVideoSetting(model) != null) return miniMaxVideoConstraints(model)
+        openAISetting.additionalVideoRoute(model)?.let { return additionalVideoConstraints(it, model) }
+        return if (openAISetting.supportsArkSeedance(model)) {
+            seedanceVideoGenerationConstraints(model)
+        } else {
+            VideoGenerationConstraints(supportsGeneration = false)
+        }
+    }
+
+    override suspend fun createVideoGenerationTask(
+        providerSetting: ProviderSetting,
+        params: VideoGenerationParams,
+    ): VideoGenerationTaskSnapshot = withContext(Dispatchers.IO) {
+        val setting = providerSetting as? ProviderSetting.OpenAI
+            ?: error("Expected OpenAI provider setting")
+        setting.miniMaxVideoSetting(params.model)?.let { miniMax ->
+            return@withContext MiniMaxVideoAPI(client).create(miniMax, params.copy(
+                referenceImages = params.referenceImages.map { it.materializeForArk() }))
+        }
+        setting.additionalVideoRoute(params.model)?.let { route ->
+            val bounded = params.constrained(additionalVideoConstraints(route, params.model))
+            return@withContext AdditionalVideoAPI(client).create(setting, route,
+                bounded.copy(referenceImages = bounded.referenceImages.map { it.materializeForArk() }),
+                keyRoulette.next(setting.apiKey, setting.id.toString()))
+        }
+        check(setting.supportsArkSeedance(params.model)) {
+            "Seedance video generation requires a Volcengine Ark video model"
+        }
+        val materializedParams = params.copy(
+            referenceImages = params.referenceImages.map { it.materializeForArk() },
         )
+        val body = buildSeedanceVideoRequestBody(
+            params = materializedParams,
+            constraints = videoGenerationConstraints(setting, params.model),
+        )
+        val key = keyRoulette.next(setting.apiKey, setting.id.toString())
+        val request = Request.Builder()
+            .url(setting.arkVideoTaskUrl())
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                body.seedanceVideoDiagnostics(
+                    providerSetting = setting,
+                    operation = ProviderRequestOperation.VIDEO_GENERATION_CREATE,
+                ),
+            )
+            .headers(params.customHeaders.toHeaders())
+            .header("Authorization", "Bearer $key")
+            .header("Content-Type", "application/json")
+            .post(json.encodeToString(body).toRequestBody("application/json".toMediaType()))
+            .configureReferHeaders(setting.baseUrl)
+            .build()
+
+        client.newCall(request).awaitAndUse { response ->
+            if (!response.isSuccessful) throw openAIVideoRequestFailure("create video task", response)
+            ensureVideoTaskResponseSize(response.body.contentLength())
+            parseSeedanceVideoTask(json.parseToJsonElement(response.body.string()).jsonObject)
+        }
+    }
+
+    override suspend fun getVideoGenerationTask(
+        providerSetting: ProviderSetting,
+        model: Model,
+        taskId: String,
+    ): VideoGenerationTaskSnapshot = withContext(Dispatchers.IO) {
+        val setting = providerSetting as? ProviderSetting.OpenAI
+            ?: error("Expected OpenAI provider setting")
+        setting.miniMaxVideoSetting(model)?.let { return@withContext MiniMaxVideoAPI(client).get(it, model, taskId) }
+        setting.additionalVideoRoute(model)?.let { route ->
+            return@withContext AdditionalVideoAPI(client).get(setting, route, model, taskId,
+                keyRoulette.next(setting.apiKey, setting.id.toString()))
+        }
+        check(setting.supportsArkSeedance(model)) {
+            "Seedance video generation requires a Volcengine Ark video model"
+        }
+        require(taskId.isNotBlank()) { "Video task id cannot be empty" }
+        val key = keyRoulette.next(setting.apiKey, setting.id.toString())
+        val diagnosticsBody = buildJsonObject { put("model", model.modelId) }
+        val request = Request.Builder()
+            .url(setting.arkVideoTaskUrl(taskId))
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                diagnosticsBody.seedanceVideoDiagnostics(
+                    providerSetting = setting,
+                    operation = ProviderRequestOperation.VIDEO_GENERATION_STATUS,
+                    taskId = taskId,
+                ),
+            )
+            .headers(model.customHeaders.toHeaders())
+            .header("Authorization", "Bearer $key")
+            .get()
+            .configureReferHeaders(setting.baseUrl)
+            .build()
+
+        client.newCall(request).awaitAndUse { response ->
+            if (!response.isSuccessful) throw openAIVideoRequestFailure("get video task", response)
+            ensureVideoTaskResponseSize(response.body.contentLength())
+            parseSeedanceVideoTask(
+                body = json.parseToJsonElement(response.body.string()).jsonObject,
+                fallbackTaskId = taskId,
+                retryAfterMillis = response.header("Retry-After")?.toLongOrNull()?.times(1_000L),
+            )
+        }
+    }
+
+    override suspend fun cancelVideoGenerationTask(
+        providerSetting: ProviderSetting,
+        model: Model,
+        taskId: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val setting = providerSetting as? ProviderSetting.OpenAI
+            ?: error("Expected OpenAI provider setting")
+        check(setting.supportsArkSeedance(model)) {
+            "Seedance video generation requires a Volcengine Ark video model"
+        }
+        require(taskId.isNotBlank()) { "Video task id cannot be empty" }
+        val key = keyRoulette.next(setting.apiKey, setting.id.toString())
+        val diagnosticsBody = buildJsonObject { put("model", model.modelId) }
+        val request = Request.Builder()
+            .url(setting.arkVideoTaskUrl(taskId))
+            .tag(
+                ProviderRequestDiagnostics::class.java,
+                diagnosticsBody.seedanceVideoDiagnostics(
+                    providerSetting = setting,
+                    operation = ProviderRequestOperation.VIDEO_GENERATION_CANCEL,
+                    taskId = taskId,
+                ),
+            )
+            .headers(model.customHeaders.toHeaders())
+            .header("Authorization", "Bearer $key")
+            .delete()
+            .configureReferHeaders(setting.baseUrl)
+            .build()
+
+        client.newCall(request).awaitAndUse { response ->
+            if (response.isSuccessful || response.code == 404) return@awaitAndUse true
+            throw openAIVideoRequestFailure("cancel video task", response)
+        }
     }
 
     override suspend fun generateImage(
@@ -376,6 +606,8 @@ class OpenAIProvider(
                 val explicitOptions = params.explicitImageOptions(constraints)
                 val advancedOptions = params.advancedImageOptions(constraints)
                 params.customBody
+                    .filter { it.enabled && it.key.isNotBlank() }
+                    .map { it.copy(key = it.key.trim()) }
                     .filter { customBody ->
                         val field = customBody.key.lowercase()
                         field !in RESERVED_IMAGE_EDIT_FIELDS &&
@@ -504,6 +736,38 @@ class OpenAIProvider(
         }
     }
 
+    private suspend fun VideoReferenceImage.materializeForArk(): VideoReferenceImage {
+        val source = url.trim()
+        if (!source.startsWith("file:", ignoreCase = true) &&
+            !source.startsWith("content:", ignoreCase = true)
+        ) return copy(url = source)
+        val appContext = context ?: error("Local video reference images require Android context")
+        val uri = Uri.parse(source)
+        val mimeType = appContext.contentResolver.getType(uri)
+            ?: URLConnection.guessContentTypeFromName(uri.lastPathSegment.orEmpty())
+            ?: "image/jpeg"
+        require(mimeType.startsWith("image/")) { "Video reference must be an image" }
+        val encoded = appContext.contentResolver.openInputStream(uri)?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count == 0) continue
+                total += count
+                require(total <= MAX_VIDEO_REFERENCE_IMAGE_BYTES) {
+                    "Video reference image exceeds 20 MB"
+                }
+                output.write(buffer, 0, count)
+            }
+            require(total > 0L) { "Video reference image is empty" }
+            Base64.getEncoder().encodeToString(output.toByteArray())
+        } ?: error("Unable to open video reference image")
+        return copy(url = "data:$mimeType;base64,$encoded")
+    }
+
     private fun ensureImageResponseSize(contentLength: Long) {
         require(contentLength < 0 || contentLength <= MAX_IMAGE_RESPONSE_CHARS) {
             "Image response is too large"
@@ -560,6 +824,7 @@ class OpenAIProvider(
         val isXaiImagineImage = normalizedModel.contains("grok-imagine-image")
         val isXaiImage2 = isXaiImagineImage && normalizedModel.contains("grok-imagine-image-2")
         val isGptImage2 = GPT_IMAGE_2_MODEL_PATTERN.containsMatchIn(normalizedModel)
+        val isGptImage25 = GPT_IMAGE_25_MODEL_PATTERN.containsMatchIn(normalizedModel)
         val isGptImage = GPT_IMAGE_MODEL_PATTERN.containsMatchIn(normalizedModel)
         val isDallE3 = normalizedModel.contains("dall-e-3")
         val isDallE2 = normalizedModel.contains("dall-e-2")
@@ -590,6 +855,7 @@ class OpenAIProvider(
         val supportedSizes = when {
             isXaiImage -> XAI_IMAGE_ASPECT_RATIOS
             isSeedream -> SEEDREAM_IMAGE_SIZES
+            isGptImage25 -> GPT_IMAGE_25_PRESET_SIZES
             isGptImage2 -> GPT_IMAGE_2_PRESET_SIZES
             isGptImage -> GPT_IMAGE_SIZES
             isDallE3 -> DALL_E_3_SIZES
@@ -610,6 +876,7 @@ class OpenAIProvider(
             supportsOutputCount = !isSeedream,
             maxReferenceImages = when {
                 !supportsEdit -> 0
+                isGptImage25 -> 10
                 isGptImage -> 16
                 isEditableSeedream -> 10
                 isXaiImagineImage -> 3
@@ -618,17 +885,26 @@ class OpenAIProvider(
             },
             supportsSize = true,
             supportedSizes = supportedSizes,
-            supportsCustomSize = isGptImage2 || isSeedream || supportedSizes == null,
-            groupSizesByAspectRatio = isGptImage2,
-            customSizeMultiple = if (isGptImage2) 16 else null,
+            supportsCustomSize = when {
+            isGptImage25 -> true
+                else -> isGptImage2 || isSeedream || supportedSizes == null
+            },
+            groupSizesByAspectRatio = isGptImage2 || isGptImage25,
+            customSizeMultiple = if (isGptImage2 || isGptImage25) 16 else null,
             customSizeMaxDimension = when {
+                isGptImage25 -> 3_840
                 isGptImage2 -> 3_840
                 isSeedream -> 4_096
                 else -> null
             },
-            customSizeMinPixels = if (isGptImage2) GPT_IMAGE_2_MIN_PIXELS else null,
-            customSizeMaxPixels = if (isGptImage2) GPT_IMAGE_2_MAX_PIXELS else null,
+            customSizeMinPixels = if (isGptImage2 && !isGptImage25) GPT_IMAGE_2_MIN_PIXELS else null,
+            customSizeMaxPixels = when {
+                isGptImage25 -> GPT_IMAGE_25_MAX_PIXELS
+                isGptImage2 -> GPT_IMAGE_2_MAX_PIXELS
+                else -> null
+            },
             customSizeMaxAspectRatio = when {
+                isGptImage25 -> 3
                 isGptImage2 -> 3
                 isSeedream -> 16
                 else -> null
@@ -636,6 +912,7 @@ class OpenAIProvider(
             sizeRequestField = if (isXaiImage) "aspect_ratio" else "size",
             supportedQualityValues = when {
                 isXaiImage2 -> XAI_IMAGE_2_QUALITY
+                isGptImage25 -> GPT_IMAGE_25_QUALITY
                 isGptImage -> GPT_IMAGE_QUALITY
                 isDallE3 -> DALL_E_3_QUALITY
                 isDallE2 -> DALL_E_2_QUALITY
@@ -648,6 +925,7 @@ class OpenAIProvider(
                 else -> emptySet()
             },
             supportedBackgroundValues = when {
+                isGptImage25 -> GPT_IMAGE_25_BACKGROUNDS
                 isGptImage2 -> GPT_IMAGE_2_BACKGROUNDS
                 isGptImage -> GPT_IMAGE_BACKGROUNDS
                 else -> emptySet()
@@ -719,6 +997,7 @@ class OpenAIProvider(
                     "quality", "output_format", "output_compression", "background", "input_fidelity",
                     "thinking", "resolution", "stream", "partial_images",
                 )
+                isGptImage25 -> setOf("thinking", "response_format", "input_fidelity", "stream", "partial_images")
                 isGptImage2 -> setOf("thinking", "response_format", "input_fidelity", "stream", "partial_images")
                 isGptImage && normalizedModel.contains("mini") ->
                     setOf("thinking", "response_format", "input_fidelity", "stream", "partial_images")
@@ -741,6 +1020,7 @@ class OpenAIProvider(
     companion object {
         private const val MAX_GENERATED_IMAGE_BYTES = 64L * 1024L * 1024L
         private const val MAX_IMAGE_RESPONSE_CHARS = 96L * 1024L * 1024L
+        private const val MAX_VIDEO_REFERENCE_IMAGE_BYTES = 20L * 1024L * 1024L
         private const val GPT_IMAGE_MAX_INPUT_BYTES = 50L * 1024L * 1024L
         private const val DALL_E_2_MAX_INPUT_BYTES = 4L * 1024L * 1024L
         private const val IMAGE_GENERATION_TEMP_DIRECTORY = "image-generation"
@@ -781,19 +1061,27 @@ class OpenAIProvider(
             "1536x512", "2304x768", "3072x1024", "3456x1152", "3840x1280",
             "512x1536", "768x2304", "1024x3072", "1152x3456", "1280x3840",
         )
+        private val GPT_IMAGE_25_PRESET_SIZES = GPT_IMAGE_2_PRESET_SIZES
         private const val GPT_IMAGE_2_MIN_PIXELS = 655_360L
         private const val GPT_IMAGE_2_MAX_PIXELS = 8_294_400L
+        private const val GPT_IMAGE_25_MAX_PIXELS = 8_294_400L
         private val GPT_IMAGE_QUALITY = setOf("auto", "low", "medium", "high")
+        private val GPT_IMAGE_25_QUALITY = setOf("auto", "low", "medium", "high", "xhigh", "max")
         private val GPT_IMAGE_OUTPUT_FORMATS = setOf("png", "jpeg", "webp")
         private val STABLE_IMAGE_OUTPUT_FORMATS = setOf("png", "jpeg", "webp")
         private val OPENAI_IMAGE_MODERATION = setOf("auto", "low")
         private val OPENAI_IMAGE_INPUT_FIDELITY = setOf("low", "high")
         private val GPT_IMAGE_2_BACKGROUNDS = setOf("auto", "opaque")
+        // OpenAI's current image API reference documents transparent for the 2.5 models.
+        private val GPT_IMAGE_25_BACKGROUNDS = setOf("auto", "transparent", "opaque")
         private val GPT_IMAGE_BACKGROUNDS = setOf("auto", "opaque", "transparent")
         private val GPT_IMAGE_SIZES = linkedSetOf("auto", "1024x1024", "1536x1024", "1024x1536")
         private val GPT_IMAGE_MODEL_PATTERN = Regex("(?:^|[^a-z0-9])gpt[^a-z0-9]*image")
         private val GPT_IMAGE_2_MODEL_PATTERN = Regex(
             "(?:^|[^a-z0-9])gpt[^a-z0-9]*image[^a-z0-9]*2(?:[^0-9]|$)"
+        )
+        private val GPT_IMAGE_25_MODEL_PATTERN = Regex(
+            "(?:^|[^a-z0-9])gpt[^a-z0-9]*image[^a-z0-9]*2[._-]?5(?:[._-]?(?:flare|sunburst))?(?:[^a-z0-9]|$)"
         )
         private val DALL_E_3_SIZES = linkedSetOf("auto", "1024x1024", "1792x1024", "1024x1792")
         private val DALL_E_2_SIZES = linkedSetOf("auto", "256x256", "512x512", "1024x1024")
@@ -1003,9 +1291,10 @@ private fun ImageGenerationConstraints.normalizedSize(requestedSize: String): St
 }
 
 private fun ImageGenerationConstraints.acceptsImageOption(customBody: CustomBody): Boolean {
-    val key = customBody.key.lowercase()
+    if (!customBody.enabled || customBody.key.isBlank()) return false
+    val key = customBody.key.trim().lowercase()
     if (key in blockedImageOptionKeys) return false
-    val allowedValues = when (customBody.key.lowercase()) {
+    val allowedValues = when (key) {
         "quality" -> supportedQualityValues.takeIf { it.isNotEmpty() }
         "output_format" -> supportedOutputFormats
             .takeIf { formats -> formats.any { it in IMAGE_FILE_FORMATS } }
@@ -1201,7 +1490,7 @@ private fun ImageEditParams.requestedImageFileFormat(constraints: ImageGeneratio
         ?: if (constraints.usesJsonImageEdit) "jpeg" else "png"
 
 private fun List<CustomBody>.lastValidImageFileFormat(constraints: ImageGenerationConstraints): String? =
-    lastOrNull { it.key.equals("output_format", ignoreCase = true) && constraints.acceptsImageOption(it) }
+    lastOrNull { it.key.trim().equals("output_format", ignoreCase = true) && constraints.acceptsImageOption(it) }
         ?.value
         ?.let { it as? JsonPrimitive }
         ?.contentOrNull
@@ -1291,5 +1580,61 @@ private val RESERVED_SEEDREAM_EDIT_FIELDS =
     setOf("model", "prompt", "n", "image", "images", "image[]", "size", "aspect_ratio")
 private const val IMAGE_EDIT_COPY_BUFFER_BYTES = 256 * 1024
 private const val MAX_IMAGE_ERROR_RESPONSE_BYTES = 64L * 1024L
+private const val MAX_VIDEO_ERROR_RESPONSE_BYTES = 64L * 1024L
+private const val MAX_VIDEO_TASK_RESPONSE_BYTES = 1L * 1024L * 1024L
+private const val VOLCENGINE_MAX_INPUT_BYTES = 100_000
 
 internal fun inferOpenAIModelType(modelId: String): ModelType = inferModelTypeFromId(modelId)
+
+/** Parses both OpenAI's one-dimensional vectors and Ark's nested multimodal vectors. */
+internal fun parseEmbeddingVector(element: JsonElement): List<Float> {
+    val values = when (element) {
+        is JsonArray -> {
+            // Ark multimodal responses currently return [[...]] while the text API
+            // returns [...]. Flatten exactly one wrapper and leave malformed nesting
+            // to the validation below.
+            if (element.size == 1 && element.firstOrNull() is JsonArray) {
+                element.first().jsonArray
+            } else {
+                element
+            }
+        }
+
+        is JsonPrimitive -> {
+            val encoded = element.contentOrNull?.takeIf(String::isNotBlank)
+                ?: error("Embedding value is empty")
+            val bytes = runCatching { Base64.getDecoder().decode(encoded) }
+                .getOrElse { error("Unsupported embedding value") }
+            require(bytes.isNotEmpty() && bytes.size % Float.SIZE_BYTES == 0) {
+                "Base64 embedding has an invalid byte length"
+            }
+            // OpenAI-compatible APIs encode base64 embeddings as IEEE-754 float32
+            // values in little-endian order.
+            val buffer = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            return List(bytes.size / Float.SIZE_BYTES) { buffer.float }
+        }
+
+        else -> error("Embedding value must be an array or base64 string")
+    }
+    return values.map { value ->
+        value.jsonPrimitive.contentOrNull?.toFloatOrNull()
+            ?: error("Embedding value is not numeric")
+    }
+}
+
+private fun ensureVideoTaskResponseSize(contentLength: Long) {
+    require(contentLength < 0 || contentLength <= MAX_VIDEO_TASK_RESPONSE_BYTES) {
+        "Video task response is too large"
+    }
+}
+
+internal fun openAIVideoRequestFailure(operation: String, response: Response): Throwable {
+    val responseDetail = runCatching {
+        response.peekBody(MAX_VIDEO_ERROR_RESPONSE_BYTES).string().trim()
+    }.getOrNull()
+    val detail = buildString {
+        append("Failed to ").append(operation).append(": HTTP ").append(response.code)
+        responseDetail?.takeIf(String::isNotEmpty)?.let { append(": ").append(it) }
+    }
+    return providerRequestFailure(response = response, cause = null, detail = detail)
+}

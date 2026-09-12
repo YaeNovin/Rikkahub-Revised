@@ -27,11 +27,26 @@ class ModelRegistryTest {
     fun testCompactVendorIdsRetainReasoningCapabilities() {
         val reasoning = listOf(ModelAbility.TOOL, ModelAbility.REASONING)
         assertEquals("gpt-5-4", "GPT54".normalizeCompactVendorModelId())
+        assertEquals("gpt-6-astra", "GPT6Astra".normalizeCompactVendorModelId())
+        assertEquals("gemini-3-8-flash", "Gemini38Flash".normalizeCompactVendorModelId())
+        assertEquals("qwen3-8flash", "Qwen38Flash".normalizeCompactVendorModelId())
         assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("GPT54"))
         assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("Gemini35-Flash"))
         assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("Claude46-Sonnet"))
         assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("Qwen38-Max"))
         assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("DeepSeekR1"))
+    }
+
+    @Test
+    fun testGpt6AstraAliasesAndQwen38Modalities() {
+        val reasoning = listOf(ModelAbility.TOOL, ModelAbility.REASONING)
+        val vision = listOf(Modality.TEXT, Modality.IMAGE)
+
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("gpt-6-astra"))
+        assertEquals(reasoning, ModelRegistry.MODEL_ABILITIES.getData("ChatGPT 6-Astra"))
+        assertEquals(vision, ModelRegistry.MODEL_INPUT_MODALITIES.getData("gpt-6-astra"))
+        assertEquals(vision, ModelRegistry.MODEL_INPUT_MODALITIES.getData("qwen3.8-flash"))
+        assertEquals(vision, ModelRegistry.MODEL_INPUT_MODALITIES.getData("qwen3.8-max-0902"))
     }
 
     @Test
@@ -57,7 +72,9 @@ class ModelRegistryTest {
         assertTrue(ModelRegistry.GEMINI_3_SERIES.match("gemini-3-pro-preview"))
         assertTrue(ModelRegistry.GEMINI_3_SERIES.match("gemini-3.1-flash-image-preview"))
         assertTrue(ModelRegistry.GEMINI_3_7_FLASH.match("gemini-3.7-flash"))
+        assertTrue(ModelRegistry.GEMINI_3_8_FLASH.match("gemini-3.8-flash"))
         assertTrue(ModelRegistry.GEMINI_3_SERIES.match("vendor/gemini-3.7-flash"))
+        assertTrue(ModelRegistry.GEMINI_3_SERIES.match("vendor/gemini-3.8-flash"))
         assertTrue(ModelRegistry.GEMINI_3_SERIES.match("vendor/gemini-3.5-flash"))
         assertFalse(ModelRegistry.GEMINI_3_SERIES.match("gemini-2.5-pro"))
     }
@@ -172,6 +189,14 @@ class ModelRegistryTest {
         assertEquals(
             reasonerAbilities,
             ModelRegistry.MODEL_ABILITIES.getData("deepseek-v4-pro")
+        )
+        assertEquals(
+            reasonerAbilities,
+            ModelRegistry.MODEL_ABILITIES.getData("deepseek-v4.1-flash")
+        )
+        assertEquals(
+            listOf(Modality.TEXT, Modality.IMAGE),
+            ModelRegistry.MODEL_INPUT_MODALITIES.getData("deepseek-flash")
         )
     }
 }

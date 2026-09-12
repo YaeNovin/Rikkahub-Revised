@@ -33,6 +33,26 @@ class OpenAIImageRequestTest {
     private val provider = OpenAIProvider(OkHttpClient())
 
     @Test
+    fun `GPT Image 2 point 5 official options are conservative and shared`() {
+        listOf("gpt-image-2.5-flare", "gpt-image-2.5-sunburst").forEach { modelId ->
+            val constraints = provider.imageGenerationConstraints(ProviderSetting.OpenAI(), Model(modelId = modelId))
+            assertTrue("model=$modelId", constraints.supportsCustomSize)
+            assertEquals("model=$modelId", 16, constraints.customSizeMultiple)
+            assertEquals("model=$modelId", 3_840, constraints.customSizeMaxDimension)
+            assertEquals("model=$modelId", 3, constraints.customSizeMaxAspectRatio)
+            assertTrue("model=$modelId", constraints.supportedSizes.orEmpty().containsAll(setOf(
+                "1024x1024", "1536x1536", "2048x2048", "2880x2880",
+                "1024x1536", "2048x3072", "3840x2160", "2160x3840",
+                "1536x512", "512x1536",
+            )))
+            assertEquals("model=$modelId", setOf("auto", "transparent", "opaque"), constraints.supportedBackgroundValues)
+            assertTrue(constraints.supportedQualityValues.containsAll(setOf("auto", "low", "medium", "high", "xhigh", "max")))
+            assertTrue(constraints.supportedOutputFormats.containsAll(setOf("png", "jpeg", "webp")))
+            assertTrue(constraints.supportsOutputCompression)
+        }
+    }
+
+    @Test
     fun `image request failure preserves provider response detail and retry metadata`() {
         val response = Response.Builder()
             .request(Request.Builder().url("https://api.openai.com/v1/images/edits").build())
@@ -609,6 +629,10 @@ class OpenAIImageRequestTest {
                     promptEnhancement = true,
                     promptEnhancementMode = "agent",
                     imageThinking = true,
+                    customBody = listOf(
+                        CustomBody("disabled_field", JsonPrimitive("should-not-send"), enabled = false),
+                        CustomBody(" active_field ", JsonPrimitive("active-value")),
+                    ),
                 ),
             ).toList()
             val request = requireNotNull(capturedRequest)
@@ -618,6 +642,9 @@ class OpenAIImageRequestTest {
             assertFalse(body.contains("prompt_extend_mode"))
             assertFalse(body.contains("agent"))
             assertTrue(body.contains("enable_thinking"))
+            assertFalse(body.contains("disabled_field"))
+            assertFalse(body.contains("should-not-send"))
+            assertTrue(body.contains("name=\"active_field\""))
         } finally {
             imageFile.delete()
         }
