@@ -28,7 +28,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`2.4.8-revised.7`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.7) |
+| 当前版本 | [`2.4.8-revised.8`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.8) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -49,10 +49,9 @@ Rikkahub Revised 的正式 APK 仅通过本仓库的
 | `app-universal-release.apk` | 同时包含 ARM64 与 x86_64 原生库的通用备用包 |
 | `app-release.aab` | 应用商店或分发平台使用的 App Bundle |
 
-Release 资产文件名可能包含版本后缀。例如当前 `.7` 版本发布的 ARM64 安装包为
-`app-arm64-v8a-release-2.4.8-revised.7.apk`；应用内更新功能会根据文件名识别设备 ABI。
+Release 资产文件名可能包含版本后缀。当前 `.8` 版本使用标准架构文件名；应用内更新功能会根据文件名识别设备 ABI。
 
-当前 `2.4.8-revised.7` Release 已包含三个 APK 架构包、AAB 和 `SHA256SUMS.txt`。
+当前 `2.4.8-revised.8` Release 已包含三个 APK 架构包、AAB 和 `SHA256SUMS.txt`。
 应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
 APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
 流程中单独核验。
@@ -73,7 +72,7 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-### 当前正式版：2.4.8-revised.7
+### 当前正式版：2.4.8-revised.8
 
 - 新增 OrcaRouter 供应商，并提供官网和文档链接。
 - 优化按模型与协议适配的参数、思考深度、工具调用及第三方兼容接口。
@@ -105,7 +104,7 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - 独立应用 ID、隔离的 URI Scheme 与 Provider Authority，以及默认关闭的
   Firebase 集成。
 
-### 已包含在重新构建的 2.4.8-revised.7 包中的源码修改
+### 2.4.8-revised.8 中包含的源码修改
 
 - 增加 DeepSeek V4.1-Flash 模型识别，支持规范名称 `deepseek-flash` 与旧别名，
   并补齐 1M 上下文、384K 输出上限、视觉输入、思考强度映射和工具调用保护。
@@ -116,9 +115,9 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - 增加按对话记忆控制、记忆生命周期、上下文统计、灵感卡片、聊天建议、请求日志
   格式化及外观/文字配色优化。
 
-本次安装包基于分组提交后的最新源码重新构建，继续使用版本号 183 和原有正式版
+本次安装包基于分组提交后的最新源码重新构建，使用版本号 184 和原有正式版
 签名证书，支持覆盖更新。完整双语更新说明见
-[release-notes-2.4.8-revised.7.md](docs/release-notes-2.4.8-revised.7.md)。
+[release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md)。
 
 完整的修改记录、上游对比和发行要求见
 [MODIFICATIONS.md](docs/MODIFICATIONS.md)。

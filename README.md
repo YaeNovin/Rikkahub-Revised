@@ -30,7 +30,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`2.4.8-revised.7`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.7) |
+| Current release | [`2.4.8-revised.8`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.8) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -52,11 +52,11 @@ Official Rikkahub Revised APKs are published only through this repository's
 | `app-release.aab` | App-store or distribution-platform bundle |
 
 Release asset filenames may include the release version suffix. For example,
-the current `.7` release publishes
-`app-arm64-v8a-release-2.4.8-revised.7.apk`; the updater detects the device ABI
+the current `.8` release publishes
+`app-arm64-v8a-release.apk`; the updater detects the device ABI
 from the asset name.
 
-The current `2.4.8-revised.7` Release contains the three APK variants, the AAB,
+The current `2.4.8-revised.8` Release contains the three APK variants, the AAB,
 and `SHA256SUMS.txt`. The in-app updater reads the latest public release from this repository and
 offers an APK compatible with the device ABI. Release descriptions contain only
 user-facing updates and fixes; package integrity and signing continuity are
@@ -82,7 +82,7 @@ repository.
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
 
-### Current Formal Release: 2.4.8-revised.7
+### Current Formal Release: 2.4.8-revised.8
 
 - Added the OrcaRouter provider with official website and documentation links.
 - Improved model- and protocol-aware parameters, reasoning depth, tool calls,
@@ -127,7 +127,7 @@ or changes the following areas:
 - A separate application ID, isolated URI schemes and authorities, and
   opt-in Firebase integration.
 
-### Source changes included in the refreshed 2.4.8-revised.7 package
+### Source changes included in 2.4.8-revised.8
 
 - Added DeepSeek V4.1-Flash model recognition through the canonical
   `deepseek-flash` name and legacy aliases, including 1M context, 384K output
@@ -143,9 +143,9 @@ or changes the following areas:
   formatting, and appearance/text-color improvements.
 
 The package was rebuilt from the current source after the grouped commits. It
-keeps version code 183 and the existing release certificate for in-place updates.
+uses version code 184 and the existing release certificate for in-place updates.
 The complete bilingual release notes are in
-[release-notes-2.4.8-revised.7.md](docs/release-notes-2.4.8-revised.7.md).
+[release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md).
 
 For the auditable modification record, upstream comparison, and release
 requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).

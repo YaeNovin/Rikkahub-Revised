@@ -6,7 +6,7 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.7`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.8`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
@@ -26,8 +26,8 @@ documented checks and bundled asset build can be reproduced.
 通用回归脚本与 KaTeX 构建适配器随源码保留，便于复现文档中的检查。
 
 逐条双语更新记录见 [2026-09-12 源码更新](changes-2026-09-12.md)，完整文档入口见
-[文档索引](../README.md)。本次源码已重新构建并刷新 `2.4.8-revised.7` Release 的 APK/AAB 资产；
-逐条中文后英文的发布说明见 [release-notes-2.4.8-revised.7.md](release-notes-2.4.8-revised.7.md)。
+[文档索引](../README.md)。本次源码已递增版本并发布 `2.4.8-revised.8` 的 APK/AAB 资产；
+逐条中文后英文的发布说明见 [release-notes-2.4.8-revised.8.md](release-notes-2.4.8-revised.8.md)。
 
 ### Latest provider and interaction additions / 最新 Provider 与交互新增
 
@@ -57,7 +57,7 @@ documented checks and bundled asset build can be reproduced.
   许可证；完善全屏预览定位、源码/渲染切换、GitHub 仓库卡片、请求日志格式化、
   记忆诊断、灵感卡片和自适应外观/文字配色。
 
-## Previous 2.4.8-revised.7 Upload / 之前的 .7 版本上传
+## 2.4.8-revised.7 Historical Release / .7 历史版本
 
 - English: Added OrcaRouter as an OpenAI-compatible provider, including its
   endpoint, website, documentation links, and localized provider descriptions.
@@ -74,10 +74,15 @@ documented checks and bundled asset build can be reproduced.
   WebView previews, image-generation settings, and Android compatibility paths;
   focused regression tests were added alongside the fixes.
   中文：修复聊天加载与流式恢复、富内容渲染、WebView 预览、生图设置及 Android 兼容性路径问题，并同步增加针对性回归测试。
-- English: Rebuilt and refreshed the signed `2.4.8-revised.7` Release from the
-  current grouped source, with ARM64, x86_64, Universal APKs, an AAB, and checksums.
-  中文：已基于分组提交后的最新源码重新构建并刷新签名正式版 `2.4.8-revised.7`，
-  Release 包含 ARM64、x86_64、Universal APK、AAB 和校验文件。
+- English: The original signed `2.4.8-revised.7` Release is restored with its
+  ARM64 APK and original bilingual notes.
+  中文：原始签名正式版 `2.4.8-revised.7` 已恢复为原 ARM64 安装包和原双语说明。
+
+## 2.4.8-revised.8 Release / .8 正式版本
+
+中文更新说明与英文更新说明按语言分段记录于
+[release-notes-2.4.8-revised.8.md](release-notes-2.4.8-revised.8.md)。该版本版本码为
+184，使用最新分组源码构建，并提供 ARM64、x86_64、Universal APK、AAB 与 SHA256 校验文件。
 
 ## 2.4.8-revised.7 Release Notes / 发布说明
 
@@ -294,7 +299,7 @@ scripts, license, this modification notice, and applicable third-party notices.
 
 ## Build and Signing Notes
 
-- `release` uses `2.4.8-revised.7` and signing values
+- `release` uses `2.4.8-revised.8` and signing values
   from ignored `local.properties` when supplied.
 - The release application ID is `me.rerere.rikkahub.revised`; Debug and QA add
   `.debug` and `.qa` respectively so test builds do not replace a signed release.
@@ -322,7 +327,7 @@ https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest
 
 GitHub `404` is treated as no published update. Release tags accept an optional
 leading `v`; historical Revised releases use the `v2.4.8-revised.N` form, while
-the current `2.4.8-revised.7` release omits the prefix. Each distributed update
+  the current `2.4.8-revised.8` release omits the prefix. Each distributed update
 must increment both `N` and Android `versionCode`. The release must be a
 non-draft, non-prerelease GitHub Release so it is returned by `/releases/latest`.
 
@@ -331,7 +336,7 @@ matching ABI from `Build.SUPPORTED_ABIS` plus the Universal fallback and filters
 out incompatible architectures. Asset names may include a version suffix; the
 updater identifies the ABI from the filename. The current ARM64 asset is:
 
-- `app-arm64-v8a-release-2.4.8-revised.7.apk`
+- `app-arm64-v8a-release.apk`
 
 Android still enforces signing continuity during installation. Every public APK
 must use the certificate recorded in `RELEASE_SIGNING.md`. Release descriptions
