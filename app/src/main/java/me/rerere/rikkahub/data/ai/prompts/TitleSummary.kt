@@ -7,7 +7,7 @@ internal val DEFAULT_TITLE_PROMPT = """
     2. Do not use punctuation or other special symbols
     3. Reply directly with the title
     4. Summarize using {locale} language
-    5. The title should not exceed 10 characters
+    5. The title should not exceed {max_title_length} characters
 
     <content>
     {content}

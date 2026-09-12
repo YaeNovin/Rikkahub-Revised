@@ -60,6 +60,7 @@ internal fun Conversation.shouldResumeInterruptedResponseAt(message: UIMessage):
  */
 internal fun UIMessage.markInterruptedToolsForContinuation(
     forcePendingApprovals: Boolean = false,
+    cancelPendingApprovals: Boolean = false,
 ): UIMessage {
     if (role != MessageRole.ASSISTANT) return this
 
@@ -72,8 +73,22 @@ internal fun UIMessage.markInterruptedToolsForContinuation(
                     (forcePendingApprovals && part.approvalState is ToolApprovalState.Pending)) -> {
                 changed = true
                 part.copy(
-                    output = listOf(UIMessagePart.Text(INTERRUPTED_CLIENT_TOOL_OUTPUT)),
-                    approvalState = ToolApprovalState.Denied(INTERRUPTED_TOOL_REASON),
+                    output = listOf(
+                        UIMessagePart.Text(
+                            if (cancelPendingApprovals && part.approvalState is ToolApprovalState.Pending) {
+                                CANCELLED_CLIENT_TOOL_OUTPUT
+                            } else {
+                                INTERRUPTED_CLIENT_TOOL_OUTPUT
+                            }
+                        )
+                    ),
+                    approvalState = if (
+                        cancelPendingApprovals && part.approvalState is ToolApprovalState.Pending
+                    ) {
+                        ToolApprovalState.Cancelled(CANCELLED_TOOL_REASON)
+                    } else {
+                        ToolApprovalState.Denied(INTERRUPTED_TOOL_REASON)
+                    },
                 )
             }
 
@@ -195,3 +210,6 @@ private const val INTERRUPTED_TOOL_REASON =
 private const val LEGACY_CANCELLED_TOOL_REASON = "Generation cancelled by user"
 private const val INTERRUPTED_CLIENT_TOOL_OUTPUT =
     "{\"status\":\"interrupted\",\"error\":\"$INTERRUPTED_TOOL_REASON\"}"
+private const val CANCELLED_TOOL_REASON = "Generation cancelled by user"
+private const val CANCELLED_CLIENT_TOOL_OUTPUT =
+    "{\"status\":\"cancelled\",\"error\":\"$CANCELLED_TOOL_REASON\"}"

@@ -69,109 +69,120 @@ data class KeywordExpressionResult(
     val error: String? = null,
 )
 
-fun PromptInjection.RegexInjection.evaluateKeywords(context: String): KeywordExpressionResult {
-    if (constantActive) return KeywordExpressionResult(true, emptyList())
-    if (keywordExpression.isBlank()) {
+fun PromptInjection.RegexInjection.evaluateKeywords(context: String): KeywordExpressionResult = try {
+    if (constantActive) KeywordExpressionResult(true, emptyList())
+    else if (keywordExpression.isBlank()) {
         val matched = keywords.filter { matchesTerm(context, it) }
-        return KeywordExpressionResult(matched.isNotEmpty(), matched)
-    }
-    return runCatching {
-        KeywordExpressionParser(keywordExpression) { matchesTerm(context, it) }.parse()
-    }.getOrElse { KeywordExpressionResult(false, emptyList(), it.message ?: "Invalid expression") }
+        KeywordExpressionResult(matched.isNotEmpty(), matched)
+    } else KeywordExpressionParser(keywordExpression) { matchesTerm(context, it) }.parse()
+} catch (e: IllegalArgumentException) {
+    KeywordExpressionResult(false, emptyList(), e.message ?: "无效触发条件")
+}
+
+private val regexCache = object : LinkedHashMap<Pair<String, Boolean>, Regex>(64, .75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, Boolean>, Regex>?) = size > 128
 }
 
 private fun PromptInjection.RegexInjection.matchesTerm(context: String, term: String): Boolean {
     if (term.isBlank()) return false
-    return if (useRegex) {
-        runCatching {
-            val options = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
-            Regex(term, options).containsMatchIn(context)
-        }.getOrDefault(false)
-    } else {
-        context.contains(term, ignoreCase = !caseSensitive)
+    if (!useRegex) return context.contains(term, ignoreCase = !caseSensitive)
+    val regex = synchronized(regexCache) {
+        regexCache.getOrPut(term to caseSensitive) {
+            try { Regex(term, if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)) }
+            catch (e: IllegalArgumentException) { throw IllegalArgumentException("无效正则「$term」：${e.message}") }
+        }
     }
+    return regex.containsMatchIn(context)
 }
 
-private class KeywordExpressionParser(
-    expression: String,
-    private val matcher: (String) -> Boolean,
-) {
-    private val tokens = tokenize(expression)
+internal fun quoteLorebookKeyword(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+private data class KeywordToken(val text: String, val literal: Boolean = false)
+
+private val expressionCache = object : LinkedHashMap<String, List<KeywordToken>>(64, .75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<KeywordToken>>?) = size > 128
+}
+
+private class KeywordExpressionParser(expression: String, private val matcher: (String) -> Boolean) {
+    private val tokens = synchronized(expressionCache) { expressionCache.getOrPut(expression) { tokenize(expression) } }
     private var index = 0
+    private var depth = 0
     private val matchedTerms = linkedSetOf<String>()
 
     fun parse(): KeywordExpressionResult {
-        require(tokens.isNotEmpty()) { "Expression is empty" }
+        require(tokens.isNotEmpty()) { "表达式不能为空" }
         val matched = parseOr()
-        require(index == tokens.size) { "Unexpected token: ${tokens[index]}" }
+        require(index == tokens.size) { "多余的词项：${tokens.getOrNull(index)?.text}" }
         return KeywordExpressionResult(matched, matchedTerms.toList())
     }
 
+    private fun operator(value: String): Boolean = tokens.getOrNull(index)?.let {
+        !it.literal && it.text.equals(value, true)
+    } == true
+
     private fun parseOr(): Boolean {
         var value = parseAnd()
-        while (peekOperator("OR")) {
-            index++
-            val right = parseAnd()
-            value = value || right
-        }
+        while (operator("OR")) { index++; val right = parseAnd(); value = value || right }
         return value
     }
 
     private fun parseAnd(): Boolean {
         var value = parseUnary()
-        while (peekOperator("AND")) {
-            index++
-            val right = parseUnary()
-            value = value && right
-        }
+        while (operator("AND")) { index++; val right = parseUnary(); value = value && right }
         return value
     }
 
     private fun parseUnary(): Boolean {
-        if (peekOperator("NOT")) {
+        require(++depth <= 64) { "条件嵌套不能超过 64 层" }
+        try {
+            if (operator("NOT")) { index++; return !parseUnary() }
+            if (operator("(")) {
+                index++
+                val value = parseOr()
+                require(operator(")")) { "缺少右括号" }
+                index++
+                return value
+            }
+            val term = tokens.getOrNull(index) ?: throw IllegalArgumentException("缺少关键词")
+            require(term.literal || term.text.uppercase() !in listOf(")", "AND", "OR")) { "此处需要关键词：${term.text}" }
+            require(term.text.isNotBlank()) { "关键词不能为空" }
             index++
-            return !parseUnary()
-        }
-        if (tokens.getOrNull(index) == "(") {
-            index++
-            val value = parseOr()
-            require(tokens.getOrNull(index) == ")") { "Missing closing parenthesis" }
-            index++
-            return value
-        }
-        val term = tokens.getOrNull(index) ?: error("Missing keyword")
-        require(term !in listOf(")", "AND", "OR")) { "Missing keyword before $term" }
-        index++
-        return matcher(term).also { if (it) matchedTerms += term }
+            return matcher(term.text).also { if (it) matchedTerms += term.text }
+        } finally { depth-- }
     }
 
-    private fun peekOperator(value: String): Boolean =
-        tokens.getOrNull(index)?.equals(value, ignoreCase = true) == true
-
-    private fun tokenize(value: String): List<String> {
-        val result = mutableListOf<String>()
+    private fun tokenize(value: String): List<KeywordToken> {
+        require(value.length <= 16384) { "表达式过长" }
+        val result = mutableListOf<KeywordToken>()
         var cursor = 0
         while (cursor < value.length) {
             when {
                 value[cursor].isWhitespace() -> cursor++
-                value[cursor] == '(' || value[cursor] == ')' -> result += value[cursor++].toString()
+                value[cursor] in "()" -> result += KeywordToken(value[cursor++].toString())
                 value[cursor] == '"' -> {
-                    val end = value.indexOf('"', cursor + 1)
-                    require(end >= 0) { "Unclosed quoted keyword" }
-                    result += value.substring(cursor + 1, end)
-                    cursor = end + 1
+                    cursor++
+                    val text = StringBuilder()
+                    var closed = false
+                    while (cursor < value.length) {
+                        val ch = value[cursor++]
+                        if (ch == '"') { closed = true; break }
+                        if (ch == '\\' && cursor < value.length && value[cursor] in "\\\"") text.append(value[cursor++])
+                        else text.append(ch)
+                    }
+                    require(closed) { "关键词引号未闭合" }
+                    result += KeywordToken(text.toString(), true)
                 }
                 else -> {
                     val start = cursor
                     while (cursor < value.length && !value[cursor].isWhitespace() && value[cursor] !in "()") cursor++
-                    result += value.substring(start, cursor)
+                    result += KeywordToken(value.substring(start, cursor))
                 }
             }
         }
         return result
     }
 }
-
 data class PromptInjectionDiagnosticEntry(
     val lorebookId: Uuid,
     val lorebookName: String,
@@ -182,6 +193,9 @@ data class PromptInjectionDiagnosticEntry(
     val position: InjectionPosition,
     val estimatedTokens: Int,
     val detail: String? = null,
+    val remainingActiveTurns: Int = 0,
+    val remainingCooldownTurns: Int = 0,
+    val injectedContent: String? = null,
 )
 
 enum class LorebookEntryStatus {
@@ -206,10 +220,10 @@ data class PromptInjectionEvaluation(
     val diagnostics: PromptInjectionDiagnostics,
 )
 
-internal fun passesDeterministicProbability(entryId: Uuid, userTurn: Int, probability: Int): Boolean {
+internal fun passesDeterministicProbability(entryId: Uuid, userTurn: Int, probability: Int, seed: String = ""): Boolean {
     if (probability >= 100) return true
     if (probability <= 0) return false
-    val bucket = ((entryId.hashCode() * 31L + userTurn * 17L) and Long.MAX_VALUE) % 100
+    val bucket = kotlin.random.Random("$seed:$entryId:$userTurn".hashCode()).nextInt(100)
     return bucket < probability
 }
 
@@ -222,5 +236,6 @@ internal fun trimToEstimatedTokens(content: String, maxTokens: Int): String {
         val mid = (low + high + 1) / 2
         if (estimateTextTokens(content.take(mid)) <= maxTokens) low = mid else high = mid - 1
     }
+    if (low > 0 && low < content.length && content[low - 1].isHighSurrogate() && content[low].isLowSurrogate()) low--
     return content.take(low).trimEnd()
 }

@@ -28,6 +28,8 @@ data class ConversationEntity(
     val modeInjectionIds: String = "[]",
     @ColumnInfo("lorebook_ids", defaultValue = "[]")
     val lorebookIds: String = "[]",
+    @ColumnInfo("disabled_lorebook_ids", defaultValue = "[]")
+    val disabledLorebookIds: String = "[]",
     @ColumnInfo("temporary_mode_injections", defaultValue = "{}")
     val temporaryModeInjections: String = "{}",
     @ColumnInfo("lorebook_runtime_states", defaultValue = "{}")
@@ -48,4 +50,6 @@ data class ConversationEntity(
     val branchedAt: Long = 0,
     @ColumnInfo("source_conversation_title", defaultValue = "")
     val sourceConversationTitle: String = "",
+    @ColumnInfo("memory_mode", defaultValue = "INHERIT")
+    val memoryMode: String = "INHERIT",
 )

@@ -1,5 +1,10 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.rikkahub.data.model.memoryCapabilityMode
+import me.rerere.rikkahub.data.ai.context.makeRequestContextSnapshot
+import me.rerere.rikkahub.data.ai.context.withRequestContext
+import me.rerere.rikkahub.data.ai.context.contextHistoryFingerprint
+
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -42,6 +47,7 @@ import me.rerere.ai.provider.providerStatusCode
 import me.rerere.ai.provider.retryProviderRequest
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.AskUserProtocol
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
@@ -59,10 +65,11 @@ import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.ai.transformers.resolvePromptVariables
-import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.ai.tools.createKnowledgeBaseTools
 import me.rerere.rikkahub.data.ai.tools.KnowledgeBaseCapabilities
 import me.rerere.rikkahub.data.ai.tools.createSessionCapabilitiesTool
+import me.rerere.rikkahub.data.model.suggestionCapabilities
+import me.rerere.rikkahub.data.ai.transforms.KnowledgeRetrievalTransformer
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -71,11 +78,8 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
 import me.rerere.rikkahub.data.model.AssistantMemory
-import me.rerere.rikkahub.data.model.MemoryType
 import me.rerere.rikkahub.data.model.LorebookEntryRuntimeState
 import me.rerere.rikkahub.data.model.PromptInjectionEvaluation
-import me.rerere.rikkahub.data.memory.MemoryEmbeddingService
-import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
@@ -101,9 +105,8 @@ class GenerationHandler(
     private val context: Context,
     private val providerManager: ProviderManager,
     private val json: Json,
-    private val memoryRepo: MemoryRepository,
-    private val memoryEmbeddingService: MemoryEmbeddingService,
     private val knowledgeBaseRepository: KnowledgeBaseRepository,
+    private val knowledgeRetrievalTransformer: KnowledgeRetrievalTransformer,
     private val requestStatisticsRecorder: RequestStatisticsRecorder,
 ) {
     fun generateText(
@@ -129,7 +132,9 @@ class GenerationHandler(
         workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
         rollingContextSummary: String? = null,
         requestMessageStartIndex: Int = 0,
+        contextScopeKey: String? = null,
         resumeInterruptedResponse: Boolean = false,
+        suggestionConversation: me.rerere.rikkahub.data.model.Conversation? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -156,49 +161,19 @@ class GenerationHandler(
 
             val registeredTools = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
-                if (assistant.enableMemory) {
-                    val memoryAssistantId = if (assistant.useGlobalMemory) {
-                        MemoryRepository.GLOBAL_MEMORY_ID
-                    } else {
-                        assistant.id.toString()
-                    }
-                    buildMemoryTools(
-                        json = json,
-                        allowEpisodicMemory = assistant.enableEpisodicMemory,
-                        onCreation = { content, type ->
-                            memoryEmbeddingService.addMemory(
-                                assistantId = memoryAssistantId,
-                                content = content,
-                                settings = settings,
-                                type = type,
-                                sourceConversationId = conversationId?.toString(),
-                            )
-                        },
-                        onUpdate = { id, content, type ->
-                            memoryEmbeddingService.updateMemory(
-                                assistantId = memoryAssistantId,
-                                id = id,
-                                content = content,
-                                settings = settings,
-                                type = type,
-                            )
-                        },
-                        onDelete = { id ->
-                            memoryRepo.deleteMemory(memoryAssistantId, id)
-                        },
-                        onList = {
-                            memoryRepo.getMemoriesOfAssistant(memoryAssistantId)
-                                .filter { memory ->
-                                    assistant.enableEpisodicMemory || memory.type == MemoryType.FACT
-                                }
-                        },
-                    ).let(this::addAll)
-                }
                 enabledKnowledgeBaseIds.takeIf { it.isNotEmpty() }?.let { knowledgeBaseIds ->
                     addAll(
                         createKnowledgeBaseTools(
                             knowledgeBaseIds = knowledgeBaseIds,
                             repository = knowledgeBaseRepository,
+                            search = { query, limit ->
+                                knowledgeRetrievalTransformer.searchForTool(
+                                    settings = settings,
+                                    baseIds = knowledgeBaseIds,
+                                    query = query,
+                                    limit = limit,
+                                )
+                            },
                         )
                     )
                 }
@@ -211,6 +186,9 @@ class GenerationHandler(
                     toolCallsAvailable = true,
                     availableToolNames = { registeredTools.map(Tool::name) + "get_session_capabilities" },
                     knowledgeBaseCapabilities = knowledgeBaseCapabilities,
+                    suggestionCapabilities = suggestionConversation?.let { source ->
+                        { details -> source.suggestionCapabilities(settings, details, enabledKnowledgeBaseIds.isNotEmpty()) }
+                    },
                 )
             } else {
                 emptyList()
@@ -223,6 +201,16 @@ class GenerationHandler(
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {
                 it.canResumeExecution
             } ?: emptyList()
+            val waitingForApproval = messages.lastOrNull()?.getTools()?.any {
+                !it.isExecuted && it.approvalState is ToolApprovalState.Pending
+            } == true
+
+            // A persisted Pending ask_user must remain visible and actionable after a restart.
+            // Do not send the same assistant turn to the provider again while it is waiting.
+            if (waitingForApproval && pendingTools.isEmpty()) {
+                Log.i(TAG, "generateText: waiting for pending tool approval")
+                break
+            }
 
             val toolsToProcess: List<UIMessagePart.Tool>
 
@@ -238,6 +226,8 @@ class GenerationHandler(
                     assistant = assistant,
                     settings = settings,
                     messages = requestMessages(),
+                    conversationMessages = messages,
+                    conversationId = conversationId,
                     onUpdateMessages = {
                         val transformedMessages = it.transforms(
                             transformers = outputTransformers,
@@ -283,6 +273,7 @@ class GenerationHandler(
                     nonToolCapabilityPrompt = nonToolCapabilityPrompt,
                     rollingContextSummary = rollingContextSummary,
                     resumeInterruptedResponse = needsInterruptedResponseContinuation,
+                    contextScopeKey = contextScopeKey,
                 )
                 needsInterruptedResponseContinuation = false
                 messages = messages.withKnowledgeCitations(requestCitations)
@@ -298,6 +289,7 @@ class GenerationHandler(
                     finishedAt = Clock.System.now()
                         .toLocalDateTime(TimeZone.currentSystemDefault()),
                     interrupted = false,
+                    requestContext = messages.last().requestContext?.copy(responseFingerprint = contextHistoryFingerprint(listOf(messages.last()))),
                 )
                 conversationId?.let { id ->
                     messages.lastOrNull { it.role == MessageRole.ASSISTANT }?.let { assistantMessage ->
@@ -321,7 +313,10 @@ class GenerationHandler(
                     val toolDef = toolsInternal.find { it.name == tool.toolName }
                     val parsedToolInput = runCatching {
                         json.parseToolArguments(tool.input, tool.toolName)
-                    }.getOrNull()
+                    }.getOrNull()?.takeIf { arguments ->
+                        tool.toolName != AskUserProtocol.TOOL_NAME ||
+                            AskUserProtocol.parseRequest(arguments).isSuccess
+                    }
                     if (toolDef != null && parsedToolInput == null) {
                         // Invalid parameters cannot execute. Let the normal tool-error path return
                         // the parse failure to the model so it can issue one corrected call without
@@ -329,6 +324,14 @@ class GenerationHandler(
                         Log.w(TAG, "generateText: invalid arguments for ${tool.toolName}")
                     }
                     when {
+                        // A malformed ask_user call from an older/persisted turn must not remain
+                        // Pending forever. Make it executable so the structured validation error
+                        // below can be returned to the model and the conversation can continue.
+                        tool.toolName == AskUserProtocol.TOOL_NAME &&
+                            parsedToolInput == null &&
+                            tool.approvalState is ToolApprovalState.Pending -> {
+                            tool.copy(approvalState = ToolApprovalState.Auto)
+                        }
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef != null &&
                             parsedToolInput != null &&
@@ -341,9 +344,21 @@ class GenerationHandler(
                                     )
                                     true
                                 } &&
-                            tool.approvalState is ToolApprovalState.Auto -> {
+                        tool.approvalState is ToolApprovalState.Auto -> {
                             hasPendingApproval = true
-                            tool.copy(approvalState = ToolApprovalState.Pending)
+                            val metadata = if (tool.toolName == AskUserProtocol.TOOL_NAME) {
+                                val pendingAt = System.currentTimeMillis()
+                                buildJsonObject {
+                                    tool.metadata?.forEach { (key, value) -> put(key, value) }
+                                    me.rerere.ai.ui.AskUserInteraction.initial(tool.input, pendingAt).forEach { (key, value) -> put(key, value) }
+                                }
+                            } else {
+                                tool.metadata
+                            }
+                            tool.copy(
+                                approvalState = ToolApprovalState.Pending,
+                                metadata = metadata,
+                            )
                         }
                         // State is Pending -> keep waiting
                         tool.approvalState is ToolApprovalState.Pending -> {
@@ -379,12 +394,39 @@ class GenerationHandler(
             } else {
                 // Resuming after user interaction - use the resumable tools directly.
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} resumable tools")
-                toolsToProcess = messages.last().getTools().filter { it.canResumeExecution }
+                // Keep untouched Auto calls from the same assistant turn. A model may return
+                // ask_user together with an independent tool; answering the former must not
+                // silently discard the latter.
+                toolsToProcess = messages.last().getTools().filter { tool ->
+                    !tool.isExecuted && (
+                        tool.canResumeExecution || tool.approvalState is ToolApprovalState.Auto
+                        )
+                }
             }
 
             // Handle tools (execute approved tools, handle denied tools)
             val executedTools = arrayListOf<UIMessagePart.Tool>()
             toolsToProcess.forEach { tool ->
+                if (tool.toolName == AskUserProtocol.TOOL_NAME) {
+                    val requestError = AskUserProtocol.parseRequest(tool.input).exceptionOrNull()
+                    if (requestError != null) {
+                        // Never invoke ask_user.execute() for malformed input. Returning a compact,
+                        // structured error lets the model correct its call without exposing an
+                        // implementation stack trace or leaving a form stuck in Pending.
+                        executedTools += tool.copy(
+                            output = listOf(
+                                UIMessagePart.Text(
+                                    buildJsonObject {
+                                        put("error", "Invalid ask_user request: ${requestError.message.orEmpty()}")
+                                        put("status", "invalid_request")
+                                        put("help", "Use get_session_capabilities(include_ask_user_details=true) for supported fields and examples.")
+                                    }.toString()
+                                )
+                            )
+                        )
+                        return@forEach
+                    }
+                }
                 when (tool.approvalState) {
                     is ToolApprovalState.Denied -> {
                         // Tool was denied by user
@@ -394,6 +436,7 @@ class GenerationHandler(
                                 UIMessagePart.Text(
                                     json.encodeToString(
                                         buildJsonObject {
+                                            if (tool.toolName == AskUserProtocol.TOOL_NAME) put("status", "denied")
                                             put(
                                                 "error",
                                                 JsonPrimitive("Tool execution denied by user. Reason: ${reason.ifBlank { "No reason provided" }}")
@@ -410,7 +453,39 @@ class GenerationHandler(
                         val answer = (tool.approvalState as ToolApprovalState.Answered).answer
                         executedTools += tool.copy(
                             output = listOf(
-                                UIMessagePart.Text(answer)
+                                UIMessagePart.Text(if (tool.toolName == AskUserProtocol.TOOL_NAME) {
+                                    me.rerere.ai.ui.AskUserContract.answerResult(AskUserProtocol.parseRequest(tool.input).getOrThrow(), answer)
+                                } else answer)
+                            )
+                        )
+                    }
+
+                    is ToolApprovalState.Cancelled -> {
+                        val reason = (tool.approvalState as ToolApprovalState.Cancelled).reason
+                            .ifBlank { "Cancelled by user" }
+                        executedTools += tool.copy(
+                            output = listOf(
+                                UIMessagePart.Text(
+                                    buildJsonObject {
+                                        put("status", "cancelled")
+                                        put("error", reason)
+                                    }.toString()
+                                )
+                            )
+                        )
+                    }
+
+                    is ToolApprovalState.Expired -> {
+                        val reason = (tool.approvalState as ToolApprovalState.Expired).reason
+                            .ifBlank { "Tool approval expired" }
+                        executedTools += tool.copy(
+                            output = listOf(
+                                UIMessagePart.Text(
+                                    buildJsonObject {
+                                        put("status", "expired")
+                                        put("error", reason)
+                                    }.toString()
+                                )
                             )
                         )
                     }
@@ -490,6 +565,8 @@ class GenerationHandler(
         assistant: Assistant,
         settings: Settings,
         messages: List<UIMessage>,
+        conversationMessages: List<UIMessage>,
+        conversationId: Uuid?,
         onUpdateMessages: suspend (List<UIMessage>) -> Unit,
         transformers: List<MessageTransformer>,
         model: Model,
@@ -511,6 +588,7 @@ class GenerationHandler(
         nonToolCapabilityPrompt: String = "",
         rollingContextSummary: String? = null,
         resumeInterruptedResponse: Boolean = false,
+        contextScopeKey: String? = null,
     ): List<UIMessageAnnotation.KnowledgeCitation> {
         val internalMessages = buildList {
             val system = buildString {
@@ -569,6 +647,8 @@ class GenerationHandler(
             processingStatus = processingStatus,
             workspaceCwd = workspaceCwd,
             workspaceFileOperationMode = workspaceFileOperationMode,
+            conversationId = conversationId,
+            conversationMessages = conversationMessages,
         ).compactHistoricalMediaForRequest(
             mediaSizeBytes = ::resolveContentMediaSize,
         )
@@ -669,6 +749,11 @@ class GenerationHandler(
                         receivedEffectiveOutput = false
                         statisticsAttemptStartedNanos = System.nanoTime()
                         firstTokenElapsedNanos = null
+                        var contextSnapshot = makeRequestContextSnapshot(
+                            conversationMessages, providerMessages, tools, model, contextScopeKey,
+                            messages.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }?.id,
+                            provider = provider,
+                        )
                         try {
                             if (stream) {
                             val streamChunkHandler = StreamChunkHandler(model)
@@ -677,7 +762,7 @@ class GenerationHandler(
                             var hasPendingUiUpdate = false
 
                             suspend fun flushStreamUpdate() {
-                                messages = messages.withKnowledgeCitations(requestCitations)
+                                messages = messages.withKnowledgeCitations(requestCitations).withRequestContext(contextSnapshot)
                                 onUpdateMessages(messages)
                                 lastUiUpdateNanos = System.nanoTime()
                                 hasPendingUiUpdate = false
@@ -700,6 +785,9 @@ class GenerationHandler(
                                 messages = providerMessages,
                                 params = params
                             ).collect { chunk ->
+                                if (chunk is StreamChunk.Usage && chunk.usage.promptTokens > 0) {
+                                    contextSnapshot = contextSnapshot.copy(measuredPromptTokens = chunk.usage.promptTokens, measuredAt = System.currentTimeMillis())
+                                }
                                 if (firstTokenElapsedNanos == null && chunk.isFirstModelContentToken()) {
                                     firstTokenElapsedNanos = (
                                         System.nanoTime() - statisticsAttemptStartedNanos
@@ -739,8 +827,10 @@ class GenerationHandler(
                                     params = params,
                                 )
                                 receivedEffectiveOutput = true
+                                contextSnapshot = contextSnapshot.copy(measuredPromptTokens = result.usage?.promptTokens?.takeIf { it > 0 }, measuredAt = System.currentTimeMillis())
                                 messages = messages.handleTextGenerationResult(result = result, model = model)
                                     .withKnowledgeCitations(requestCitations)
+                                    .withRequestContext(contextSnapshot)
                                 onUpdateMessages(messages)
                             }
                         } catch (error: Throwable) {
@@ -954,11 +1044,7 @@ class GenerationHandler(
         registeredTools: List<Tool>,
         knowledgeBaseCapabilities: KnowledgeBaseCapabilities,
     ): String {
-        val memoryMode = when {
-            !assistant.enableMemory -> "disabled"
-            assistant.enableMemoryRag -> "rag_background"
-            else -> "basic_prompt"
-        }
+        val memoryMode = assistant.memoryCapabilityMode()
         return buildString {
             appendLine("<session_capabilities>")
             appendLine("Function tool calls are unavailable because the active chat model does not have tool calling enabled. Do not claim that a tool was called.")

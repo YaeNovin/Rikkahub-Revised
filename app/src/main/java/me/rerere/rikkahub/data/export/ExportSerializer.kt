@@ -11,6 +11,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.model.validationErrors
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDateTime
 import kotlin.uuid.Uuid
@@ -109,78 +110,14 @@ object LorebookSerializer : ExportSerializer<Lorebook> {
     override fun export(data: Lorebook): ExportData {
         return ExportData(
             type = type,
-            data = ExportSerializer.DefaultJson.encodeToJsonElement(data)
+            data = ExportSerializer.DefaultJson.encodeToJsonElement(data.copy(revisions = emptyList()))
         )
     }
 
     override fun import(context: Context, uri: Uri): Result<Lorebook> {
         return runCatching {
-            val json = readUri(context, uri)
-            // 首先尝试解析为自己的格式
-            tryImportNative(json)
-            // 然后尝试解析为 SillyTavern 格式
-                ?: tryImportSillyTavern(json, getUriFileName(context, uri)?.removeSuffix(".json"))
-                ?: throw IllegalArgumentException("Unsupported format")
-        }
-    }
-
-    private fun tryImportNative(json: String): Lorebook? {
-        return runCatching {
-            val exportData = ExportSerializer.DefaultJson.decodeFromString(
-                ExportData.serializer(),
-                json
-            )
-            if (exportData.type != type) return null
-            ExportSerializer.DefaultJson
-                .decodeFromJsonElement<Lorebook>(exportData.data)
-                .copy(
-                    id = Uuid.random(),
-                    entries = ExportSerializer.DefaultJson
-                        .decodeFromJsonElement<Lorebook>(exportData.data)
-                        .entries.map { it.copy(id = Uuid.random()) }
-                )
-        }.getOrNull()
-    }
-
-    private fun tryImportSillyTavern(json: String, fileName: String?): Lorebook? {
-        return runCatching {
-            val stLorebook = ExportSerializer.DefaultJson.decodeFromString(
-                SillyTavernLorebook.serializer(),
-                json
-            )
-            Lorebook(
-                id = Uuid.random(),
-                name = fileName ?: LocalDateTime.now().toLocalString(),
-                description = "",
-                enabled = true,
-                entries = stLorebook.entries.values.map { entry ->
-                    PromptInjection.RegexInjection(
-                        id = Uuid.random(),
-                        name = entry.comment.orEmpty().ifEmpty { entry.key.firstOrNull().orEmpty() },
-                        enabled = !entry.disable,
-                        priority = entry.order,
-                        position = mapSillyTavernPosition(entry.position),
-                        injectDepth = entry.depth,
-                        content = entry.content,
-                        keywords = entry.key,
-                        useRegex = false, // SillyTavern 格式不支持 useRegex
-                        caseSensitive = entry.caseSensitive ?: false,
-                        scanDepth = entry.scanDepth ?: 4,
-                        constantActive = entry.constant,
-                    )
-                }
-            )
-        }.getOrNull()
-    }
-
-    private fun mapSillyTavernPosition(position: Int): InjectionPosition {
-        return when (position) {
-            0 -> InjectionPosition.BEFORE_SYSTEM_PROMPT
-            1 -> InjectionPosition.AFTER_SYSTEM_PROMPT
-            2 -> InjectionPosition.TOP_OF_CHAT
-            3 -> InjectionPosition.TOP_OF_CHAT // After Examples -> 聊天历史开头
-            4 -> InjectionPosition.AT_DEPTH    // @Depth 模式
-            else -> InjectionPosition.AFTER_SYSTEM_PROMPT
+            val json = context.contentResolver.openInputStream(uri)?.use(::readLorebookJson) ?: error("无法读取世界书文件")
+            decodeLorebookDocument(json, getUriFileName(context, uri)?.removeSuffix(".json") ?: "世界书")
         }
     }
 }

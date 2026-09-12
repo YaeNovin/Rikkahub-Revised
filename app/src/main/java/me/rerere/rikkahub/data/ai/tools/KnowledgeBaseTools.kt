@@ -28,9 +28,11 @@ private const val MAX_EXCERPT_CHARS = 1_600
 fun createKnowledgeBaseTools(
     knowledgeBaseIds: Set<String>,
     repository: KnowledgeBaseRepository,
+    search: (suspend (query: String, limit: Int) -> List<KnowledgeChunkSearchRow>)? = null,
 ): List<Tool> = listOf(
     createKnowledgeListTool(knowledgeBaseIds, repository),
-    createKnowledgeSearchTool(knowledgeBaseIds, repository),
+    search?.let(::createKnowledgeSearchTool)
+        ?: createKnowledgeSearchTool(knowledgeBaseIds, repository),
 )
 
 fun createKnowledgeSearchTool(

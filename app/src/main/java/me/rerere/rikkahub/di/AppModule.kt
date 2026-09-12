@@ -20,6 +20,7 @@ import me.rerere.tts.provider.TTSManager
 import org.koin.dsl.module
 
 val appModule = module {
+    single { me.rerere.rikkahub.service.GenerationKeepAlive(get(), get(), get()) }
     single<Json> { JsonInstant }
 
     single {
@@ -72,12 +73,17 @@ val appModule = module {
 
     single {
         ChatService(
+            generationKeepAlive = get(),
             context = get(),
             appScope = get(),
             appEventBus = get(),
             settingsStore = get(),
             conversationRepo = get(),
             memoryRepository = get(),
+            memoryMaintenance = get(),
+            knowledgeBaseRepository = get(),
+            memoryExtractionService = get(),
+            conversationMemoryIndexService = get(),
             generationHandler = get(),
             templateTransformer = get(),
             providerManager = get(),

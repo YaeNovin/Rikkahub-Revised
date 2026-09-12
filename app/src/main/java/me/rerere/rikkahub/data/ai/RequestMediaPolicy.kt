@@ -17,10 +17,11 @@ internal fun List<UIMessage>.compactHistoricalMediaForRequest(
     mediaSizeBytes: (String) -> Long? = { null },
 ): List<UIMessage> {
     val currentUserIndex = indexOfLast { it.role == MessageRole.USER }
-    if (currentUserIndex < 0) return this
 
     return mapIndexed { messageIndex, message ->
-        if (messageIndex >= currentUserIndex) return@mapIndexed message
+        if (messageIndex >= currentUserIndex && message.parts.none {
+                it is UIMessagePart.Video && it.metadata?.get("generated_video")?.toString() == "true"
+            }) return@mapIndexed message
 
         var changed = false
         val requestParts = message.parts.map { part ->

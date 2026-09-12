@@ -42,6 +42,9 @@ data class Assistant(
     val presetMessages: List<UIMessage> = emptyList(),
     val quickMessageIds: Set<Uuid> = emptySet(),
     val quickMessageGroups: List<QuickMessageGroup> = emptyList(),
+    val suggestionSettings: ChatSuggestionConfig? = null,
+    val inspirationSettings: InspirationSettings? = null,
+    val suggestionFeedback: List<SuggestionFeedback> = emptyList(),
     val regexes: List<AssistantRegex> = emptyList(),
     val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
     val maxTokens: Int? = null,
@@ -61,6 +64,20 @@ data class Assistant(
     val backgroundOpacity: Float = 1.0f, // 背景图不透明度(0~1)
     val backgroundBlurRadius: Float = 0f, // 背景图高斯模糊半径(dp), 0 表示关闭
     val useGradientBackground: Boolean = false, // 开启后聊天页使用动态渐变背景
+    val gradientBackgroundAnimation: Boolean = true,
+    val gradientBackgroundSpeed: Float = 1f,
+    val gradientBackgroundFollowTheme: Boolean = false,
+    val gradientBackgroundPreset: GradientBackgroundPreset = GradientBackgroundPreset.CLASSIC,
+    /** Optional custom colors. Empty lists keep using the selected preset. */
+    val gradientBackgroundCustomColors: GradientBackgroundCustomColors = GradientBackgroundCustomColors(),
+    val gradientBackgroundIntensity: Float = 1f,
+    val gradientBackgroundMotionScale: Float = 1f,
+    val gradientBackgroundBlobCount: Int = 4,
+    val gradientBackgroundSoftness: Float = 1f,
+    /** Base gradient direction in degrees; 0 is top-to-bottom, positive values rotate clockwise. */
+    val gradientBackgroundAngle: Float = 0f,
+    /** Optional edge darkening that keeps the center readable. */
+    val gradientBackgroundVignette: Float = 0f,
     val modeInjectionIds: Set<Uuid> = emptySet(),      // 关联的模式注入 ID
     val lorebookIds: Set<Uuid> = emptySet(),            // 关联的 Lorebook ID
     val enabledSkills: Set<String> = emptySet(),        // 启用的 skill 名称列表
@@ -68,6 +85,34 @@ data class Assistant(
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
     val knowledgeBaseIds: Set<Uuid> = emptySet(),
+)
+
+@Serializable
+enum class GradientBackgroundPreset {
+    /** Serialized as gemini to preserve existing assistant settings. */
+    @SerialName("gemini")
+    CLASSIC,
+
+    @SerialName("aurora")
+    AURORA,
+
+    @SerialName("sunset")
+    SUNSET,
+
+    @SerialName("monochrome")
+    MONOCHROME,
+}
+
+/**
+ * User-defined gradient colors stored as opaque ARGB values. The first five
+ * colors replace the base gradient stops; the next four replace animated blobs.
+ * Missing entries fall back to the selected preset, keeping older settings
+ * compatible while allowing every visible color to be edited.
+ */
+@Serializable
+data class GradientBackgroundCustomColors(
+    val baseColors: List<Long> = emptyList(),
+    val blobColors: List<Long> = emptyList(),
 )
 
 @Serializable
@@ -120,6 +165,16 @@ data class AssistantMemory(
     val type: MemoryType = MemoryType.FACT,
     val createdAt: Long = 0L,
     val sourceConversationId: String? = null,
+    val lifecycleState: MemoryLifecycleState = MemoryLifecycleState.ACTIVE,
+    val lifecycleUpdatedAt: Long = 0L,
+    val supersededByMemoryId: Int? = null,
+    val uid: String = "",
+    val revision: Long = 1,
+    val contentHash: String = "",
+    val scopeType: MemoryScopeType? = null,
+    val scopeId: String? = null,
+    val supersededByUid: String? = null,
+    val createdByRunId: String? = null,
 )
 
 @Serializable
@@ -258,6 +313,12 @@ sealed class PromptInjection {
         val stickyTurns: Int = 1,
         val cooldownTurns: Int = 0,
         val settingKeys: List<String> = emptyList(),
+        val category: String = "",
+        val scanSource: LorebookScanSource = LorebookScanSource.ALL,
+        val scanMode: LorebookScanMode = LorebookScanMode.CUSTOM,
+        val exclusiveGroup: String = "",
+        val selectionWeight: Int = 0,
+        val groupOverride: Boolean = false,
     ) : PromptInjection()
 }
 
@@ -280,6 +341,27 @@ data class Lorebook(
     val entries: List<PromptInjection.RegexInjection> = emptyList(),
     val tokenBudget: Int = 0,
     val overflowStrategy: LorebookOverflowStrategy = LorebookOverflowStrategy.DROP_LOW_PRIORITY,
+    val revisions: List<LorebookRevision> = emptyList(),
+    val importWarnings: List<String> = emptyList(),
+    val defaultScanDepth: Int = 4,
+)
+
+@Serializable
+enum class LorebookScanSource { ALL, USER, ASSISTANT, TEXT_ONLY }
+
+@Serializable
+enum class LorebookScanMode { CUSTOM, INHERIT, CURRENT_INPUT, NONE }
+
+@Serializable
+data class LorebookRevision(
+    val savedAt: Long,
+    val name: String,
+    val description: String,
+    val enabled: Boolean,
+    val entries: List<PromptInjection.RegexInjection>,
+    val tokenBudget: Int,
+    val overflowStrategy: LorebookOverflowStrategy,
+    val defaultScanDepth: Int = 4,
 )
 
 /**
@@ -322,8 +404,9 @@ fun extractContextForMatching(
     messages: List<UIMessage>,
     scanDepth: Int
 ): String {
+    if (scanDepth == 0) return ""
     return messages
-        .takeLast(scanDepth)
+        .takeLast(scanDepth.coerceIn(1, 1000))
         .joinToString("\n") { it.toText() }
 }
 

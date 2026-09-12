@@ -12,7 +12,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
+import me.rerere.rikkahub.data.memory.MemoryExtractionStatus
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.uuid.Uuid
 
 private const val TAG = "ConversationSession"
@@ -23,6 +25,7 @@ class ConversationSession(
     initial: Conversation,
     private val scope: CoroutineScope,
     private val onIdle: (Uuid) -> Unit,
+    private val onJobStarted: (Job) -> Unit = {},
 ) {
     // 会话状态
     val state = MutableStateFlow(initial)
@@ -41,6 +44,11 @@ class ConversationSession(
     val processingStatus = MutableStateFlow<String?>(null)
 
     val promptInjectionDiagnostics = MutableStateFlow<PromptInjectionDiagnostics?>(null)
+
+    val memoryExtractionStatus = MutableStateFlow<MemoryExtractionStatus>(MemoryExtractionStatus.Idle)
+    private val memoryExtractionScheduleVersion = AtomicLong(0L)
+    private val titleGenerationVersion = AtomicLong(0L)
+    internal val suggestionGeneration = SuggestionGenerationGate()
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
@@ -85,6 +93,7 @@ class ConversationSession(
         val previousJob = _generationJob.value
         previousJob?.cancel()
         _generationJob.value = job
+        job?.let(onJobStarted)
         job?.invokeOnCompletion {
             // A replaced job may finish after the new one has already started. Do not let the
             // stale completion callback clear the current generation state.
@@ -98,6 +107,21 @@ class ConversationSession(
     }
 
     fun getJob(): Job? = _generationJob.value
+
+    fun nextMemoryExtractionSchedule(): Long = memoryExtractionScheduleVersion.incrementAndGet()
+
+    fun isCurrentMemoryExtractionSchedule(version: Long): Boolean =
+        memoryExtractionScheduleVersion.get() == version
+
+    fun nextTitleGeneration(): Long = titleGenerationVersion.incrementAndGet()
+
+    fun isCurrentTitleGeneration(version: Long): Boolean =
+        titleGenerationVersion.get() == version
+
+    fun nextSuggestionGeneration(): Long = suggestionGeneration.invalidate()
+
+    fun isCurrentSuggestionGeneration(version: Long): Boolean =
+        suggestionGeneration.isCurrent(version)
 
     suspend fun initializeOnce(initializer: suspend () -> Conversation): Conversation =
         initializationMutex.withLock {
@@ -140,5 +164,9 @@ class ConversationSession(
         idleCheckJob?.cancel()
         idleCheckJob = null
         promptInjectionDiagnostics.value = null
+        memoryExtractionStatus.value = MemoryExtractionStatus.Idle
+        memoryExtractionScheduleVersion.incrementAndGet()
+        titleGenerationVersion.incrementAndGet()
+        suggestionGeneration.invalidate()
     }
 }

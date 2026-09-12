@@ -40,6 +40,9 @@ interface KnowledgeBaseDAO {
     @Query("UPDATE knowledge_base SET rag_enabled = :ragEnabled, updated_at = :updatedAt WHERE id = :id")
     suspend fun updateBaseRagEnabled(id: String, ragEnabled: Boolean, updatedAt: Long)
 
+    @Query("UPDATE knowledge_base SET embedding_model_id = :embeddingModelId, updated_at = :updatedAt WHERE id = :id")
+    suspend fun updateBaseEmbeddingModel(id: String, embeddingModelId: String?, updatedAt: Long)
+
     @Query("SELECT * FROM knowledge_document WHERE knowledge_base_id = :baseId ORDER BY updated_at DESC")
     fun observeDocuments(baseId: String): Flow<List<KnowledgeDocumentEntity>>
 

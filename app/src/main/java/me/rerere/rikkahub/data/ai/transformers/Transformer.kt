@@ -25,6 +25,8 @@ class TransformerContext(
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     val workspaceCwd: String? = null,
     val workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
+    val conversationId: Uuid? = null,
+    val conversationMessages: List<UIMessage> = emptyList(),
 )
 
 interface MessageTransformer {
@@ -84,6 +86,8 @@ suspend fun List<UIMessage>.transforms(
     processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     workspaceCwd: String? = null,
     workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
+    conversationId: Uuid? = null,
+    conversationMessages: List<UIMessage> = emptyList(),
 ): List<UIMessage> {
     val ctx = TransformerContext(
         context = context,
@@ -99,6 +103,8 @@ suspend fun List<UIMessage>.transforms(
         processingStatus = processingStatus,
         workspaceCwd = workspaceCwd,
         workspaceFileOperationMode = workspaceFileOperationMode,
+        conversationId = conversationId,
+        conversationMessages = conversationMessages,
     )
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc)

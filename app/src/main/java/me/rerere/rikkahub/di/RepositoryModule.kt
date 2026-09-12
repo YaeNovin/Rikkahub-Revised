@@ -13,6 +13,7 @@ import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.github.GitHubRepository
 import me.rerere.workspace.ProotShellRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceBindMount
@@ -22,6 +23,16 @@ import org.koin.dsl.module
 import java.io.File
 
 val repositoryModule = module {
+    single { me.rerere.rikkahub.data.memory.MemoryMaintenanceService(get(), get()) }
+    single { GitHubRepository(get(), onFailure = { repository, result ->
+        me.rerere.common.android.Logging.logError(
+            name = "GitHub 仓库卡片加载失败",
+            summary = if (result.status == me.rerere.rikkahub.data.github.GitHubCardStatus.RATE_LIMITED) "GitHub API 请求受限"
+                else "GitHub API ${result.httpStatus?.toString() ?: result.failure?.name ?: "unavailable"}",
+            details = "Repository: $repository\nEndpoint: api.github.com\nHTTP: ${result.httpStatus ?: "none"}\nFailure: ${result.failure}\nRetry at: ${result.retryAt ?: "none"}",
+            tag = "GITHUB_CARD",
+        )
+    }) }
     single {
         ConversationRepository(get(), get(), get(), get(), get(), get())
     }

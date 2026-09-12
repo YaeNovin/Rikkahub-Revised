@@ -16,6 +16,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
@@ -27,6 +33,8 @@ import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.visibleChatSuggestions
+import me.rerere.rikkahub.data.model.ChatSuggestionItem
 import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
@@ -34,6 +42,58 @@ import java.time.Instant
 import kotlin.uuid.Uuid
 
 private const val MESSAGE_NODE_INITIAL_PAGE_SIZE = 16
+
+@Serializable
+internal data class ChatSuggestionEnvelope(
+    val version: Int = 2,
+    val items: List<ChatSuggestionItem> = emptyList(),
+    val session: me.rerere.rikkahub.data.model.SuggestionSession = me.rerere.rikkahub.data.model.SuggestionSession(),
+)
+
+internal data class DecodedChatSuggestions(
+    val texts: List<String>,
+    val items: List<ChatSuggestionItem>,
+    val session: me.rerere.rikkahub.data.model.SuggestionSession = me.rerere.rikkahub.data.model.SuggestionSession(),
+)
+
+private val suggestionJson = Json(JsonInstant) { coerceInputValues = true }
+
+internal fun encodeChatSuggestions(conversation: Conversation): String =
+    if (conversation.chatSuggestionItems.isNotEmpty() || conversation.suggestionSession != me.rerere.rikkahub.data.model.SuggestionSession()) {
+        JsonInstant.encodeToString(ChatSuggestionEnvelope(items = conversation.visibleChatSuggestions(), session = conversation.suggestionSession))
+    } else {
+        JsonInstant.encodeToString(conversation.chatSuggestions)
+    }
+
+internal fun decodeChatSuggestions(raw: String): DecodedChatSuggestions {
+    val element = runCatching { JsonInstant.parseToJsonElement(raw) }.getOrNull()
+    if (element is JsonObject) {
+        val items = element["items"] as? JsonArray
+        if (items != null) {
+            val usedIds = hashSetOf<String>()
+            val decoded = items.mapNotNull { item ->
+                runCatching { suggestionJson.decodeFromJsonElement<ChatSuggestionItem>(item) }.getOrNull()
+                    ?.takeIf { it.text.isNotBlank() }
+                    ?.let { value ->
+                        val id = if (value.id.isBlank() || !usedIds.add(value.id)) Uuid.random().toString().also(usedIds::add) else value.id
+                        value.copy(id = id)
+                    }
+            }
+            return DecodedChatSuggestions(
+                texts = decoded.map(ChatSuggestionItem::text),
+                items = decoded,
+                session = element["session"]?.let {
+                    runCatching { suggestionJson.decodeFromJsonElement<me.rerere.rikkahub.data.model.SuggestionSession>(it) }.getOrNull()
+                } ?: me.rerere.rikkahub.data.model.SuggestionSession(),
+            )
+        }
+    }
+    if (element is JsonArray) {
+        val texts = element.mapNotNull { (it as? JsonPrimitive)?.takeIf { it.isString && it.content.isNotBlank() }?.content }
+        return DecodedChatSuggestions(texts = texts, items = emptyList())
+    }
+    return DecodedChatSuggestions(texts = emptyList(), items = emptyList())
+}
 
 internal suspend fun <T> forEachAdaptivePage(
     initialPageSize: Int,
@@ -397,11 +457,12 @@ class ConversationRepository(
             createAt = conversation.createAt.toEpochMilli(),
             updateAt = conversation.updateAt.toEpochMilli(),
             assistantId = conversation.assistantId.toString(),
-            chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
+            chatSuggestions = encodeChatSuggestions(conversation),
             isPinned = conversation.isPinned,
             customSystemPrompt = conversation.customSystemPrompt ?: "",
             modeInjectionIds = JsonInstant.encodeToString(conversation.modeInjectionIds),
             lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
+            disabledLorebookIds = JsonInstant.encodeToString(conversation.disabledLorebookIds),
             temporaryModeInjections = JsonInstant.encodeToString(conversation.temporaryModeInjections),
             lorebookRuntimeStates = JsonInstant.encodeToString(conversation.lorebookRuntimeStates),
             workspaceCwd = conversation.workspaceCwd ?: "",
@@ -412,6 +473,7 @@ class ConversationRepository(
             sourceMessageId = conversation.sourceMessageId?.toString() ?: "",
             branchedAt = conversation.branchedAt?.toEpochMilli() ?: 0,
             sourceConversationTitle = conversation.sourceConversationTitle.orEmpty(),
+            memoryMode = conversation.memoryMode.name,
         )
     }
 
@@ -419,6 +481,7 @@ class ConversationRepository(
         conversationEntity: ConversationEntity,
         messageNodes: List<MessageNode>
     ): Conversation {
+        val decodedSuggestions = decodeChatSuggestions(conversationEntity.chatSuggestions)
         return Conversation(
             id = Uuid.parse(conversationEntity.id),
             title = conversationEntity.title,
@@ -426,11 +489,14 @@ class ConversationRepository(
             createAt = Instant.ofEpochMilli(conversationEntity.createAt),
             updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
             assistantId = Uuid.parse(conversationEntity.assistantId),
-            chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
+            chatSuggestions = decodedSuggestions.texts,
+            chatSuggestionItems = decodedSuggestions.items,
+            suggestionSession = decodedSuggestions.session,
             isPinned = conversationEntity.isPinned,
             customSystemPrompt = conversationEntity.customSystemPrompt.ifEmpty { null },
             modeInjectionIds = JsonInstant.decodeFromString(conversationEntity.modeInjectionIds),
             lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
+            disabledLorebookIds = JsonInstant.decodeFromString(conversationEntity.disabledLorebookIds),
             temporaryModeInjections = JsonInstant.decodeFromString(conversationEntity.temporaryModeInjections),
             lorebookRuntimeStates = JsonInstant.decodeFromString(conversationEntity.lorebookRuntimeStates),
             workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
@@ -451,6 +517,9 @@ class ConversationRepository(
                 .takeIf { it > 0 }
                 ?.let(Instant::ofEpochMilli),
             sourceConversationTitle = conversationEntity.sourceConversationTitle.ifEmpty { null },
+            memoryMode = runCatching {
+                me.rerere.rikkahub.data.model.ConversationMemoryMode.valueOf(conversationEntity.memoryMode)
+            }.getOrDefault(me.rerere.rikkahub.data.model.ConversationMemoryMode.INHERIT),
         )
     }
 

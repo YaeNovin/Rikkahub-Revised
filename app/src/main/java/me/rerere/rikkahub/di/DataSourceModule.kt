@@ -19,15 +19,21 @@ import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.RequestStatisticsRecorder
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.ChatImageGenerationService
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transforms.KnowledgeRetrievalTransformer
 import me.rerere.rikkahub.data.ai.transforms.MemoryRetrievalTransformer
 import me.rerere.rikkahub.data.knowledge.KnowledgeDocumentImporter
 import me.rerere.rikkahub.data.memory.MemoryEmbeddingService
+import me.rerere.rikkahub.data.memory.MemoryExtractionService
+import me.rerere.rikkahub.data.memory.ConversationMemoryIndexService
 import me.rerere.rikkahub.data.api.RikkaHubAPI
 import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.repository.VideoGenerationTaskRepository
+import me.rerere.rikkahub.data.video.VideoGenerationCoordinator
+import me.rerere.rikkahub.data.video.VideoGenerationWorker
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
 import me.rerere.rikkahub.data.db.migrations.Migration_6_7
@@ -43,12 +49,15 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.koin.dsl.module
+import org.koin.androidx.workmanager.dsl.worker
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
+    single { me.rerere.rikkahub.ui.pages.log.LogAnalysisStore(get()) }
+    single { me.rerere.rikkahub.data.ai.MediaGenerationService(get(), get()) }
     single {
         SettingsStore(context = get(), scope = get())
     }
@@ -57,7 +66,8 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16)
+            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16,
+                me.rerere.rikkahub.data.db.migrations.Migration_42_43)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     val dictDir = SimpleDictManager.extractDict(context)
@@ -121,9 +131,27 @@ val dataSourceModule = module {
 
     single { KnowledgeRetrievalTransformer(repository = get(), providerManager = get()) }
 
-    single { MemoryRetrievalTransformer(repository = get(), providerManager = get()) }
+    single {
+        MemoryRetrievalTransformer(
+            repository = get(),
+            providerManager = get(),
+            conversationMemoryIndexService = get(),
+        )
+    }
 
     single { MemoryEmbeddingService(repository = get(), providerManager = get()) }
+
+    single { ConversationMemoryIndexService(dao = get(), providerManager = get(), memoryRepository = get()) }
+
+    single {
+        MemoryExtractionService(
+            providerManager = get(),
+            memoryEmbeddingService = get(),
+            memoryRepository = get(),
+            conversationMemoryDAO = get(),
+            json = get(),
+        )
+    }
 
     single {
         KnowledgeDocumentImporter(
@@ -179,6 +207,40 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().conversationMemoryDao()
+    }
+
+    single {
+        get<AppDatabase>().videoGenerationTaskDao()
+    }
+
+    single { get<AppDatabase>().githubRepositoryCacheDao() }
+
+    single {
+        VideoGenerationTaskRepository(get())
+    }
+
+    single {
+        VideoGenerationCoordinator(
+            context = get(),
+            repository = get(),
+            providerManager = get(),
+        )
+    }
+
+    worker { parameters ->
+        VideoGenerationWorker(
+            appContext = get(),
+            workerParameters = parameters.get(),
+            repository = get(),
+            settingsStore = get(),
+            providerManager = get(),
+            filesManager = get(),
+            client = get(),
+        )
+    }
+
+    single {
         MessageFtsManager(get())
     }
 
@@ -189,9 +251,8 @@ val dataSourceModule = module {
             context = get(),
             providerManager = get(),
             json = get(),
-            memoryRepo = get(),
-            memoryEmbeddingService = get(),
             knowledgeBaseRepository = get(),
+            knowledgeRetrievalTransformer = get(),
             requestStatisticsRecorder = get(),
         )
     }
@@ -257,6 +318,8 @@ val dataSourceModule = module {
     single {
         ProviderManager(client = get(), context = get())
     }
+
+    single { ChatImageGenerationService(providerManager = get(), filesManager = get(), generationKeepAlive = get()) }
 
     single {
         WebDavSync(

@@ -30,6 +30,7 @@ import me.rerere.rikkahub.di.dataSourceModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.video.VideoGenerationCoordinator
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -84,6 +85,9 @@ class RikkaHubApp : Application() {
         // sync upload files to DB
         syncManagedFiles()
 
+        // Resume asynchronous video tasks after process death or app updates.
+        recoverVideoGenerationTasks()
+
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
@@ -102,6 +106,7 @@ class RikkaHubApp : Application() {
                 Log.i(TAG, "incrementLaunchCount: ${store.settingsFlowRaw.first().launchCount}")
             }.onFailure {
                 Log.e(TAG, "incrementLaunchCount failed", it)
+                Logging.logSoftwareError(TAG, "incrementLaunchCount", it)
             }
         }
     }
@@ -112,6 +117,7 @@ class RikkaHubApp : Application() {
                 get<WorkspaceManager>().cleanupAllTempDirs()
             }.onFailure {
                 Log.e(TAG, "cleanupWorkspaceTempDirs failed", it)
+                Logging.logSoftwareError(TAG, "cleanupWorkspaceTempDirs", it)
             }
         }
     }
@@ -122,6 +128,7 @@ class RikkaHubApp : Application() {
                 get<WorkspaceRepository>().checkIntegrity()
             }.onFailure {
                 Log.e(TAG, "checkWorkspaceIntegrity failed", it)
+                Logging.logSoftwareError(TAG, "checkWorkspaceIntegrity", it)
             }
         }
     }
@@ -152,6 +159,20 @@ class RikkaHubApp : Application() {
                 get<FilesManager>().syncFolder()
             }.onFailure {
                 Log.e(TAG, "syncManagedFiles failed", it)
+                Logging.logSoftwareError(TAG, "syncManagedFiles", it)
+            }
+        }
+    }
+
+    private fun recoverVideoGenerationTasks() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                me.rerere.rikkahub.data.files.AtomicMediaFileStore.cleanupStalePartials(
+                    File(filesDir, FileFolders.GENERATED_VIDEOS))
+                get<VideoGenerationCoordinator>().recoverTasks()
+            }.onFailure {
+                Log.e(TAG, "recoverVideoGenerationTasks failed", it)
+                Logging.logSoftwareError(TAG, "recoverVideoGenerationTasks", it)
             }
         }
     }
@@ -190,6 +211,7 @@ class RikkaHubApp : Application() {
                 }
             }.onFailure {
                 Log.e(TAG, "startWebServerIfEnabled failed", it)
+                Logging.logSoftwareError(TAG, "startWebServerIfEnabled", it)
             }
         }
     }
@@ -238,5 +260,6 @@ class AppScope : CoroutineScope by CoroutineScope(
         + CoroutineName("AppScope")
         + CoroutineExceptionHandler { _, e ->
         Log.e(TAG, "AppScope exception", e)
+        Logging.logSoftwareError(TAG, "AppScope", e)
     }
 )

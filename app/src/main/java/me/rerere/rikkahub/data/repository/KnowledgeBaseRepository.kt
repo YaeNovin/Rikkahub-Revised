@@ -61,6 +61,10 @@ class KnowledgeBaseRepository(
         dao.updateBaseRagEnabled(id, ragEnabled, Clock.System.now().toEpochMilliseconds())
     }
 
+    suspend fun updateBaseEmbeddingModel(id: String, embeddingModelId: String?) {
+        dao.updateBaseEmbeddingModel(id, embeddingModelId, Clock.System.now().toEpochMilliseconds())
+    }
+
     suspend fun insertDocumentWithChunks(
         document: KnowledgeDocumentEntity,
         chunks: List<KnowledgeChunkEntity>,

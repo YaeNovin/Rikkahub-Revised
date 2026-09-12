@@ -223,7 +223,7 @@ fun splitTextForTokenBudget(text: String, maxTokens: Int): List<String> {
 private fun RollingContextSummary?.orEmptySummaryTokens(): Int = this?.content?.let(::estimateTextTokens) ?: 0
 
 @Suppress("DEPRECATION")
-private fun estimatePartTokens(part: UIMessagePart): Int = when (part) {
+fun estimatePartTokens(part: UIMessagePart): Int = when (part) {
     is UIMessagePart.Text -> estimateTextTokens(part.text)
     is UIMessagePart.Reasoning -> estimateTextTokens(part.reasoning)
     is UIMessagePart.Tool -> estimateTextTokens(part.toolCallId) +

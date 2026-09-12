@@ -97,12 +97,23 @@ class SkillManager(
 
     fun getSkillDir(skillName: String): File? = resolveSkillDir(skillName)
 
+    @Synchronized
     fun saveSkillFile(skillName: String, relativePath: String, content: String): Boolean {
         val skillDir = resolveSkillDir(skillName) ?: return false
         val target = SkillPaths.resolveSkillFile(skillDir, relativePath) ?: return false
-        target.parentFile?.mkdirs()
-        target.writeText(content)
-        return true
+        val atomicFile = android.util.AtomicFile(target)
+        var stream: java.io.FileOutputStream? = null
+        return try {
+            target.parentFile?.mkdirs()
+            stream = atomicFile.startWrite()
+            stream.write(content.toByteArray(Charsets.UTF_8))
+            atomicFile.finishWrite(stream)
+            true
+        } catch (e: Exception) {
+            atomicFile.failWrite(stream)
+            Log.w(TAG, "Failed to save skill file", e)
+            false
+        }
     }
 
     fun saveSkillFilesAtomically(skillName: String, files: Map<String, String>): Boolean {

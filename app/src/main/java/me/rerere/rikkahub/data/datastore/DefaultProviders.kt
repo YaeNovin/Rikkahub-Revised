@@ -21,6 +21,18 @@ val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 
 val DEFAULT_PROVIDERS = listOf(
     ProviderSetting.OpenAI(
+        id = Uuid.parse("8ea9ce7d-b9a4-4510-b536-ded739f7e102"),
+        name = "可灵 AI",
+        baseUrl = "https://api-singapore.klingai.com/v1",
+        enabled = false,
+        builtIn = true,
+        models = listOf(Model(modelId = "kling-v1-6", displayName = "Kling 1.6",
+            id = Uuid.parse("69c560f1-0df5-4e47-8e17-1d2e06de87b6"),
+            type = me.rerere.ai.provider.ModelType.VIDEO,
+            inputModalities = listOf(Modality.TEXT, Modality.IMAGE), outputModalities = listOf(Modality.VIDEO))),
+        description = { MarkdownBlock("可灵官方视频生成服务。官网：[klingai.com](https://klingai.com)。API Key 填写为 AccessKey:SecretKey，应用会自动生成短期 JWT。当前接入文生与单图生视频，使用专业模式（pro）。") },
+    ),
+    ProviderSetting.OpenAI(
         id = Uuid.parse("a8d2d463-e8c0-41f2-b89e-f5eb8e716cce"),
         name = "RikkaHub",
         baseUrl = "https://api.rikka-ai.com/v1",

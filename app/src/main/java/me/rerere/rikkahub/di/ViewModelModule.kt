@@ -12,6 +12,7 @@ import me.rerere.rikkahub.ui.pages.favorite.FavoriteVM
 import me.rerere.rikkahub.ui.pages.search.SearchVM
 import me.rerere.rikkahub.ui.pages.history.HistoryVM
 import me.rerere.rikkahub.ui.pages.stats.StatsVM
+import me.rerere.rikkahub.ui.pages.log.LogVM
 import me.rerere.rikkahub.ui.pages.imggen.ImgGenVM
 import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
@@ -24,6 +25,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.knowledge.KnowledgeBaseVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
+import me.rerere.rikkahub.ui.hooks.ChatInputState
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -40,8 +42,13 @@ val viewModelModule = module {
             analytics = if (BuildConfig.ENABLE_FIREBASE) get<FirebaseAnalytics>() else null,
             filesManager = get(),
             favoriteRepository = get(),
+            memoryRepository = get(),
+            chatImageGenerationService = get(),
+            providerManager = get(),
+            sharedInputState = get(),
         )
     }
+    single { ChatInputState() }
     viewModelOf(::ChatDrawerVM)
     viewModelOf(::SettingVM)
     viewModelOf(::DebugVM)
@@ -83,5 +90,6 @@ val viewModelModule = module {
     viewModelOf(::FavoriteVM)
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)
+    viewModelOf(::LogVM)
     viewModelOf(::KnowledgeBaseVM)
 }

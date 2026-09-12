@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import me.rerere.rikkahub.ui.components.ui.trackGlassInteraction
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -56,6 +57,8 @@ import coil3.request.crossfade
 import coil3.svg.SvgDecoder
 import com.dokar.sonner.Toaster
 import com.dokar.sonner.rememberToasterState
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -71,10 +74,13 @@ import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
 import me.rerere.rikkahub.ui.components.ui.GlobalAppBackground
 import me.rerere.rikkahub.ui.components.ui.GlobalGlassTheme
 import me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground
+import me.rerere.rikkahub.ui.components.ui.LocalGlobalBackgroundHazeState
 import me.rerere.rikkahub.ui.components.ui.advancedAppearanceCapabilities
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
 import me.rerere.rikkahub.ui.context.LocalGlobalGlassSurfaceOpacity
+import me.rerere.rikkahub.ui.context.LocalAppearanceSurfaceOpacityPolicy
+import me.rerere.rikkahub.ui.context.appearanceSurfaceOpacityPolicy
 import me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -146,7 +152,7 @@ import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
-import me.rerere.rikkahub.ui.theme.rememberChatBackgroundForeground
+import me.rerere.rikkahub.ui.theme.rememberBackgroundReadability
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.openUsageAccessSettings
 import okhttp3.OkHttpClient
@@ -249,7 +255,9 @@ class RouteActivity : ComponentActivity() {
         super.onNewIntent(intent)
         // Navigate to the chat screen if a conversation ID is provided
         intent.getStringExtra("conversationId")?.let { text ->
-            navStack?.add(Screen.Chat(text))
+            runCatching { Uuid.parse(text) }.getOrNull()?.let {
+                if (navStack?.lastOrNull() != Screen.Chat(text)) navStack?.add(Screen.Chat(text))
+            }
         }
     }
 
@@ -258,6 +266,7 @@ class RouteActivity : ComponentActivity() {
     fun AppRoutes() {
         val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+        me.rerere.rikkahub.ui.theme.MaintainBackgroundAccent(settings, settingsStore)
         val tts = rememberCustomTtsState()
         val asr = rememberCustomAsrState()
         val eventBus = koinInject<AppEventBus>()
@@ -276,7 +285,9 @@ class RouteActivity : ComponentActivity() {
 
         val startScreen = remember {
             Screen.Chat(
-                id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
+                id = intent.getStringExtra("conversationId")?.let { value ->
+                    runCatching { Uuid.parse(value).toString() }.getOrNull()
+                } ?: if (readBooleanPreference("create_new_conversation_on_start", true)) {
                     Uuid.random().toString()
                 } else {
                     readStringPreference(
@@ -295,23 +306,30 @@ class RouteActivity : ComponentActivity() {
         val appearanceCapabilities = remember {
             advancedAppearanceCapabilities(Build.VERSION.SDK_INT)
         }
+        val globalBackgroundHazeState = rememberHazeState()
+        val glassBackdrop = me.rerere.rikkahub.ui.components.ui.rememberGlassBackdrop()
+        val glassPowerSave = me.rerere.rikkahub.ui.components.ui.rememberGlassPowerSave()
+        val motionAllowed = me.rerere.rikkahub.ui.components.ui.rememberSystemMotionAllowed()
         val pageSurfaceStyle = appearanceCapabilities.effectiveSurfaceStyle(
             settings.advancedAppearanceSetting.pageSurfaceStyle
         )
         val globalBackgroundVisible = globalBackgroundActive &&
             pageSurfaceStyle != BackgroundSurfaceStyle.OPAQUE
-        val globalBackgroundForeground = rememberChatBackgroundForeground(
+        val globalReadability = rememberBackgroundReadability(
             background = settings.advancedAppearanceSetting.globalBackground
                 .takeIf { globalBackgroundActive },
             backgroundOpacity = settings.advancedAppearanceSetting.globalBackgroundOpacity,
             useGradientBackground = false,
+            overlayTopAlpha = .28f,
+            overlayBottomAlpha = .42f,
         )
         val globalBackgroundSpec = if (globalBackgroundActive) {
             AppearanceBackgroundSpec(
                 background = settings.advancedAppearanceSetting.globalBackground,
                 opacity = settings.advancedAppearanceSetting.globalBackgroundOpacity,
                 blurRadius = settings.advancedAppearanceSetting.globalBackgroundBlurRadius,
-                foreground = globalBackgroundForeground,
+                foreground = globalReadability.foreground,
+                readability = globalReadability,
             )
         } else {
             null
@@ -326,9 +344,20 @@ class RouteActivity : ComponentActivity() {
                 LocalSettings provides settings,
                 LocalGlobalBackgroundActive provides globalBackgroundVisible,
                 LocalGlobalGlassSurfaceOpacity provides settings.advancedAppearanceSetting.pageSurfaceOpacity,
+                LocalAppearanceSurfaceOpacityPolicy provides appearanceSurfaceOpacityPolicy(
+                    cardOpacity = settings.advancedAppearanceSetting.pageSurfaceOpacity,
+                    topBarOpacity = settings.displaySetting.topBarSurfaceOpacity,
+                    inputOpacity = settings.displaySetting.inputSurfaceOpacity,
+                    dockOpacity = settings.advancedAppearanceSetting.chatDockGlassOpacity,
+                    cardBackgroundActive = globalBackgroundVisible,
+                ),
                 LocalPageSurfaceStyle provides pageSurfaceStyle,
                 LocalAdvancedAppearanceCapabilities provides appearanceCapabilities,
                 LocalAppearanceBackground provides globalBackgroundSpec,
+                LocalGlobalBackgroundHazeState provides globalBackgroundHazeState,
+                me.rerere.rikkahub.ui.components.ui.LocalGlassBackdrop provides glassBackdrop,
+                me.rerere.rikkahub.ui.components.ui.LocalGlassPowerSave provides glassPowerSave,
+                me.rerere.rikkahub.ui.components.ui.LocalGlassBusy provides glassBackdrop.interacting,
                 LocalToaster provides toastState,
                 LocalTTSState provides tts,
                 LocalASRState provides asr,
@@ -345,12 +374,16 @@ class RouteActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .semantics { testTagsAsResourceId = true }
+                        .trackGlassInteraction(glassBackdrop)
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    if (globalBackgroundVisible) {
+                    if (globalBackgroundActive) {
                         GlobalAppBackground(
                             settings = settings,
-                            modifier = Modifier.fillMaxSize(),
+                            captureOnly = !globalBackgroundVisible,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .hazeSource(globalBackgroundHazeState),
                         )
                     }
                     GlobalGlassTheme(
@@ -367,6 +400,9 @@ class RouteActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         onBack = { backStack.removeLastOrNull() },
                         transitionSpec = {
+                            if (!motionAllowed) {
+                                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                            } else {
                             if (backStack.size == 1) {
                                 fadeIn(animationSpec = tween(210)) togetherWith
                                     fadeOut(animationSpec = tween(190))
@@ -376,18 +412,27 @@ class RouteActivity : ComponentActivity() {
                                     (scaleOut(targetScale = 1.02f, animationSpec = tween(220)) +
                                         fadeOut(animationSpec = tween(200)))
                             }
+                            }
                         },
                         popTransitionSpec = {
+                            if (!motionAllowed) {
+                                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                            } else {
                             (scaleIn(initialScale = 1.02f, animationSpec = tween(240)) +
                                 fadeIn(animationSpec = tween(240))) togetherWith
                                 (scaleOut(targetScale = 0.96f, animationSpec = tween(220)) +
                                     fadeOut(animationSpec = tween(200)))
+                            }
                         },
                         predictivePopTransitionSpec = {
+                            if (!motionAllowed) {
+                                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                            } else {
                             (scaleIn(initialScale = 1.02f, animationSpec = tween(240)) +
                                 fadeIn(animationSpec = tween(240))) togetherWith
                                 (scaleOut(targetScale = 0.96f, animationSpec = tween(220)) +
                                     fadeOut(animationSpec = tween(200)))
+                            }
                         },
                         entryProvider = entryProvider {
                             entry<Screen.Chat> { key ->
@@ -489,6 +534,9 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.ImageGen> {
                                 ImageGenPage()
                             }
+                            entry<Screen.VideoGen> {
+                                me.rerere.rikkahub.ui.pages.videogen.VideoGenPage()
+                            }
 
                             entry<Screen.WebView> { key ->
                                 WebViewPage(key.url, key.contentId)
@@ -582,6 +630,9 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Extensions> {
                                 ExtensionsPage()
+                            }
+                            entry<Screen.ExtensionItem> { key ->
+                                me.rerere.rikkahub.ui.pages.extensions.ExtensionItemPage(key.kind, key.id)
                             }
 
                             entry<Screen.QuickMessages> {
@@ -762,6 +813,9 @@ sealed interface Screen : NavKey {
     data object ImageGen : Screen
 
     @Serializable
+    data object VideoGen : Screen
+
+    @Serializable
     data class WebView(val url: String = "", val contentId: String = "") : Screen
 
     @Serializable
@@ -829,6 +883,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Extensions : Screen
+
+    @Serializable
+    data class ExtensionItem(val kind: String, val id: String) : Screen
 
     @Serializable
     data object QuickMessages : Screen

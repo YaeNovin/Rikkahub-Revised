@@ -7,6 +7,7 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import me.rerere.ai.core.TokenUsage
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
+import me.rerere.rikkahub.data.db.dao.ConversationMemoryDAO
 import me.rerere.rikkahub.data.db.dao.FavoriteDAO
 import me.rerere.rikkahub.data.db.dao.FolderDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
@@ -16,13 +17,21 @@ import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.RequestStatDAO
 import me.rerere.rikkahub.data.db.dao.KnowledgeBaseDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
+import me.rerere.rikkahub.data.db.dao.VideoGenerationTaskDAO
+import me.rerere.rikkahub.data.db.dao.GitHubRepositoryCacheDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
+import me.rerere.rikkahub.data.db.entity.ConversationMemoryEntity
+import me.rerere.rikkahub.data.db.entity.ConversationMemoryExclusionEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
+import me.rerere.rikkahub.data.db.entity.MemorySourceEntity
+import me.rerere.rikkahub.data.db.entity.MemoryDeletionEntity
+import me.rerere.rikkahub.data.db.entity.MemoryRunEntity
+import me.rerere.rikkahub.data.db.entity.MemoryExtractionCheckpointEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.RequestStatEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
@@ -30,6 +39,10 @@ import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeCitationEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.db.entity.VideoGenerationOutputEntity
+import me.rerere.rikkahub.data.db.entity.VideoGenerationTaskEntity
+import me.rerere.rikkahub.data.db.entity.GitHubRepositoryCacheEntity
+import me.rerere.rikkahub.data.db.entity.GitHubApiCacheStateEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
@@ -39,6 +52,9 @@ import me.rerere.rikkahub.utils.JsonInstant
     entities = [
         ConversationEntity::class,
         MemoryEntity::class,
+        MemorySourceEntity::class,
+        MemoryDeletionEntity::class,
+        MemoryRunEntity::class,
         GenMediaEntity::class,
         GenMediaFolderEntity::class,
         MessageNodeEntity::class,
@@ -51,8 +67,15 @@ import me.rerere.rikkahub.utils.JsonInstant
         KnowledgeChunkEntity::class,
         KnowledgeCitationEntity::class,
         RequestStatEntity::class,
+        ConversationMemoryEntity::class,
+        ConversationMemoryExclusionEntity::class,
+        MemoryExtractionCheckpointEntity::class,
+        VideoGenerationTaskEntity::class,
+        VideoGenerationOutputEntity::class,
+        GitHubRepositoryCacheEntity::class,
+        GitHubApiCacheStateEntity::class,
     ],
-    version = 34,
+    version = 43,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -82,6 +105,14 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 31, to = 32),
         AutoMigration(from = 32, to = 33),
         AutoMigration(from = 33, to = 34),
+        AutoMigration(from = 34, to = 35),
+        AutoMigration(from = 35, to = 36),
+        AutoMigration(from = 36, to = 37),
+        AutoMigration(from = 37, to = 38),
+        AutoMigration(from = 38, to = 39),
+        AutoMigration(from = 39, to = 40),
+        AutoMigration(from = 40, to = 41),
+        AutoMigration(from = 41, to = 42),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -105,6 +136,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun requestStatDao(): RequestStatDAO
 
     abstract fun knowledgeBaseDao(): KnowledgeBaseDAO
+
+    abstract fun conversationMemoryDao(): ConversationMemoryDAO
+
+    abstract fun videoGenerationTaskDao(): VideoGenerationTaskDAO
+    abstract fun githubRepositoryCacheDao(): GitHubRepositoryCacheDAO
 }
 
 object TokenUsageConverter {

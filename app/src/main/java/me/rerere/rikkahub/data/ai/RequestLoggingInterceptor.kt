@@ -20,9 +20,9 @@ import okhttp3.Interceptor
 import okhttp3.RequestBody
 import okhttp3.Response
 import okio.Buffer
+import okio.ForwardingSink
+import okio.buffer
 
-private const val MAX_LOGGED_REQUEST_BODY_BYTES = 64L * 1024L
-private const val MAX_LOGGED_ERROR_BODY_BYTES = 16L * 1024L
 private const val MAX_LOGGED_ERROR_REASON_CHARS = 2_048
 private const val REDACTED = "[REDACTED]"
 
@@ -40,7 +40,10 @@ class RequestLoggingInterceptor(
         val startTime = System.currentTimeMillis()
         val startNanos = System.nanoTime()
         val requestHeaders = if (recordHttpRequest) request.headers.toSafeMap() else emptyMap()
-        val requestBody = if (recordHttpRequest) request.body.readSanitizedBody() else null
+        val secrets = request.headers.names().filter { it.lowercase() !in SAFE_HEADER_FIELDS }.flatMap { name ->
+            request.headers.values(name).flatMap { listOf(it, it.removePrefix("Bearer ").removePrefix("Basic ")) }
+        } + request.url.queryParameterNames.filter { it.isSensitiveLogField() }.mapNotNull { request.url.queryParameter(it) }
+        val requestBody = if (recordHttpRequest) request.body.readDetailedBody(request.header("Content-Encoding"), secrets) else null
 
         val response: Response
         var error: String? = null
@@ -79,7 +82,7 @@ class RequestLoggingInterceptor(
         if (!response.isSuccessful) {
             error = response.readSafeErrorReason()
         }
-        buildUnifiedRequestLog(
+        val entry = buildUnifiedRequestLog(
             diagnostics = diagnostics,
             recordHttpRequest = recordHttpRequest,
             url = request.url.toSafeLogUrl().takeIf { recordHttpRequest },
@@ -90,7 +93,8 @@ class RequestLoggingInterceptor(
             responseHeaders = if (recordHttpRequest) response.headers.toSafeMap() else emptyMap(),
             durationMs = durationMs,
             error = error,
-        )?.record()
+        )
+        entry?.record()
         requestStatisticsRecorder?.record(
             diagnostics = diagnostics,
             timestamp = startTime,
@@ -100,13 +104,20 @@ class RequestLoggingInterceptor(
             completedAt = completedAt,
         )
 
+        val type = response.body.contentType()?.toString().orEmpty().lowercase()
+        if (recordHttpRequest && entry != null && (type.contains("json") || type.startsWith("text/") || type.contains("xml"))) {
+            return response.newBuilder().body(response.body.captureForLog(response.header("Content-Encoding")) { body ->
+                Logging.updateResponseBody(entry.id, detailedLogBody(body, secrets))
+            }).build()
+        }
         return response
     }
 }
 
 private fun Response.readSafeErrorReason(): String {
     val responseBody = runCatching {
-        peekBody(MAX_LOGGED_ERROR_BODY_BYTES).string()
+        val bytes = peekBody(LOG_BODY_LIMIT).bytes()
+        decodeLogBytes(bytes, header("Content-Encoding"), body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8)
     }.getOrNull()
     return extractLoggedResponseError(responseBody)
         ?: "HTTP $code ${message.takeIf(String::isNotBlank).orEmpty()}".trim()
@@ -144,7 +155,10 @@ internal fun buildUnifiedRequestLog(
                 model = diagnostics.model,
                 channel = diagnostics.channel.name,
                 operation = diagnostics.operation.name,
-                parameters = diagnostics.parameters,
+                parameters = diagnostics.parameters.mapValues { (key, value) ->
+                    if (key.isSensitiveLogField()) REDACTED else detailedLogBody(value)
+                } + actualRequestParameters(requestBody).takeIf { recordHttpRequest }.orEmpty() +
+                    diagnostics.requestId?.let { mapOf("request_id" to it) }.orEmpty(),
                 responseCode = responseCode,
                 durationMs = durationMs,
                 error = error,
@@ -179,6 +193,15 @@ private fun LogEntry.record() {
     }
 }
 
+internal fun actualRequestParameters(body: String?): Map<String, String> {
+    val parsed = body?.let { runCatching { JsonInstantPretty.parseToJsonElement(detailedLogBody(it)) as? JsonObject }.getOrNull() }
+        ?: return emptyMap()
+    return parsed.filterKeys { it !in setOf("messages", "contents", "input", "prompt", "instructions", "tools", "content") }
+        .mapKeys { "body.${it.key}" }.mapValues { (_, value) ->
+            if (value is JsonPrimitive && value.isString) value.content else value.toString()
+        }
+}
+
 internal fun Headers.toSafeMap(): Map<String, String> = names().associateWith { name ->
     if (name.lowercase() in SAFE_HEADER_FIELDS) get(name).orEmpty() else REDACTED
 }
@@ -192,15 +215,23 @@ internal fun HttpUrl.toSafeLogUrl(): String {
     }.build().toString()
 }
 
-private fun RequestBody?.readSanitizedBody(): String? {
+private fun RequestBody?.readDetailedBody(encoding: String?, secrets: List<String>): String? {
     if (this == null) return null
+    if (isOneShot() || isDuplex()) return "[request body omitted: streaming body]"
     val length = runCatching { contentLength() }.getOrDefault(-1L)
     if (length < 0L) return "[request body omitted: unknown length]"
-    if (length > MAX_LOGGED_REQUEST_BODY_BYTES) return "[request body omitted: $length bytes]"
+    if (length > LOG_BODY_LIMIT) return "[request body omitted: $length bytes]"
     return runCatching {
         val buffer = Buffer()
-        writeTo(buffer)
-        sanitizeRequestBody(buffer.readUtf8())
+        val bounded = object : ForwardingSink(buffer) {
+            override fun write(source: Buffer, byteCount: Long) {
+                require(buffer.size + byteCount <= LOG_BODY_LIMIT) { "Request log body limit exceeded" }
+                super.write(source, byteCount)
+            }
+        }.buffer()
+        writeTo(bounded)
+        bounded.flush()
+        detailedLogBody(decodeLogBytes(buffer.readByteArray(), encoding, contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8), secrets)
     }.getOrElse { "[request body omitted: unreadable]" }
 }
 
@@ -278,6 +309,7 @@ private val SENSITIVE_FIELDS = setOf(
     "token",
     "cookie",
     "setcookie",
+    "password", "secret", "secretkey", "accesskey", "signature", "xapikey",
 )
 private val TEXT_FIELDS = setOf("text", "prompt", "input", "instructions", "content")
 private val BINARY_FIELDS = setOf("data", "base64", "bytes")

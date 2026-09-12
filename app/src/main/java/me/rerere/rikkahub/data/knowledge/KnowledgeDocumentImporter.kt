@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.knowledge
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.net.toFile
@@ -10,8 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.EmbeddingImageInput
 import me.rerere.ai.provider.EmbeddingGenerationParams
+import me.rerere.ai.provider.EmbeddingTaskType
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.usesVolcengineMultimodalEmbeddingApi
+import me.rerere.ai.provider.usesVolcengineTextEmbeddingApi
+import me.rerere.ai.provider.usesGoogleMultimodalEmbeddingApi
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.document.DocxParser
@@ -27,6 +32,7 @@ import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -37,6 +43,10 @@ import kotlin.uuid.Uuid
 private const val CHUNK_SIZE = 1400
 private const val CHUNK_OVERLAP = 180
 private const val EMBEDDING_BATCH_SIZE = 32
+// Ark recommends no more than four inputs and a total of 4096 tokens per call.
+// Keep batches at that documented recommendation; each chunk is validated by
+// the provider against its 100000 UTF-8 byte limit.
+private const val VOLCENGINE_TEXT_EMBEDDING_BATCH_SIZE = 4
 private const val MAX_SOURCE_FILE_BYTES = 20L * 1024 * 1024
 private const val MAX_SOURCE_FILE_SIZE_MIB = 20
 private const val MAX_EXTRACTED_TEXT_CHARS = 3_000_000
@@ -87,7 +97,17 @@ class KnowledgeDocumentImporter(
                 ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
                 ?.let { settings.resolveEmbeddingModel(it) }
                 ?: settings.resolveEmbeddingModel()
-            val visualImage = temporaryFile.toVisionEmbeddingImage(mimeType, model?.usesVolcengineMultimodalEmbeddingApi() == true)
+            val modelProvider = model?.findProvider(settings.providers)
+            val useVisionEmbedding = model != null && (
+                model.usesVolcengineMultimodalEmbeddingApi() ||
+                    (model.usesGoogleMultimodalEmbeddingApi() &&
+                        modelProvider is ProviderSetting.Google && !modelProvider.vertexAI)
+                )
+            val visualImage = temporaryFile.toVisionEmbeddingImage(
+                mimeType = mimeType,
+                useVisionEmbedding = useVisionEmbedding,
+                normalizeGoogleWebp = model?.usesGoogleMultimodalEmbeddingApi() == true,
+            )
             val content = when {
                 visualImage != null -> "[图片文档：$title]"
                 mimeType.startsWith("image/") && model == null -> "[图片文档：$title]"
@@ -127,17 +147,20 @@ class KnowledgeDocumentImporter(
                 return@withContext indexedDocument.copy(status = KnowledgeDocumentEntity.STATUS_READY_WITHOUT_EMBEDDING)
             }
 
-            val providerSetting = model.findProvider(settings.providers)
+            val providerSetting = modelProvider
                 ?: error("Embedding provider not found for ${model.modelId}")
             val provider = providerManager.getProviderByType(providerSetting)
             require(visualImage == null || chunks.size == 1) {
                 "An image document must produce exactly one embedding chunk"
             }
-            val embeddingBatchSize = if (model.usesVolcengineMultimodalEmbeddingApi()) {
-                1
-            } else {
-                EMBEDDING_BATCH_SIZE
+            val embeddingBatchSize = when {
+                model.usesVolcengineMultimodalEmbeddingApi() -> 1
+                model.usesGoogleMultimodalEmbeddingApi() -> 1
+                model.usesVolcengineTextEmbeddingApi() || providerSetting.isVolcengineArkEndpoint() ->
+                    VOLCENGINE_TEXT_EMBEDDING_BATCH_SIZE
+                else -> EMBEDDING_BATCH_SIZE
             }
+            var embeddingDimension: Int? = null
             chunks.chunked(embeddingBatchSize).forEach { batch ->
                 val result = provider.generateEmbedding(
                     providerSetting = providerSetting,
@@ -145,6 +168,7 @@ class KnowledgeDocumentImporter(
                         model = model,
                         input = if (visualImage == null) batch.map { it.content } else emptyList(),
                         images = visualImage?.let(::listOf).orEmpty(),
+                        taskType = EmbeddingTaskType.RETRIEVAL_DOCUMENT.takeIf { visualImage == null },
                         customHeaders = model.customHeaders,
                         customBody = model.customBodies,
                     )
@@ -155,6 +179,15 @@ class KnowledgeDocumentImporter(
                 val dimensions = result.embeddings.map { it.size }.distinct()
                 require(dimensions.size == 1 && dimensions.single() > 0) {
                     "Embedding provider returned inconsistent vector dimensions: $dimensions"
+                }
+                val batchDimension = dimensions.single()
+                if (embeddingDimension == null) {
+                    embeddingDimension = batchDimension
+                } else {
+                    require(embeddingDimension == batchDimension) {
+                        "Embedding provider changed vector dimensions within one document: " +
+                            "$embeddingDimension -> $batchDimension"
+                    }
                 }
                 require(result.embeddings.flatten().all(Float::isFinite)) {
                     "Embedding provider returned a non-finite vector"
@@ -249,10 +282,26 @@ class KnowledgeDocumentImporter(
     private fun File.toVisionEmbeddingImage(
         mimeType: String,
         useVisionEmbedding: Boolean,
+        normalizeGoogleWebp: Boolean,
     ): EmbeddingImageInput? {
         if (!mimeType.startsWith("image/") || !useVisionEmbedding) return null
         require(mimeType in VISION_EMBEDDING_IMAGE_TYPES) {
             "Unsupported image type: $mimeType. Vision embedding supports PNG, JPEG, and WebP"
+        }
+        // Gemini Embedding 2 currently accepts JPEG/PNG image parts. Convert WebP
+        // locally so a document imported from Android's photo picker remains usable.
+        if (normalizeGoogleWebp && mimeType == "image/webp") {
+            val bitmap = BitmapFactory.decodeFile(path)
+                ?: error("Unable to decode WebP image for Google embedding")
+            return ByteArrayOutputStream().use { output ->
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, output)) {
+                    "Unable to convert WebP image for Google embedding"
+                }
+                EmbeddingImageInput(
+                    mimeType = "image/jpeg",
+                    base64 = android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP),
+                )
+            }.also { bitmap.recycle() }
         }
         return EmbeddingImageInput(
             mimeType = mimeType,
@@ -370,6 +419,9 @@ class KnowledgeDocumentImporter(
         .digest(value.toByteArray())
         .joinToString("") { "%02x".format(it) }
 }
+
+private fun ProviderSetting.isVolcengineArkEndpoint(): Boolean =
+    this is ProviderSetting.OpenAI && baseUrl.contains(".volces.com", ignoreCase = true)
 
 private fun List<Float>.toByteArray(): ByteArray {
     val buffer = ByteBuffer.allocate(size * 4).order(ByteOrder.LITTLE_ENDIAN)

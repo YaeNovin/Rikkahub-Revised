@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.ToolApprovalResult
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.web.dto.ConversationDto
@@ -362,8 +363,27 @@ fun Route.conversationRoutes(
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<ToolApprovalRequest>()
             chatService.initializeConversation(uuid)
-            chatService.handleToolApproval(uuid, request.toolCallId, request.approved, request.reason, request.answer)
-            call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
+            when (
+                chatService.handleToolApprovalAndAwait(
+                    conversationId = uuid,
+                    toolCallId = request.toolCallId,
+                    approved = request.approved,
+                    reason = request.reason,
+                    answer = request.answer,
+                    cancelled = request.cancelled,
+                )
+            ) {
+                ToolApprovalResult.APPLIED ->
+                    call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
+                ToolApprovalResult.EXPIRED ->
+                    call.respond(HttpStatusCode.Conflict, mapOf("status" to "expired"))
+                ToolApprovalResult.NOT_FOUND ->
+                    throw NotFoundException("Tool call not found")
+                ToolApprovalResult.ALREADY_HANDLED ->
+                    call.respond(HttpStatusCode.Conflict, mapOf("status" to "already_handled"))
+                ToolApprovalResult.INVALID_REQUEST ->
+                    throw BadRequestException("Invalid tool approval request")
+            }
         }
 
         // SSE /api/conversations/{id}/stream - Stream conversation updates

@@ -22,6 +22,13 @@ import me.rerere.rikkahub.data.model.trimToEstimatedTokens
 import me.rerere.rikkahub.data.ai.context.estimateTextTokens
 import me.rerere.rikkahub.data.datastore.ExtensionManagementMode
 import kotlin.uuid.Uuid
+import me.rerere.rikkahub.data.model.LorebookScanSource
+import me.rerere.rikkahub.data.model.lorebookScanText
+import me.rerere.rikkahub.data.model.ruleFingerprint
+import me.rerere.rikkahub.data.model.resolvedScanDepth
+import me.rerere.rikkahub.data.model.scanText
+import me.rerere.rikkahub.data.model.LorebookScanMode
+import me.rerere.rikkahub.data.model.KeywordExpressionResult
 
 /**
  * 提示词注入转换器
@@ -45,8 +52,11 @@ object PromptInjectionTransformer : InputMessageTransformer {
             runtimeStates = ctx.lorebookRuntimeStates,
             currentUserTurn = ctx.conversationUserTurn,
             entertainmentMode = entertainmentMode,
+            randomSeed = ctx.conversationId?.toString().orEmpty(),
+            totalTokenBudget = ctx.settings.lorebookTotalTokenBudget,
+            historyMessages = ctx.conversationMessages.ifEmpty { messages },
         )
-        if (entertainmentMode) ctx.onPromptInjectionEvaluation?.invoke(evaluation)
+        ctx.onPromptInjectionEvaluation?.invoke(evaluation)
         if (evaluation.injections.isEmpty()) return messages
         val byPosition = evaluation.injections
             .sortedByDescending { it.priority }
@@ -100,21 +110,21 @@ internal fun evaluateInjections(
     runtimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
     currentUserTurn: Int? = null,
     entertainmentMode: Boolean = false,
+    randomSeed: String = "",
+    totalTokenBudget: Int = 0,
+    historyMessages: List<UIMessage> = messages,
 ): PromptInjectionEvaluation {
     if (!entertainmentMode) {
-        val injections = collectInjections(
-            messages,
-            assistant,
-            modeInjections,
-            lorebooks,
-            conversationModeInjectionIds,
-            conversationLorebookIds,
-        )
-        return PromptInjectionEvaluation(
-            injections = injections,
-            runtimeStates = runtimeStates,
-            diagnostics = PromptInjectionDiagnostics(0, emptyList(), 0),
-        )
+        // One evaluator and diagnostic path; advanced entertainment fields remain dormant.
+        return evaluateInjections(
+            messages = messages, assistant = assistant, modeInjections = modeInjections,
+            lorebooks = lorebooks.map { book -> book.copy(tokenBudget = 0, overflowStrategy = LorebookOverflowStrategy.DROP_LOW_PRIORITY, entries = book.entries.map {
+                it.copy(keywordExpression = "", triggerProbability = 100, stickyTurns = 1, cooldownTurns = 0, exclusiveGroup = "", selectionWeight = 0)
+            }) },
+            conversationModeInjectionIds = conversationModeInjectionIds, conversationLorebookIds = conversationLorebookIds,
+            currentUserTurn = currentUserTurn, entertainmentMode = true, randomSeed = randomSeed,
+            totalTokenBudget = totalTokenBudget, historyMessages = historyMessages,
+        ).copy(runtimeStates = emptyMap())
     }
 
     val nonSystemMessages = messages.filter { it.role != MessageRole.SYSTEM }
@@ -140,11 +150,17 @@ internal fun evaluateInjections(
     val validEntryIds = lorebooks.flatMap { it.entries }.mapTo(hashSetOf()) { it.id }
     val updatedRuntime = runtimeStates.filterKeys { it in validEntryIds }.toMutableMap()
     val diagnostics = mutableListOf<PromptInjectionDiagnosticEntry>()
+    val scanCache = mutableMapOf<Triple<Int, LorebookScanSource, LorebookScanMode>, String>()
+    val userMessages = historyMessages.filter { it.role == MessageRole.USER }
+    var totalRemaining = if (totalTokenBudget > 0) totalTokenBudget else Int.MAX_VALUE
     val effectiveLorebookIds = assistant.lorebookIds + if (assistant.allowConversationPromptInjection) {
         conversationLorebookIds
     } else {
         emptySet()
     }
+
+    val activeEntryIds = lorebooks.filter { it.enabled && it.id in effectiveLorebookIds }.flatMap { it.entries.filter { entry -> entry.enabled } }.map { it.id }.toSet()
+    updatedRuntime.keys.retainAll(activeEntryIds)
 
     lorebooks.filter { it.enabled && it.id in effectiveLorebookIds }.forEach { lorebook ->
         data class Candidate(
@@ -155,16 +171,23 @@ internal fun evaluateInjections(
 
         val candidates = mutableListOf<Candidate>()
         lorebook.entries.filter { it.enabled }.forEach { entry ->
-            val context = extractContextForMatching(nonSystemMessages, entry.scanDepth.coerceAtLeast(1))
-            val keywordResult = entry.evaluateKeywords(context)
-            val previous = runtimeStates[entry.id]
+            val depth = entry.resolvedScanDepth(lorebook)
+            val context = if (entry.constantActive) "" else scanCache.getOrPut(Triple(depth, entry.scanSource, entry.scanMode)) { entry.scanText(nonSystemMessages, lorebook) }
+            val keywordResult = if (depth == 0 && !entry.constantActive) KeywordExpressionResult(false, emptyList()) else entry.evaluateKeywords(context)
+            val fingerprint = entry.copy(scanDepth = depth).ruleFingerprint()
+            val previous = runtimeStates[entry.id]?.takeIf {
+                it.ruleFingerprint == fingerprint && it.lastTriggeredTurn <= userTurn &&
+                    (it.triggerMessageId == null || it.triggerMessageId == userMessages.getOrNull(it.lastTriggeredTurn - 1)?.id?.toString()) &&
+                    (it.triggerTextHash == null || it.triggerTextHash == userMessages.getOrNull(it.lastTriggeredTurn - 1)?.toText()?.hashCode())
+            }
+            if (previous == null) updatedRuntime.remove(entry.id)
             val stickyActive = previous != null && userTurn <= previous.activeUntilTurn
             val candidateStatus = when {
-                stickyActive -> LorebookEntryStatus.ACTIVE_FROM_PREVIOUS_TURN
                 keywordResult.error != null -> LorebookEntryStatus.INVALID_EXPRESSION
+                stickyActive -> LorebookEntryStatus.ACTIVE_FROM_PREVIOUS_TURN
                 !keywordResult.matched -> LorebookEntryStatus.NOT_MATCHED
                 previous != null && userTurn <= previous.cooldownUntilTurn -> LorebookEntryStatus.COOLDOWN
-                !passesDeterministicProbability(entry.id, userTurn, entry.triggerProbability.coerceIn(0, 100)) ->
+                !passesDeterministicProbability(entry.id, userTurn, entry.triggerProbability.coerceIn(0, 100), randomSeed) ->
                     LorebookEntryStatus.PROBABILITY_MISSED
                 else -> LorebookEntryStatus.USED
             }
@@ -177,15 +200,31 @@ internal fun evaluateInjections(
                     lorebook = lorebook,
                     matchedTerms = keywordResult.matchedTerms,
                     status = candidateStatus,
-                    detail = keywordResult.error,
+                    detail = keywordResult.error ?: if (depth == 0) "未扫描：深度为 0，不会通过关键词激活；常驻与持续激活独立生效" else null,
                 )
             }
         }
 
-        val ordered = candidates.sortedByDescending { it.entry.priority }
+        val winners = candidates.filter { it.entry.exclusiveGroup.isNotBlank() }
+            .groupBy { it.entry.exclusiveGroup.trim().lowercase() }.values.map { group ->
+                val sticky = group.filter { it.status == LorebookEntryStatus.ACTIVE_FROM_PREVIOUS_TURN }
+                val overrides = group.filter { it.entry.groupOverride }
+                if (sticky.isNotEmpty()) sticky.maxBy { it.entry.priority }
+                else if (overrides.isNotEmpty()) overrides.maxBy { it.entry.priority }
+                else if (group.any { it.entry.selectionWeight > 0 }) {
+                    val random = kotlin.random.Random("$randomSeed:$userTurn:${group.first().entry.exclusiveGroup}".hashCode())
+                    var ticket = random.nextLong(group.sumOf { it.entry.selectionWeight.coerceIn(0, 10000).toLong() })
+                    group.first { ticket -= it.entry.selectionWeight.coerceIn(0, 10000); ticket < 0 }
+                } else group.maxBy { it.entry.priority }
+            }.map { it.entry.id }.toSet()
+        val ordered = candidates.filter { candidate ->
+            val included = candidate.entry.exclusiveGroup.isBlank() || candidate.entry.id in winners
+            if (!included) diagnostics += candidate.entry.toDiagnostic(lorebook, candidate.matchedTerms, LorebookEntryStatus.NOT_MATCHED, detail = "互斥组中采用了其他条目")
+            included
+        }.sortedByDescending { it.entry.priority }
         val budget = lorebook.tokenBudget.coerceAtLeast(0)
         val totalTokens = ordered.sumOf { estimateTextTokens(it.entry.content) }
-        if (budget > 0 && lorebook.overflowStrategy == LorebookOverflowStrategy.SKIP_BOOK && totalTokens > budget) {
+        if (lorebook.overflowStrategy == LorebookOverflowStrategy.SKIP_BOOK && totalTokens > minOf(totalRemaining, if (budget > 0) budget else Int.MAX_VALUE)) {
             ordered.forEach { candidate ->
                 diagnostics += candidate.entry.toDiagnostic(
                     lorebook,
@@ -200,7 +239,7 @@ internal fun evaluateInjections(
         var truncated = false
         ordered.forEach { candidate ->
             val tokens = estimateTextTokens(candidate.entry.content)
-            val remaining = if (budget == 0) Int.MAX_VALUE else budget - usedTokens
+            val remaining = minOf(totalRemaining, if (budget == 0) Int.MAX_VALUE else budget - usedTokens)
             val selected = when {
                 tokens <= remaining -> candidate.entry
                 lorebook.overflowStrategy == LorebookOverflowStrategy.TRUNCATE_LAST && !truncated && remaining > 0 -> {
@@ -218,13 +257,17 @@ internal fun evaluateInjections(
             } else {
                 val selectedTokens = estimateTextTokens(selected.content)
                 usedTokens += selectedTokens
+                totalRemaining -= selectedTokens
                 injections += selected
                 if (candidate.status == LorebookEntryStatus.USED) {
-                    val activeUntil = userTurn + candidate.entry.stickyTurns.coerceAtLeast(1) - 1
+                    val activeUntil = userTurn + candidate.entry.stickyTurns.coerceIn(1, 10000) - 1
                     updatedRuntime[candidate.entry.id] = LorebookEntryRuntimeState(
                         lastTriggeredTurn = userTurn,
                         activeUntilTurn = activeUntil,
-                        cooldownUntilTurn = activeUntil + candidate.entry.cooldownTurns.coerceAtLeast(0),
+                        cooldownUntilTurn = activeUntil + candidate.entry.cooldownTurns.coerceIn(0, 10000),
+                        ruleFingerprint = candidate.entry.copy(scanDepth = candidate.entry.resolvedScanDepth(lorebook)).ruleFingerprint(),
+                        triggerMessageId = userMessages.getOrNull(userTurn - 1)?.id?.toString(),
+                        triggerTextHash = userMessages.getOrNull(userTurn - 1)?.toText()?.hashCode(),
                     )
                 }
                 diagnostics += selected.toDiagnostic(
@@ -232,7 +275,7 @@ internal fun evaluateInjections(
                     candidate.matchedTerms,
                     candidate.status,
                     estimatedTokens = selectedTokens,
-                    detail = if (selected.content != candidate.entry.content) "truncated" else null,
+                    detail = if (selected.content != candidate.entry.content) "truncated" else if (selected.constantActive) "常驻激活：仅在已选择本书的助手或对话生效，仍受预算与互斥约束" else null,
                 )
             }
         }
@@ -243,7 +286,14 @@ internal fun evaluateInjections(
         runtimeStates = updatedRuntime,
         diagnostics = PromptInjectionDiagnostics(
             userTurn = userTurn,
-            entries = diagnostics,
+            entries = diagnostics.map { diagnostic ->
+                val state = updatedRuntime[diagnostic.entryId]
+                diagnostic.copy(
+                    remainingActiveTurns = state?.let { (it.activeUntilTurn - userTurn).coerceAtLeast(0) } ?: 0,
+                    remainingCooldownTurns = state?.let { (it.cooldownUntilTurn - maxOf(userTurn, it.activeUntilTurn)).coerceAtLeast(0) } ?: 0,
+                    injectedContent = injections.firstOrNull { it.id == diagnostic.entryId }?.content,
+                )
+            },
             totalEstimatedTokens = injections.sumOf { estimateTextTokens(it.content) },
         ),
     )
@@ -311,8 +361,8 @@ internal fun collectInjections(
         enabledLorebooks.forEach { lorebook ->
             lorebook.entries
                 .filter { entry ->
-                    val context = extractContextForMatching(nonSystemMessages, entry.scanDepth)
-                    entry.isTriggered(context)
+                    val context = entry.scanText(nonSystemMessages, lorebook)
+                    entry.enabled && (entry.constantActive || (entry.resolvedScanDepth(lorebook) > 0 && entry.isTriggered(context)))
                 }
                 .forEach { injections.add(it) }
         }

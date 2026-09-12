@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import java.io.File
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +88,36 @@ class FilesManager(
             displayName = displayName,
             mimeType = mimeType,
         )
+    }
+
+    suspend fun saveGeneratedVideoFromStream(
+        input: InputStream,
+        displayName: String,
+        mimeType: String = "video/mp4",
+        expectedSizeBytes: Long? = null,
+        maxBytes: Long = AtomicMediaFileStore.DEFAULT_MAX_VIDEO_BYTES,
+        onProgress: (bytesWritten: Long, expectedSizeBytes: Long?) -> Unit = { _, _ -> },
+    ): ManagedFileEntity = withContext(Dispatchers.IO) {
+        require(mimeType.startsWith("video/")) { "Generated media must use a video MIME type" }
+        val target = createTargetFile(FileFolders.GENERATED_VIDEOS, displayName, mimeType)
+        try {
+            AtomicMediaFileStore.write(
+                input = input,
+                target = target,
+                expectedSizeBytes = expectedSizeBytes,
+                maxBytes = maxBytes,
+                onProgress = onProgress,
+            )
+            createManagedFileEntity(
+                folder = FileFolders.GENERATED_VIDEOS,
+                file = target,
+                displayName = displayName,
+                mimeType = mimeType,
+            )
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        }
     }
 
     suspend fun saveManagedText(
@@ -172,14 +203,19 @@ class FilesManager(
         }
     }
 
-    fun createChatFilesByByteArrays(byteArrays: List<ByteArray>): List<Uri> {
+    fun createChatFilesByByteArrays(
+        byteArrays: List<ByteArray>,
+        displayName: String = "image.png",
+        mimeType: String = "image/png",
+    ): List<Uri> {
         val newUris = mutableListOf<Uri>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
         }
         byteArrays.forEach { byteArray ->
-            val fileName = buildUuidFileName(displayName = "image.png", mimeType = "image/png")
+            require(byteArray.isNotEmpty()) { "Cannot create an empty chat file" }
+            val fileName = buildUuidFileName(displayName = displayName, mimeType = mimeType)
             val file = dir.resolve(fileName)
             if (!file.exists()) {
                 file.createNewFile()
@@ -191,8 +227,8 @@ class FilesManager(
             trackManagedFile(
                 folder = FileFolders.UPLOAD,
                 file = file,
-                displayName = "image.png",
-                mimeType = "image/png"
+                displayName = displayName,
+                mimeType = mimeType
             )
             newUris.add(newUri)
         }
@@ -613,6 +649,7 @@ object FileFolders {
     const val SKILLS = "skills"
     const val FONTS = "fonts"
     const val TOOL_OUTPUTS = "tool_outputs"
+    const val GENERATED_VIDEOS = "videos"
 }
 
 suspend fun FilesManager.saveUploadFromUri(

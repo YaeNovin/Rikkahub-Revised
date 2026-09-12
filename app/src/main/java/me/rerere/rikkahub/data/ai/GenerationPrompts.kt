@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryLifecycleState
 import me.rerere.rikkahub.data.model.MemoryType
 import me.rerere.rikkahub.utils.JsonInstantPretty
 
@@ -16,7 +17,9 @@ internal fun buildMemoryPrompt(
 ): String {
     require(maxChars >= 512) { "Memory prompt budget must be at least 512 characters" }
     val eligible = memories.filter { memory ->
-        memory.content.isNotBlank() && (includeEpisodic || memory.type == MemoryType.FACT)
+        memory.content.isNotBlank() &&
+            memory.lifecycleState == MemoryLifecycleState.ACTIVE &&
+            (includeEpisodic || memory.type == MemoryType.FACT)
     }
     if (eligible.isEmpty()) return ""
 

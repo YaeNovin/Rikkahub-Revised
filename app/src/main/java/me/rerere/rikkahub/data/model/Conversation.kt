@@ -3,12 +3,14 @@ package me.rerere.rikkahub.data.model
 import android.net.Uri
 import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Transient
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.util.InstantSerializer
 import me.rerere.rikkahub.data.ai.context.RollingContextSummary
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import java.time.Instant
 import kotlin.uuid.Uuid
@@ -20,6 +22,8 @@ data class Conversation(
     val title: String = "",
     val messageNodes: List<MessageNode>,
     val chatSuggestions: List<String> = emptyList(),
+    val chatSuggestionItems: List<ChatSuggestionItem> = emptyList(),
+    val suggestionSession: SuggestionSession = SuggestionSession(),
     val isPinned: Boolean = false,
     @Serializable(with = InstantSerializer::class)
     val createAt: Instant = Instant.now(),
@@ -28,6 +32,7 @@ data class Conversation(
     val customSystemPrompt: String? = null,
     val modeInjectionIds: Set<Uuid> = emptySet(),
     val lorebookIds: Set<Uuid> = emptySet(),
+    val disabledLorebookIds: Set<Uuid> = emptySet(),
     val temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
     val lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
     // Rootfs path (for example /workspace/src) or an encoded SAF CWD
@@ -48,6 +53,7 @@ data class Conversation(
     @Serializable(with = InstantSerializer::class)
     val branchedAt: Instant? = null,
     val sourceConversationTitle: String? = null,
+    val memoryMode: ConversationMemoryMode = ConversationMemoryMode.DISABLED,
     @Transient
     val newConversation: Boolean = false
 ) {
@@ -123,10 +129,120 @@ data class Conversation(
 }
 
 @Serializable
+data class ChatSuggestionItem(
+    val id: String = Uuid.random().toString(),
+    val text: String,
+    val description: String = "",
+    val category: ChatSuggestionCategory = ChatSuggestionCategory.FOLLOW_UP,
+    val action: ChatSuggestionAction = ChatSuggestionAction.INSERT_TEXT,
+    val payload: String = "",
+    val sourceMessageId: Uuid? = null,
+    val sourceContextKey: String? = null,
+    val parameterForm: kotlinx.serialization.json.JsonObject? = null,
+)
+
+@Serializable
+enum class ChatSuggestionCategory {
+    @SerialName("follow_up")
+    FOLLOW_UP,
+
+    @SerialName("action")
+    ACTION,
+
+    @SerialName("direction")
+    DIRECTION,
+    @SerialName("dialogue") DIALOGUE,
+    @SerialName("role_action") ROLE_ACTION,
+    @SerialName("inner_thought") INNER_THOUGHT,
+    @SerialName("plot") PLOT,
+}
+
+@Serializable
+enum class ChatSuggestionAction {
+    @SerialName("insert_text")
+    INSERT_TEXT,
+
+    @SerialName("copy_text")
+    COPY_TEXT,
+
+    @SerialName("save_quick_message")
+    SAVE_QUICK_MESSAGE,
+
+    @SerialName("create_branch")
+    CREATE_BRANCH,
+
+    @SerialName("search_web")
+    SEARCH_WEB,
+
+    @SerialName("search_knowledge")
+    SEARCH_KNOWLEDGE,
+
+    @SerialName("search_memory")
+    SEARCH_MEMORY,
+
+    @SerialName("search_conversations")
+    SEARCH_CONVERSATIONS,
+
+    @SerialName("ask_user")
+    ASK_USER,
+
+    @SerialName("workspace")
+    WORKSPACE,
+
+    @SerialName("use_skill")
+    USE_SKILL,
+
+    @SerialName("mcp")
+    MCP,
+    @SerialName("image_draft")
+    IMAGE_DRAFT,
+}
+
+fun Conversation.visibleChatSuggestions(): List<ChatSuggestionItem> =
+    if (chatSuggestionItems.isNotEmpty()) {
+        chatSuggestionItems
+    } else {
+        chatSuggestions.mapIndexed { index, text ->
+            ChatSuggestionItem(
+                id = "legacy-${text.hashCode()}-$index",
+                text = text,
+            )
+        }
+    }
+
+fun Conversation.currentChatSuggestions(): List<ChatSuggestionItem> {
+    val source = suggestionSourceMessage() ?: return emptyList()
+    val contextKey by lazy { suggestionContextKey() }
+    return visibleChatSuggestions().filter { suggestion ->
+        (suggestion.sourceMessageId == null || suggestion.sourceMessageId == source.id) &&
+            (suggestion.sourceContextKey == null || suggestion.sourceContextKey == contextKey) && suggestion.text.isNotBlank()
+    }.distinctBy(ChatSuggestionItem::id)
+}
+
+fun ChatSuggestionAction.isAvailableFor(assistant: Assistant): Boolean = when (this) {
+    ChatSuggestionAction.SEARCH_WEB -> assistant.enableWebSearch
+    ChatSuggestionAction.SEARCH_KNOWLEDGE -> assistant.knowledgeBaseIds.isNotEmpty()
+    ChatSuggestionAction.SEARCH_MEMORY -> assistant.enableMemory || assistant.enableMemoryRag
+    ChatSuggestionAction.SEARCH_CONVERSATIONS -> assistant.enableRecentChatsReference
+    ChatSuggestionAction.ASK_USER -> LocalToolOption.AskUser in assistant.localTools
+    ChatSuggestionAction.WORKSPACE -> assistant.workspaceId != null
+    ChatSuggestionAction.USE_SKILL -> assistant.enabledSkills.isNotEmpty()
+    ChatSuggestionAction.MCP -> assistant.mcpServers.isNotEmpty()
+    ChatSuggestionAction.INSERT_TEXT,
+    ChatSuggestionAction.COPY_TEXT,
+    ChatSuggestionAction.SAVE_QUICK_MESSAGE,
+    ChatSuggestionAction.CREATE_BRANCH -> true
+    ChatSuggestionAction.IMAGE_DRAFT -> false // Requires a configured image model; resolved per conversation.
+}
+
+@Serializable
 data class LorebookEntryRuntimeState(
     val lastTriggeredTurn: Int = -1,
     val activeUntilTurn: Int = -1,
     val cooldownUntilTurn: Int = -1,
+    val ruleFingerprint: String? = null,
+    val triggerMessageId: String? = null,
+    val triggerTextHash: Int? = null,
 )
 
 @Serializable

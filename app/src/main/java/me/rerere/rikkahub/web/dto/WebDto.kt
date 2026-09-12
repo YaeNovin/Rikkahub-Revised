@@ -7,6 +7,7 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.currentChatSuggestions
 import me.rerere.rikkahub.data.model.MessageNode
 
 // ========== Request DTOs ==========
@@ -29,6 +30,7 @@ data class ToolApprovalRequest(
     val approved: Boolean,
     val reason: String = "",
     val answer: String? = null,
+    val cancelled: Boolean = false,
 )
 
 @Serializable
@@ -329,7 +331,7 @@ fun Conversation.toDto(isGenerating: Boolean = false) = ConversationDto(
     assistantId = assistantId.toString(),
     title = title,
     messages = messageNodes.map { it.toDto() },
-    chatSuggestions = chatSuggestions,
+    chatSuggestions = if (isGenerating || suggestionSession.paused || suggestionSession.collapsed) emptyList() else currentChatSuggestions().map { it.text },
     isPinned = isPinned,
     customSystemPrompt = customSystemPrompt,
     modeInjectionIds = modeInjectionIds.map { it.toString() },
