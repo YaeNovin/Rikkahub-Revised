@@ -56,7 +56,16 @@
     "ask_user_title": "Ask User",
     "ask_user_questions_count": "Ask {{count}} questions",
     "ask_user_submit": "Submit",
-    "ask_user_answered": "Answered"
+    "ask_user_confirm_yes": "Confirm",
+    "ask_user_confirm_no": "Reject",
+    "ask_user_answered": "Answered",
+    "ask_user_invalid_request": "This question request is invalid.",
+    "ask_user_denied": "Question denied",
+    "ask_user_cancelled": "Question cancelled",
+    "ask_user_expired": "Question expired",
+    "ask_user_default_cancel_reason": "Cancelled by user",
+    "ask_user_default_expired_reason": "Tool approval expired",
+    "cancel": "Cancel"
   },
   "media_part": {
     "video_load_failed": "Failed to load video: {{url}}",

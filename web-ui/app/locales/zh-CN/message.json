@@ -56,7 +56,16 @@
     "ask_user_title": "询问用户",
     "ask_user_questions_count": "询问 {{count}} 个问题",
     "ask_user_submit": "提交",
-    "ask_user_answered": "已回答"
+    "ask_user_confirm_yes": "确认",
+    "ask_user_confirm_no": "拒绝",
+    "ask_user_answered": "已回答",
+    "ask_user_invalid_request": "此提问请求无效",
+    "ask_user_denied": "提问已拒绝",
+    "ask_user_cancelled": "提问已取消",
+    "ask_user_expired": "提问已过期",
+    "ask_user_default_cancel_reason": "已由用户取消",
+    "ask_user_default_expired_reason": "工具审批已过期",
+    "cancel": "取消"
   },
   "media_part": {
     "video_load_failed": "加载视频失败：{{url}}",

@@ -146,6 +146,7 @@ export interface Settings {
   displaySetting: DisplaySetting;
   favoriteModels: string[];
   chatModelId: string;
+  enableSuggestion?: boolean;
   assistantId: string;
   providers: ProviderProfile[];
   assistants: AssistantProfile[];

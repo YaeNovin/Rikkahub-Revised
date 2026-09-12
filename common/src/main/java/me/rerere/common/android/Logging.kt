@@ -40,6 +40,7 @@ sealed class LogEntry {
         val method: String,
         val requestHeaders: Map<String, String> = emptyMap(),
         val requestBody: String? = null,
+        val responseBody: String? = null,
         val responseCode: Int? = null,
         val responseHeaders: Map<String, String> = emptyMap(),
         val durationMs: Long? = null,
@@ -61,6 +62,7 @@ sealed class LogEntry {
         val error: String? = null,
         val url: String? = null,
         val method: String? = null,
+        val responseBody: String? = null,
         val requestHeaders: Map<String, String> = emptyMap(),
         val requestBody: String? = null,
         val responseHeaders: Map<String, String> = emptyMap(),
@@ -133,6 +135,12 @@ object Logging {
         addLog(LogEntry.TextLog(tag = tag, message = message))
     }
 
+    fun recordEvent(tag: String, message: String): Uuid {
+        val entry = LogEntry.TextLog(tag = tag, message = message)
+        addLog(entry)
+        return entry.id
+    }
+
     fun logRequest(entry: LogEntry.RequestLog) {
         if (!requestLoggingEnabled) return
         addLog(entry)
@@ -142,12 +150,25 @@ object Logging {
         addLog(entry)
     }
 
+    fun updateResponseBody(id: Uuid, body: String) {
+        synchronized(lock) {
+            val index = recentLogs.indexOfFirst { it.id == id }
+            if (index < 0) return
+            recentLogs[index] = when (val entry = recentLogs[index]) {
+                is LogEntry.RequestLog -> entry.copy(responseBody = body)
+                is LogEntry.ProviderRequestLog -> entry.copy(responseBody = body)
+                else -> entry
+            }
+        }
+    }
+
     fun logError(
         name: String,
         summary: String,
         details: String,
         reason: String? = null,
         tag: String = "ERROR",
+        timestamp: Long = System.currentTimeMillis(),
     ) {
         val normalizedName = name.trim().ifEmpty { "Error" }
         val normalizedSummary = summary.trim().ifEmpty { normalizedName }
@@ -160,6 +181,7 @@ object Logging {
             errorLogs.add(
                 0,
                 LogEntry.ErrorLog(
+                    timestamp = timestamp,
                     tag = tag,
                     name = normalizedName,
                     summary = normalizedSummary,
@@ -173,6 +195,16 @@ object Logging {
     }
 
     fun isRequestLoggingEnabled(): Boolean = requestLoggingEnabled
+
+    fun logSoftwareError(tag: String, operation: String, error: Throwable) {
+        if (error is java.util.concurrent.CancellationException) return
+        logError(
+            name = operation,
+            summary = error.javaClass.simpleName,
+            details = error.stackTraceToString().take(32_000),
+            tag = tag,
+        )
+    }
 
     fun setRequestLoggingEnabled(enabled: Boolean) {
         requestLoggingEnabled = enabled

@@ -786,7 +786,11 @@ function ConversationsPageInner() {
   }, [activeConversation?.title, t]);
   const isNewChat = isHomeRoute && !activeId;
   const showSuggestions =
-    Boolean(activeId) && !detailLoading && !detailError && chatSuggestions.length > 0;
+    settings?.enableSuggestion !== false &&
+    Boolean(activeId) &&
+    !detailLoading &&
+    !detailError &&
+    chatSuggestions.length > 0;
   const displaySuggestions = showSuggestions ? chatSuggestions : EMPTY_SUGGESTIONS;
 
   const handleSelect = React.useCallback(
@@ -817,13 +821,20 @@ function ConversationsPageInner() {
   );
 
   const handleToolApproval = React.useCallback(
-    async (toolCallId: string, approved: boolean, reason: string, answer?: string) => {
+    async (
+      toolCallId: string,
+      approved: boolean,
+      reason: string,
+      answer?: string,
+      cancelled?: boolean,
+    ) => {
       if (!activeId) return;
       await api.post<{ status: string }>(`conversations/${activeId}/tool-approval`, {
         toolCallId,
         approved,
         reason,
         ...(answer != null ? { answer } : {}),
+        ...(cancelled === true ? { cancelled: true } : {}),
       });
     },
     [activeId],

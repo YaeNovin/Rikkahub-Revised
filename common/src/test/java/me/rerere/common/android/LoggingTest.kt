@@ -13,6 +13,21 @@ class LoggingTest {
     private val json = Json { encodeDefaults = true }
 
     @Test
+    fun `software failures are retained but user cancellation is not an error`() {
+        Logging.clear()
+        try {
+            Logging.logSoftwareError("FileIO", "Write", IllegalStateException("disk full"))
+            Logging.logSoftwareError("FileIO", "Write", java.util.concurrent.CancellationException("stopped"))
+            val logs = Logging.getRecentLogs().filterIsInstance<LogEntry.ErrorLog>()
+            assertEquals(1, logs.size)
+            assertEquals("FileIO", logs.single().tag)
+            assertEquals("disk full", logs.single().reason)
+        } finally {
+            Logging.clear()
+        }
+    }
+
+    @Test
     fun `extracts nested provider message from Google error JSON`() {
         val details = """
             me.rerere.ai.provider.ProviderRequestException: Failed to generate image: 400 {"error":{"code":400,"message":"图片尺寸不受支持","status":"INVALID_ARGUMENT"}}
