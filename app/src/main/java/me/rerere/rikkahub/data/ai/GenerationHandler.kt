@@ -77,6 +77,7 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
+import me.rerere.rikkahub.data.model.LorebookGenerationTrigger
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.LorebookEntryRuntimeState
 import me.rerere.rikkahub.data.model.PromptInjectionEvaluation
@@ -124,6 +125,7 @@ class GenerationHandler(
         conversationSystemPrompt: String? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
+        disabledLorebookIds: Set<Uuid> = emptySet(),
         temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
         lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
         conversationUserTurn: Int? = null,
@@ -135,6 +137,7 @@ class GenerationHandler(
         contextScopeKey: String? = null,
         resumeInterruptedResponse: Boolean = false,
         suggestionConversation: me.rerere.rikkahub.data.model.Conversation? = null,
+        generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.NORMAL,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -228,6 +231,7 @@ class GenerationHandler(
                     messages = requestMessages(),
                     conversationMessages = messages,
                     conversationId = conversationId,
+                    generationTrigger = generationTrigger,
                     onUpdateMessages = {
                         val transformedMessages = it.transforms(
                             transformers = outputTransformers,
@@ -264,6 +268,7 @@ class GenerationHandler(
                     conversationSystemPrompt = conversationSystemPrompt,
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
+                    disabledLorebookIds = disabledLorebookIds,
                     temporaryModeInjections = temporaryModeInjections,
                     lorebookRuntimeStates = lorebookRuntimeStates,
                     conversationUserTurn = conversationUserTurn,
@@ -579,6 +584,7 @@ class GenerationHandler(
         conversationSystemPrompt: String? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
+        disabledLorebookIds: Set<Uuid> = emptySet(),
         temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
         lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
         conversationUserTurn: Int? = null,
@@ -589,6 +595,7 @@ class GenerationHandler(
         rollingContextSummary: String? = null,
         resumeInterruptedResponse: Boolean = false,
         contextScopeKey: String? = null,
+        generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.NORMAL,
     ): List<UIMessageAnnotation.KnowledgeCitation> {
         val internalMessages = buildList {
             val system = buildString {
@@ -640,6 +647,8 @@ class GenerationHandler(
             settings = settings,
             conversationModeInjectionIds = conversationModeInjectionIds,
             conversationLorebookIds = conversationLorebookIds,
+            disabledLorebookIds = disabledLorebookIds,
+            allowLorebookNetwork = true,
             temporaryModeInjections = temporaryModeInjections,
             lorebookRuntimeStates = lorebookRuntimeStates,
             conversationUserTurn = conversationUserTurn,
@@ -649,6 +658,9 @@ class GenerationHandler(
             workspaceFileOperationMode = workspaceFileOperationMode,
             conversationId = conversationId,
             conversationMessages = conversationMessages,
+            userName = settings.displaySetting.userNickname.ifBlank { "user" },
+                    assistantName = assistant.name.ifBlank { "assistant" },
+                    generationTrigger = generationTrigger,
         ).compactHistoricalMediaForRequest(
             mediaSizeBytes = ::resolveContentMediaSize,
         )

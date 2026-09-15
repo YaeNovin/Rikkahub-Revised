@@ -41,6 +41,8 @@ suspend fun buildAssistantPromptPreview(
         model = model,
         assistant = assistant,
         settings = settings,
+        userName = settings.displaySetting.userNickname.ifBlank { "user" },
+        assistantName = assistant.name.ifBlank { "assistant" },
     )
     val promptVariables = PromptVariableResolutionContext(
         settings = settings,

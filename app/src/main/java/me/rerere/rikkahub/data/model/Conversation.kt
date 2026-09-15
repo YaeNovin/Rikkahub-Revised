@@ -243,6 +243,8 @@ data class LorebookEntryRuntimeState(
     val ruleFingerprint: String? = null,
     val triggerMessageId: String? = null,
     val triggerTextHash: Int? = null,
+    val timingUnit: LorebookTimingUnit = LorebookTimingUnit.USER_TURNS,
+    val recursionLevel: Int = 0,
 )
 
 @Serializable

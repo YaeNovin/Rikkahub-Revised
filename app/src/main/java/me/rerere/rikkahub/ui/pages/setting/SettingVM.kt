@@ -43,7 +43,7 @@ class SettingVM(
     fun selectBackgroundAccent(enabled: Boolean) = updateThemeSelection { it.selectBackgroundAccent(enabled) }
 
     private fun updateThemeSelection(transform: (Settings) -> Settings) {
-        viewModelScope.launch { saveAppearance { settingsStore.update(transform) } }
+        viewModelScope.launch { saveAppearance { settingsStore.updateThemeSelection(transform) } }
     }
 
     fun updateAdvancedAppearance(

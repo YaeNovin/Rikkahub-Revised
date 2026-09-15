@@ -77,6 +77,8 @@ fun LorebooksContent(
     onToggle: (kotlin.uuid.Uuid, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onManage: (() -> Unit)? = null,
+    scopeLabels: Map<kotlin.uuid.Uuid, String> = emptyMap(),
+    lockedIds: Set<kotlin.uuid.Uuid> = emptySet(),
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -87,10 +89,10 @@ fun LorebooksContent(
                 headlineContent = {
                     Text(lorebook.name.ifBlank { stringResource(R.string.extension_content_unnamed_lorebook) })
                 },
-                supportingContent = if (lorebook.description.isNotBlank()) {
+                supportingContent = if (lorebook.description.isNotBlank() || lorebook.id in scopeLabels) {
                     {
                         Text(
-                            text = lorebook.description,
+                            text = listOfNotNull(scopeLabels[lorebook.id], lorebook.description.takeIf { it.isNotBlank() }).joinToString("\n"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
@@ -99,6 +101,7 @@ fun LorebooksContent(
                 trailingContent = {
                     Switch(
                         checked = selectedIds.contains(lorebook.id),
+                        enabled = lorebook.id !in lockedIds,
                         onCheckedChange = { checked -> onToggle(lorebook.id, checked) }
                     )
                 },

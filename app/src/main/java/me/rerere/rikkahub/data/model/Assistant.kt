@@ -80,6 +80,9 @@ data class Assistant(
     val gradientBackgroundVignette: Float = 0f,
     val modeInjectionIds: Set<Uuid> = emptySet(),      // 关联的模式注入 ID
     val lorebookIds: Set<Uuid> = emptySet(),            // 关联的 Lorebook ID
+    val useGlobalLorebooks: Boolean = true,
+    val usePersonaLorebooks: Boolean = true,
+    val lorebookCharacterFields: Map<String, String> = emptyMap(),
     val enabledSkills: Set<String> = emptySet(),        // 启用的 skill 名称列表
     val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
@@ -253,6 +256,9 @@ enum class InjectionPosition {
 
     @SerialName("at_depth")
     AT_DEPTH,               // 在指定深度位置插入（从最新消息往前数）
+
+    @SerialName("outlet")
+    OUTLET,                 // 由 {{outlet::Name}} 宏显式拉取
 }
 
 /**
@@ -317,8 +323,42 @@ sealed class PromptInjection {
         val scanSource: LorebookScanSource = LorebookScanSource.ALL,
         val scanMode: LorebookScanMode = LorebookScanMode.CUSTOM,
         val exclusiveGroup: String = "",
+        /** All SillyTavern inclusion groups; exclusiveGroup remains the legacy first-group alias. */
+        val inclusionGroups: List<String> = emptyList(),
         val selectionWeight: Int = 0,
         val groupOverride: Boolean = false,
+        // Null preserves the ordering of existing native books. Imported order is ascending.
+        val insertionOrder: Int? = null,
+        val timingUnit: LorebookTimingUnit = LorebookTimingUnit.USER_TURNS,
+        val delayMessages: Int = 0,
+        val matchWholeWords: Boolean = false,
+        val sourceFormat: LorebookSourceFormat = LorebookSourceFormat.NATIVE,
+        val sourceData: kotlinx.serialization.json.JsonObject? = null,
+        val unsupportedPosition: String? = null,
+        /** SillyTavern recursion flags. The evaluator rescans selected content when enabled on the book. */
+        val preventRecursion: Boolean = false,
+        val excludeRecursion: Boolean = false,
+        /** Only eligible during a recursive scan, matching SillyTavern delayUntilRecursion. */
+        val delayUntilRecursion: Boolean = false,
+        /** Recursive activation level. Zero means any recursive level. */
+        val recursionLevel: Int = 0,
+        /** SillyTavern group-scoring override. */
+        val useGroupScoring: Boolean = false,
+        /** Source outlet name. When outlets are unavailable, the evaluator uses the mapped position. */
+        val outletName: String = "",
+        /** SillyTavern generation-type filters; empty means all generation types. */
+        val generationTriggers: Set<LorebookGenerationTrigger> = emptySet(),
+        /** Character name filter. Empty means all characters. */
+        val characterFilter: List<String> = emptyList(),
+        val characterFilterExclude: Boolean = false,
+        /** SillyTavern Prioritize Inclusion (highest order wins before weights). */
+        val prioritizeInclusion: Boolean = false,
+        /** Include this entry even when the book/token budget is exhausted. */
+        val ignoreBudget: Boolean = false,
+        val characterFilterTags: List<String> = emptyList(),
+        val vectorized: Boolean = false,
+        val additionalMatchingSources: Set<String> = emptySet(),
+        @kotlinx.serialization.Transient val lorebookSourceRank: Int = 0,
     ) : PromptInjection()
 }
 
@@ -344,7 +384,33 @@ data class Lorebook(
     val revisions: List<LorebookRevision> = emptyList(),
     val importWarnings: List<String> = emptyList(),
     val defaultScanDepth: Int = 4,
+    val sourceFormat: LorebookSourceFormat = LorebookSourceFormat.NATIVE,
+    val sourceData: kotlinx.serialization.json.JsonObject? = null,
+    /** SillyTavern book-level scanning controls. */
+    val recursiveScanning: Boolean = false,
+    val maxRecursionSteps: Int = 0,
+    val minActivations: Int = 0,
+    val maxScanDepth: Int = 0,
+    val includeNames: Boolean = false,
+    val useGroupScoring: Boolean = false,
+    val defaultCaseSensitive: Boolean = false,
+    val defaultMatchWholeWords: Boolean = false,
+    val alertOnOverflow: Boolean = false,
+    /** Runtime source scope used for deterministic Chat > Persona > Character > Global ordering. */
+    val sourceScope: LorebookSourceScope = LorebookSourceScope.GLOBAL,
 )
+
+@Serializable
+enum class LorebookSourceFormat { NATIVE, SILLY_TAVERN, CHARACTER_CARD_V2, CHARACTER_CARD_V3 }
+
+@Serializable
+enum class LorebookSourceScope { CHAT, PERSONA, CHARACTER, GLOBAL }
+
+@Serializable
+enum class LorebookTimingUnit { USER_TURNS, MESSAGES }
+
+@Serializable
+enum class LorebookGenerationTrigger { NORMAL, CONTINUE, IMPERSONATE, SWIPE, REGENERATE, QUIET }
 
 @Serializable
 enum class LorebookScanSource { ALL, USER, ASSISTANT, TEXT_ONLY }
@@ -362,6 +428,18 @@ data class LorebookRevision(
     val tokenBudget: Int,
     val overflowStrategy: LorebookOverflowStrategy,
     val defaultScanDepth: Int = 4,
+    val sourceFormat: LorebookSourceFormat = LorebookSourceFormat.NATIVE,
+    val sourceData: kotlinx.serialization.json.JsonObject? = null,
+    val recursiveScanning: Boolean = false,
+    val maxRecursionSteps: Int = 0,
+    val minActivations: Int = 0,
+    val maxScanDepth: Int = 0,
+    val includeNames: Boolean = false,
+    val useGroupScoring: Boolean = false,
+    val defaultCaseSensitive: Boolean = false,
+    val defaultMatchWholeWords: Boolean = false,
+    val alertOnOverflow: Boolean = false,
+    val sourceScope: LorebookSourceScope = LorebookSourceScope.GLOBAL,
 )
 
 /**
@@ -371,26 +449,8 @@ data class LorebookRevision(
  * @return 是否触发
  */
 fun PromptInjection.RegexInjection.isTriggered(context: String): Boolean {
-    if (!enabled) return false
-    if (constantActive) return true
-    if (keywords.isEmpty()) return false
-
-    return keywords.any { keyword ->
-        if (useRegex) {
-            try {
-                val options = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
-                Regex(keyword, options).containsMatchIn(context)
-            } catch (e: Exception) {
-                false
-            }
-        } else {
-            if (caseSensitive) {
-                context.contains(keyword)
-            } else {
-                context.contains(keyword, ignoreCase = true)
-            }
-        }
-    }
+    if (!enabled || unsupportedPosition != null) return false
+    return evaluateKeywords(context).matched
 }
 
 /**

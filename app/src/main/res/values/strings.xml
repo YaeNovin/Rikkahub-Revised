@@ -669,9 +669,9 @@
   <string name="extensions_page_issue_invalid_regex">A trigger contains an invalid regular expression</string>
   <string name="extensions_page_issue_invalid_keyword_expression">A lorebook keyword expression is invalid</string>
   <string name="extensions_page_issue_missing_trigger">A non-permanent entry has no trigger keyword</string>
-  <string name="extensions_page_issue_invalid_depth">Injection depth must be at least 1</string>
+  <string name="extensions_page_issue_invalid_depth">Invalid injection position or depth; check the entry settings</string>
   <string name="extensions_page_issue_invalid_scan_depth">Lorebook scan depth must be 0–1000; 0 disables scanning</string>
-  <string name="extensions_page_issue_invalid_role">Injection role must be User or Assistant</string>
+  <string name="extensions_page_issue_invalid_role">Unsupported injection role; lorebook entries also support System</string>
   <string name="extensions_page_issue_missing_skill_manifest">Skill directory has no SKILL.md</string>
   <string name="extensions_page_issue_unreadable_skill_manifest">SKILL.md cannot be read</string>
   <string name="extensions_page_issue_missing_skill_name">SKILL.md has no valid name</string>
@@ -679,7 +679,7 @@
   <string name="extensions_page_issue_missing_reference">An assistant references an item that no longer exists</string>
   <string name="extensions_page_issue_inaccessible_workspace">Workspace directory is missing or inaccessible</string>
   <string name="extensions_page_issue_broken_workspace">Workspace is marked as broken</string>
-  <string name="extensions_page_issue_setting_conflict">Same setting has conflicting entries at the same priority</string>
+  <string name="extensions_page_issue_setting_conflict">Potential conflict: different content for the same setting and priority</string>
   <string name="extensions_page_issue_setting_overlap">Multiple lorebook entries affect the same setting</string>
   <string name="extensions_page_issue_mutually_exclusive_modes">An assistant enables multiple modes from the same mutually exclusive group</string>
   <string name="favorite_page_no_favorites">No favorites yet</string>
@@ -2925,7 +2925,7 @@
   <string name="log_page_filter_requests">Requests</string>
   <string name="log_page_filter_text">Diagnostics</string>
   <string name="log_page_count">Showing %1$d of %2$d logs</string>
-  <string name="log_page_retention">Errors are kept for 7 days, up to 200 entries. Other logs retain only the latest 100 entries from this app session. Updates automatically while visible.</string>
+  <string name="log_page_retention">Request logs persist locally across restarts, up to 500 entries / 32 MiB; oldest records are removed at the limit. Errors are kept for 7 days, up to 200 entries. Other events retain the latest 100 entries this session. Updates automatically while visible. Full bodies may contain private conversation content; share with care.</string>
   <string name="log_page_empty">No matching logs</string>
   <string name="log_page_requests_tab">Request logs</string>
   <string name="log_page_software_tab">Software logs</string>

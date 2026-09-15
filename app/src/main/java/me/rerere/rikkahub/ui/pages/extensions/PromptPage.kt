@@ -95,6 +95,7 @@ import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.LorebookOverflowStrategy
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.model.validationErrors
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ExportDialog
 import me.rerere.rikkahub.ui.components.ui.FormItem
@@ -114,6 +115,7 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val entertainmentMode = settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT
     val pagerState = rememberPagerState { 2 }
+    val nav = me.rerere.rikkahub.ui.context.LocalNavController.current
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var totalBudget by remember(settings.lorebookTotalTokenBudget) { mutableStateOf(settings.lorebookTotalTokenBudget.toString()) }
@@ -123,6 +125,7 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
             LargeFlexibleTopAppBar(
                 navigationIcon = { BackButton() },
                 title = { Text(stringResource(R.string.prompt_page_title)) },
+                actions = { TextButton(onClick = { nav.navigate(me.rerere.rikkahub.Screen.LorebookHelp) }) { Text("世界书教程") } },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
@@ -167,6 +170,7 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                     OutlinedTextField(totalBudget, { totalBudget = it }, label = { Text("跨世界书总 Token 预算（0 不限，最高 1000000）") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true)
                     TextButton(enabled = totalBudget.toIntOrNull() in 0..1000000, onClick = { vm.setLorebookTotalBudget(totalBudget.toInt()) }) { Text("保存总预算 · 按书序分配，两种模式均生效") }
                     LorebookTab(
+                    vm = vm,
                     lorebooks = settings.lorebooks,
                     entertainmentMode = entertainmentMode,
                     onUpdate = { vm.updateSettings(settings, settings.copy(lorebooks = it)) }
@@ -330,13 +334,7 @@ private fun ModeInjectionCard(
     SwipeToDismissBox(
         state = swipeState,
         backgroundContent = {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            me.rerere.rikkahub.ui.components.ui.SwipeRevealActions(swipeState) {
                 IconButton(onClick = { scope.launch { swipeState.reset() } }) {
                     Icon(HugeIcons.Cancel01, null)
                 }
@@ -353,11 +351,7 @@ private fun ModeInjectionCard(
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
-        ) {
+        me.rerere.rikkahub.ui.components.ui.AppearanceCard {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -574,6 +568,7 @@ private fun InjectionPosition.usesStandaloneMessage(): Boolean = when (this) {
     InjectionPosition.TOP_OF_CHAT,
     InjectionPosition.BOTTOM_OF_CHAT,
     InjectionPosition.AT_DEPTH -> true
+    InjectionPosition.OUTLET -> false
 }
 
 @Composable
@@ -583,6 +578,7 @@ private fun getPositionLabel(position: InjectionPosition): String = when (positi
     InjectionPosition.TOP_OF_CHAT -> stringResource(R.string.prompt_page_position_top_of_chat)
     InjectionPosition.BOTTOM_OF_CHAT -> stringResource(R.string.prompt_page_position_bottom_of_chat)
     InjectionPosition.AT_DEPTH -> stringResource(R.string.prompt_page_position_at_depth)
+    InjectionPosition.OUTLET -> "Outlet（由宏显式插入）"
 }
 
 @Composable
@@ -610,44 +606,56 @@ private fun getRoleLabel(role: MessageRole): String = when (role) {
 
 @Composable
 private fun LorebookTab(
+    vm: PromptVM,
     lorebooks: List<Lorebook>,
     entertainmentMode: Boolean,
     onUpdate: (List<Lorebook>) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("全部") }
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentLorebooks by rememberUpdatedState(lorebooks)
+    val displayedLorebooks = remember(lorebooks, searchQuery, filter) {
+        lorebooks.filter { book ->
+            val queryMatch = searchQuery.isBlank() || "${book.name}\n${book.description}".contains(searchQuery.trim(), true)
+            val filterMatch = when (filter) {
+                "启用" -> book.enabled
+                "有问题" -> book.importWarnings.isNotEmpty() || book.entries.any { it.validationErrors(true).isNotEmpty() }
+                "有递归" -> book.recursiveScanning || book.entries.any { it.delayUntilRecursion || it.preventRecursion || it.excludeRecursion }
+                else -> true
+            }
+            queryMatch && filterMatch
+        }
+    }
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val newList = lorebooks.toMutableList()
-        val item = newList.removeAt(from.index)
-        newList.add(to.index, item)
+        val fromId = displayedLorebooks.getOrNull(from.index)?.id ?: return@rememberReorderableLazyListState
+        val toId = displayedLorebooks.getOrNull(to.index)?.id
+        val fromIndex = newList.indexOfFirst { it.id == fromId }
+        val toIndex = toId?.let { id -> newList.indexOfFirst { it.id == id } } ?: newList.lastIndex
+        if (fromIndex < 0 || toIndex < 0) return@rememberReorderableLazyListState
+        val item = newList.removeAt(fromIndex)
+        newList.add(toIndex.coerceIn(0, newList.size), item)
         onUpdate(newList)
-    }
-    val editState = useEditState<Lorebook> { edited ->
-        val index = lorebooks.indexOfFirst { it.id == edited.id }
-        if (index >= 0) {
-            onUpdate(lorebooks.toMutableList().apply { set(index, edited) })
-        } else {
-            onUpdate(lorebooks + edited)
-        }
     }
     val importSuccessMsg = stringResource(R.string.export_import_success)
     val context = LocalContext.current
-    var pendingLorebookImport by remember { mutableStateOf<Lorebook?>(null) }
     val importer = rememberImporter(LorebookSerializer) { result ->
         result.onSuccess { imported ->
-            pendingLorebookImport = imported
+            vm.pendingImport = imported
         }.onFailure { error ->
             toaster.show(context.formatUserFacingError(error))
         }
     }
 
-    pendingLorebookImport?.let { imported ->
-        LorebookImportPreview(imported, currentLorebooks, { pendingLorebookImport = null }) { updated ->
-            onUpdate(updated)
-            pendingLorebookImport = null
-            toaster.show(importSuccessMsg)
+    vm.pendingImport?.let { imported ->
+        LorebookImportPreview(imported, currentLorebooks, { vm.pendingImport = null }) { before, updated, done ->
+            vm.importLorebooks(before, updated) { result ->
+                done(result)
+                result.onSuccess { vm.pendingImport = null; toaster.show(importSuccessMsg) }
+            }
         }
     }
 
@@ -665,6 +673,24 @@ private fun LorebookTab(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("世界书总览", style = MaterialTheme.typography.titleMedium)
+                    val sourceNav = me.rerere.rikkahub.ui.context.LocalNavController.current
+                    TextButton(onClick = { sourceNav.navigate(me.rerere.rikkahub.Screen.LorebookSources) }) { Text("来源与绑定：全局 / Persona / 助手") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Tag(type = TagType.INFO) { Text("${lorebooks.size} 本") }
+                        Tag(type = TagType.DEFAULT) { Text("${lorebooks.count { it.enabled }} 启用") }
+                        Tag(type = TagType.WARNING) { Text("${lorebooks.sumOf { it.importWarnings.size + it.entries.sumOf { entry -> entry.validationErrors(true).size } }} 个问题") }
+                    }
+                    OutlinedTextField(searchQuery, { searchQuery = it }, label = { Text("搜索世界书") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("全部", "启用", "有问题", "有递归").forEach { option ->
+                            InputChip(selected = filter == option, onClick = { filter = option }, label = { Text(option) })
+                        }
+                    }
+                }
+            }
             if (lorebooks.isEmpty()) {
                 item {
                     Column(
@@ -687,7 +713,7 @@ private fun LorebookTab(
                     }
                 }
             } else {
-                items(lorebooks, key = { it.id }) { book ->
+                items(displayedLorebooks, key = { it.id }) { book ->
                     ReorderableItem(
                         state = reorderableState,
                         key = book.id
@@ -702,7 +728,7 @@ private fun LorebookTab(
                                         scaleY = 1.05f
                                     }
                                 },
-                            onEdit = { editState.open(book) },
+                            onEdit = { vm.openLorebook(book) },
                             onDelete = { onUpdate(lorebooks - book) }
                         )
                     }
@@ -720,7 +746,7 @@ private fun LorebookTab(
             IconButton(onClick = { importer.importFromFile() }) {
                 Icon(HugeIcons.FileImport, null)
             }
-            Button(onClick = { editState.open(Lorebook()) }) {
+            Button(onClick = { vm.openLorebook(Lorebook()) }) {
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
@@ -741,17 +767,7 @@ private fun LorebookTab(
         }
     }
 
-    if (editState.isEditing) {
-        editState.currentState?.let { state ->
-            LorebookEditSheet(
-                book = state,
-                entertainmentMode = entertainmentMode,
-                onDismiss = { editState.dismiss() },
-                onConfirm = { editState.confirm() },
-                onEdit = { editState.currentState = it }
-            )
-        }
-    }
+    LorebookEditorHost(vm, entertainmentMode)
 }
 
 @Composable
@@ -770,13 +786,7 @@ private fun LorebookCard(
     SwipeToDismissBox(
         state = swipeState,
         backgroundContent = {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            me.rerere.rikkahub.ui.components.ui.SwipeRevealActions(swipeState) {
                 IconButton(onClick = { scope.launch { swipeState.reset() } }) {
                     Icon(HugeIcons.Cancel01, null)
                 }
@@ -793,11 +803,7 @@ private fun LorebookCard(
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
-        ) {
+        me.rerere.rikkahub.ui.components.ui.AppearanceCard {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -846,6 +852,14 @@ private fun LorebookCard(
                                 Text("${book.tokenBudget} Token")
                             }
                         }
+                        Tag(type = TagType.INFO) {
+                            Text(when (book.sourceScope) {
+                                me.rerere.rikkahub.data.model.LorebookSourceScope.CHAT -> "Chat Lore"
+                                me.rerere.rikkahub.data.model.LorebookSourceScope.PERSONA -> "Persona Lore"
+                                me.rerere.rikkahub.data.model.LorebookSourceScope.CHARACTER -> "Character Lore"
+                                me.rerere.rikkahub.data.model.LorebookSourceScope.GLOBAL -> "Global Lore"
+                            })
+                        }
                     }
                 }
                 IconButton(onClick = { showExportDialog = true }) {
@@ -867,6 +881,8 @@ private fun LorebookCard(
 }
 
 @Composable
-internal fun LorebookEditSheet(book: Lorebook, entertainmentMode: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit, onEdit: (Lorebook) -> Unit) {
-    LorebookEditorSheet(book, entertainmentMode, onDismiss, onConfirm, onEdit)
+internal fun LorebookEditorHost(vm: PromptVM, entertainmentMode: Boolean) {
+    vm.lorebookEditor?.let { session -> LorebookEditorSheet(session, entertainmentMode, vm::dismissLorebook, vm::saveLorebook, vm::saveLorebookCopy) }
+    val toaster = LocalToaster.current
+    androidx.compose.runtime.LaunchedEffect(vm.saveError) { vm.saveError?.let { toaster.show(it) } }
 }

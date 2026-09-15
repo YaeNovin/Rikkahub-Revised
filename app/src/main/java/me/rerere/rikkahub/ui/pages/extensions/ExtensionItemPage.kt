@@ -43,8 +43,8 @@ fun ExtensionItemPage(kind: String, id: String) {
         }
     }
     var editing by rememberSaveable(id) { mutableStateOf(false) }
+    val nav = me.rerere.rikkahub.ui.context.LocalNavController.current
     var modeDraft by remember(id) { mutableStateOf<PromptInjection.ModeInjection?>(null) }
-    var bookDraft by remember(id) { mutableStateOf<Lorebook?>(null) }
     var editBase by remember(id) { mutableStateOf<Settings?>(null) }
     Scaffold(
         topBar = { LargeFlexibleTopAppBar(title = { Text(title) }, navigationIcon = { BackButton() }, colors = CustomColors.topBarColors) },
@@ -54,7 +54,7 @@ fun ExtensionItemPage(kind: String, id: String) {
             item {
                 Text(quick?.content ?: mode?.content ?: book?.description.orEmpty())
                 TextButton(enabled = quick != null || mode != null || book != null, onClick = {
-                    editBase = settings; modeDraft = mode; bookDraft = book; editing = true
+                    if (book != null) vm.openLorebook(book) else { editBase = settings; modeDraft = mode; editing = true }
                 }) { Text("编辑") }
             }
             item { Text("助手默认引用（${users.size}）", style = MaterialTheme.typography.titleMedium) }
@@ -63,6 +63,7 @@ fun ExtensionItemPage(kind: String, id: String) {
                 CardGroup { item(headlineContent = { Text(assistant.name.ifBlank { "未命名助手" }) }) }
             }
             if (book != null) {
+                item { TextButton(onClick = { nav.navigate(me.rerere.rikkahub.Screen.LorebookHelp) }) { Text("世界书帮助与教程") } }
                 item { LorebookBatchPanel(book, settings.lorebooks, vm) }
                 item { LorebookSimulator(book, settings.lorebooks, entertainment, settings.lorebookTotalTokenBudget) }
             }
@@ -77,10 +78,7 @@ fun ExtensionItemPage(kind: String, id: String) {
                 editBase?.let { base -> vm.updateSettings(base, base.copy(modeInjections = base.modeInjections.map { if (it.id == modeDraft!!.id) modeDraft!! else it })) }
                 editing = false
             }, { modeDraft = it })
-            bookDraft != null -> LorebookEditSheet(bookDraft!!, entertainment, { editing = false }, {
-                editBase?.let { base -> vm.updateSettings(base, base.copy(lorebooks = base.lorebooks.map { if (it.id == bookDraft!!.id) bookDraft!! else it })) }
-                editing = false
-            }, { bookDraft = it })
         }
     }
+    LorebookEditorHost(vm, entertainment)
 }

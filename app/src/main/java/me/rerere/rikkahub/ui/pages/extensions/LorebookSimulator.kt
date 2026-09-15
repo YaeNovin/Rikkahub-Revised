@@ -33,6 +33,7 @@ internal fun LorebookSimulator(book: Lorebook, allBooks: List<Lorebook>, enterta
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("世界书场景模拟", style = MaterialTheme.typography.titleMedium)
         Text("使用聊天同一评估器，不调用模型、不写入真实对话。每次推进一轮可验证持续激活和冷却；修改配置或种子会重置模拟。", style = MaterialTheme.typography.bodySmall)
+        Text("此处不调用向量模型，也不自动绑定全局、Persona 或真实助手资料；语义匹配与来源继承请在实际聊天诊断中确认。", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(seed, { if (!busy) seed = it }, label = { Text("场景种子：相同种子与轮次可复现") }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
         LorebookToggle("同时模拟其他已启用世界书（检查总预算）", includeOthers) { if (!busy) includeOthers = it }
         OutlinedTextField(text, { text = it }, label = { Text("本轮用户消息") }, minLines = 3, modifier = Modifier.fillMaxWidth())
@@ -50,7 +51,7 @@ internal fun LorebookSimulator(book: Lorebook, allBooks: List<Lorebook>, enterta
                                 runtimeStates = previous, entertainmentMode = entertainment, randomSeed = seed, totalTokenBudget = totalBudget,
                                 currentUserTurn = next.count { it.role == MessageRole.USER })
                         }
-                        val rendered = applyInjections(next, result.injections.sortedByDescending { it.priority }.groupBy { it.position })
+                        val rendered = applyInjections(next, result.injections.orderedForInsertion().groupBy { it.position })
                         history = next; runtime = result.runtimeStates; evaluation = result
                         preview = rendered.joinToString("\n\n") { "[${it.role}]\n${it.toText()}" }
                     } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -63,11 +64,13 @@ internal fun LorebookSimulator(book: Lorebook, allBooks: List<Lorebook>, enterta
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         evaluation?.let { result ->
             Text("采用 ${result.injections.size} 项 · 估算 ${result.injections.sumOf { me.rerere.rikkahub.data.ai.context.estimateTextTokens(it.content) }} Token")
-            if (!entertainment) Text("普通模式不启用概率与冷却；下方为实际注入预览。")
+            if (!entertainment) Text("普通模式下，原生娱乐规则休眠；新导入的兼容规则保持生效。此模拟未绑定助手变量值，含变量的预算以聊天诊断为准。")
             result.diagnostics.entries.forEach { entry ->
                 val state = result.runtimeStates[entry.entryId]
-                Text("${entry.lorebookName} / ${entry.entryName}：${entry.statusLabel()}\n命中：${entry.matchedTerms.joinToString()} · ${entry.estimatedTokens} Token · ${entry.position}\n${entry.detail.orEmpty()}" +
-                    if (state != null) "\n持续至第 ${state.activeUntilTurn} 轮，冷却至第 ${state.cooldownUntilTurn} 轮" else "")
+                Text("${entry.lorebookName} / ${entry.entryName}：${entry.statusLabel()}\n命中：${entry.matchedTerms.joinToString()} · ${entry.estimatedTokens} Token · ${entry.position}" +
+                    entry.source?.let { "\n匹配来源：${if (it == "recursion") "递归第 ${entry.recursionLevel} 层" else "聊天上下文"}" }.orEmpty() +
+                    "\n${entry.detail.orEmpty()}" +
+                    if (state != null) "\n持续剩余 ${entry.remainingActiveTurns}，冷却剩余 ${entry.remainingCooldownTurns} ${if (state.timingUnit == LorebookTimingUnit.MESSAGES) "条消息" else "轮"}" else "")
             }
             Text("最终消息预览", style = MaterialTheme.typography.titleSmall)
             androidx.compose.foundation.text.selection.SelectionContainer { Text(preview) }

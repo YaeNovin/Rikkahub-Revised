@@ -23,6 +23,8 @@ fun requestContextScopeKey(conversation: Conversation, settings: Settings, model
         assistant?.enableWebSearch, assistant?.mcpServers, assistant?.customBodies, assistant?.enableMemory, assistant?.enableMemoryRag,
         assistant?.enableEpisodicMemory, assistant?.useGlobalMemory, assistant?.localTools, assistant?.knowledgeBaseIds,
         assistant?.modeInjectionIds, assistant?.lorebookIds, assistant?.enabledSkills, assistant?.workspaceId,
+        settings.lorebookSources, assistant?.useGlobalLorebooks, assistant?.usePersonaLorebooks,
+        assistant?.lorebookCharacterFields,
         conversation.customSystemPrompt, conversation.modeInjectionIds, conversation.lorebookIds, conversation.disabledLorebookIds,
         conversation.memoryMode, conversation.rollingContextSummary?.content, conversation.rollingContextSummary?.sourceMessageIds).joinToString("\u0000"))
 }

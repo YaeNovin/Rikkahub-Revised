@@ -63,6 +63,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.model.LorebookGenerationTrigger
 import me.rerere.rikkahub.data.memory.MemoryExtractionService
 import me.rerere.rikkahub.data.memory.MemoryExtractionOutcome
 import me.rerere.rikkahub.data.memory.MemoryExtractionProcessResult
@@ -960,6 +961,7 @@ class ChatService(
         message: UIMessage,
         regenerateAssistantMsg: Boolean = true,
         responseCount: Int = 1,
+        generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.REGENERATE,
     ) {
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
@@ -978,7 +980,7 @@ class ChatService(
                         messageNodes = conversation.messageNodes.subList(0, indexAt + 1)
                     )
                     saveConversation(conversationId, newConversation)
-                    handleMessageComplete(conversationId)
+                    handleMessageComplete(conversationId, generationTrigger = generationTrigger)
                 } else {
                     if (regenerateAssistantMsg) {
                         val node = conversation.getMessageNodeByMessage(message)
@@ -986,6 +988,7 @@ class ChatService(
                         handleMessageComplete(
                             conversationId,
                             messageRange = 0..<nodeIndex,
+                            generationTrigger = generationTrigger,
                         )
                     } else {
                         saveConversation(conversationId, conversation)
@@ -1018,6 +1021,7 @@ class ChatService(
                     conversationId = conversationId,
                     messageRange = 0..nodeIndex,
                     resumeInterruptedResponse = true,
+                    generationTrigger = LorebookGenerationTrigger.CONTINUE,
                 )
                 _generationDoneFlow.emit(conversationId)
             } catch (error: Exception) {
@@ -1026,6 +1030,22 @@ class ChatService(
                     conversationId,
                     title = context.getString(R.string.error_title_continue_generation),
                 )
+            }
+        }
+        session.setJob(job)
+    }
+
+    /** Generate an impersonation turn without adding a user message. */
+    fun impersonate(conversationId: Uuid) {
+        val session = getOrCreateSession(conversationId)
+        session.getJob()?.cancel()
+        val job = appScope.launch {
+            try {
+                initializeConversation(conversationId)
+                handleMessageComplete(conversationId, generationTrigger = LorebookGenerationTrigger.IMPERSONATE)
+                _generationDoneFlow.emit(conversationId)
+            } catch (error: Exception) {
+                addError(error, conversationId, title = context.getString(R.string.error_title_generation))
             }
         }
         session.setJob(job)
@@ -1321,6 +1341,7 @@ class ChatService(
         conversationId: Uuid,
         messageRange: ClosedRange<Int>? = null,
         resumeInterruptedResponse: Boolean = false,
+        generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.NORMAL,
     ) {
         val settings = settingsStore.settingsFlow.first()
         val initialConversation = getConversationFlow(conversationId).value
@@ -1433,17 +1454,19 @@ class ChatService(
             )
             var pendingLorebookEvaluation: me.rerere.rikkahub.data.model.PromptInjectionEvaluation? = null
             val excludedBooks = if (assistant.allowConversationPromptInjection) conversation.disabledLorebookIds else emptySet()
-            generationHandler.generateText(
+                generationHandler.generateText(
                 settings = settings,
                 model = model,
                 processingStatus = session.processingStatus,
                 conversationId = conversationId,
                 messages = generationMessages,
                 suggestionConversation = conversation,
-                assistant = assistant.copy(lorebookIds = assistant.lorebookIds - excludedBooks),
+                    assistant = assistant.copy(lorebookIds = assistant.lorebookIds - excludedBooks),
+                    generationTrigger = generationTrigger,
                 conversationSystemPrompt = conversation.customSystemPrompt,
                 conversationModeInjectionIds = conversation.modeInjectionIds,
                 conversationLorebookIds = conversation.lorebookIds - excludedBooks,
+                disabledLorebookIds = excludedBooks,
                 temporaryModeInjections = conversation.temporaryModeInjections,
                 lorebookRuntimeStates = conversation.lorebookRuntimeStates,
                 conversationUserTurn = conversation.currentMessages.count { it.role == MessageRole.USER },

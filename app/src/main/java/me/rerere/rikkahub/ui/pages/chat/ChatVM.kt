@@ -480,12 +480,18 @@ class ChatVM(
             conversationId = _conversationId,
             message = message,
             responseCount = count.coerceIn(2, 5),
+            generationTrigger = me.rerere.rikkahub.data.model.LorebookGenerationTrigger.SWIPE,
         )
     }
 
     fun continueAtMessage(message: UIMessage) {
         analytics?.logEvent("ai_continue_at_message", null)
         chatService.continueAtMessage(_conversationId, message)
+    }
+
+    fun impersonate() {
+        analytics?.logEvent("ai_impersonate", null)
+        chatService.impersonate(_conversationId)
     }
 
     fun handleToolApproval(

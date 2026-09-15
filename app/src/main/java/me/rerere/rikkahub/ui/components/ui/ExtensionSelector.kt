@@ -37,6 +37,7 @@ import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.resolveActiveModes
 import me.rerere.rikkahub.data.model.selectExclusiveMode
 import me.rerere.rikkahub.data.model.withQuickMessageIds
+import me.rerere.rikkahub.data.model.resolve
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
 import me.rerere.rikkahub.ui.components.ai.LorebooksContent
 import me.rerere.rikkahub.ui.components.ai.ModeInjectionsContent
@@ -102,11 +103,11 @@ fun ExtensionSelector(
     } else {
         assistant.modeInjectionIds
     }
-    val selectedLorebookIds = if (useConversationInjections) {
-        (assistant.lorebookIds + conversation.lorebookIds) - conversation.disabledLorebookIds
-    } else {
-        assistant.lorebookIds
-    }
+    val bookSources = settings.lorebookSources.resolve(assistant,
+        if (useConversationInjections) conversation.lorebookIds else emptySet(),
+        if (useConversationInjections) conversation.disabledLorebookIds else emptySet())
+    val selectedLorebookIds = bookSources.keys
+    val inheritedBooks = if (useConversationInjections) emptySet() else settings.lorebookSources.resolve(assistant.copy(lorebookIds = emptySet())).keys
 
     val pagerState = rememberPagerState { 4 }
     val scope = rememberCoroutineScope()
@@ -259,6 +260,8 @@ fun ExtensionSelector(
                         LorebooksContent(
                             lorebooks = settings.lorebooks,
                             selectedIds = selectedLorebookIds,
+                            lockedIds = inheritedBooks,
+                            scopeLabels = bookSources.mapValues { (_, source) -> "来源：${source.name}" + if (source == me.rerere.rikkahub.data.model.LorebookSourceScope.GLOBAL || source == me.rerere.rikkahub.data.model.LorebookSourceScope.PERSONA) "（来源管理中调整，或允许对话单独配置后停用）" else "" },
                             onToggle = { id, checked ->
                                 if (useConversationInjections) {
                                     if (checked) {

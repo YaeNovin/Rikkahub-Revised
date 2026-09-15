@@ -46,7 +46,7 @@ class LorebookScanModeTest {
         assertEquals(3, book.entries.count { it.exclusiveGroup == "zm_platform_mode" })
         assertEquals(5, evaluate(book, listOf(UIMessage.user("unmatched"))).injections.size)
         assertTrue(book.importWarnings.none { it.contains("扫描深度") || it.contains("已跳过") })
-        assertTrue(book.importWarnings.any { it.contains("useGroupScoring") })
+        assertFalse(book.importWarnings.any { it.contains("useGroupScoring") })
     }
     @Test fun `native round trip preserves scan choices`() {
         val book = Lorebook(defaultScanDepth = 0, entries = listOf(rule().copy(scanMode = LorebookScanMode.INHERIT), rule().copy(scanDepth = 0)))
@@ -61,5 +61,25 @@ class LorebookScanModeTest {
         val result = evaluateInjections(listOf(UIMessage.user("plain")), Assistant(lorebookIds = setOf(book.id)), emptyList(), listOf(book),
             runtimeStates = mapOf(rule.id to state), currentUserTurn = 2, entertainmentMode = true)
         assertEquals(LorebookEntryStatus.ACTIVE_FROM_PREVIOUS_TURN, result.diagnostics.entries.single().status)
+    }
+
+    @Test fun `include names uses participant names instead of generic roles`() {
+        val rule = rule().copy(keywords = listOf("Alice"), scanDepth = 1)
+        val book = Lorebook(entries = listOf(rule), includeNames = true)
+        val result = evaluateInjections(
+            listOf(UIMessage.user("hello")),
+            Assistant(name = "Bob", lorebookIds = setOf(book.id)),
+            emptyList(), listOf(book), entertainmentMode = true,
+            userName = "Alice", assistantName = "Bob",
+        )
+        assertEquals(1, result.injections.size)
+    }
+
+    @Test fun `imported book matching defaults apply when entry omits overrides`() {
+        val book = decodeTavernLorebook(Json.parseToJsonElement("""
+            {"case_sensitive":true,"match_whole_words":true,"entries":[{"key":["Cat"],"content":"x"}]}
+        """.trimIndent()).jsonObject, "B")
+        assertTrue(evaluateInjections(listOf(UIMessage.user("cat")), Assistant(lorebookIds = setOf(book.id)), emptyList(), listOf(book), entertainmentMode = true).injections.isEmpty())
+        assertEquals(1, evaluateInjections(listOf(UIMessage.user("Cat")), Assistant(lorebookIds = setOf(book.id)), emptyList(), listOf(book), entertainmentMode = true).injections.size)
     }
 }

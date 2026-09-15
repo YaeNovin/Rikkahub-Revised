@@ -403,9 +403,9 @@
   <string name="extensions_page_issue_invalid_regex">觸發條件包含無效的正規表示式</string>
   <string name="extensions_page_issue_invalid_keyword_expression">世界書包含無效的關鍵詞組合表達式</string>
   <string name="extensions_page_issue_missing_trigger">非常駐條目沒有設定觸發關鍵字</string>
-  <string name="extensions_page_issue_invalid_depth">注入深度必須至少為 1</string>
+  <string name="extensions_page_issue_invalid_depth">注入位置或深度無效，請檢查條目設定</string>
   <string name="extensions_page_issue_invalid_scan_depth">世界書掃描深度須為 0–1000，0 表示不掃描</string>
-  <string name="extensions_page_issue_invalid_role">注入角色必須為使用者或助手</string>
+  <string name="extensions_page_issue_invalid_role">注入角色不受支援；世界書也支援系統角色</string>
   <string name="extensions_page_issue_missing_skill_manifest">技能目錄中缺少 SKILL.md</string>
   <string name="extensions_page_issue_unreadable_skill_manifest">無法讀取 SKILL.md</string>
   <string name="extensions_page_issue_missing_skill_name">SKILL.md 缺少有效名稱</string>
@@ -413,7 +413,7 @@
   <string name="extensions_page_issue_missing_reference">有助手仍引用已不存在的項目</string>
   <string name="extensions_page_issue_inaccessible_workspace">工作區目錄缺失或無法存取</string>
   <string name="extensions_page_issue_broken_workspace">工作區已被標記為損壞</string>
-  <string name="extensions_page_issue_setting_conflict">同一設定存在相同優先順序的衝突項目</string>
+  <string name="extensions_page_issue_setting_conflict">潛在衝突：同一設定、相同優先順序存在不同內容</string>
   <string name="extensions_page_issue_setting_overlap">多個世界書項目影響同一個設定</string>
   <string name="extensions_page_issue_mutually_exclusive_modes">同一助手啟用了同一互斥群組中的多個模式</string>
   <string name="favorite_page_no_favorites">尚無收藏</string>

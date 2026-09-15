@@ -20,6 +20,19 @@ import org.junit.Test
 
 class ExtensionAuditTest {
     @Test
+    fun `worldbook system role zero insertion depth and imported expression are valid`() {
+        val entry = PromptInjection.RegexInjection(name = "Valid", content = "Scene", role = MessageRole.SYSTEM,
+            position = me.rerere.rikkahub.data.model.InjectionPosition.AT_DEPTH, injectDepth = 0,
+            sourceFormat = me.rerere.rikkahub.data.model.LorebookSourceFormat.SILLY_TAVERN, keywordExpression = "forest AND rain")
+        val book = Lorebook(name = "Book", entries = listOf(entry))
+        val settings = Settings(lorebooks = listOf(book), modeInjections = emptyList())
+        val valid = buildExtensionAudit(settings, SkillScanResult(), emptyList())
+        assertTrue(valid.issues.none { it.kind in setOf(ExtensionIssueKind.INVALID_ROLE, ExtensionIssueKind.INVALID_INJECTION_DEPTH, ExtensionIssueKind.MISSING_TRIGGER) })
+        val unmapped = buildExtensionAudit(settings.copy(lorebooks = listOf(book.copy(entries = listOf(entry.copy(unsupportedPosition = "7"))))), SkillScanResult(), emptyList())
+        assertTrue(unmapped.issues.any { it.kind == ExtensionIssueKind.INVALID_INJECTION_DEPTH })
+    }
+
+    @Test
     fun `valid expression alone is a trigger and searchable`() {
         val book = Lorebook(name = "Book", entries = listOf(PromptInjection.RegexInjection(
             name = "Scene", content = "Details", keywordExpression = "forest AND rain",
@@ -114,7 +127,7 @@ class ExtensionAuditTest {
                     keywords = listOf("("),
                     useRegex = true,
                     scanDepth = -1,
-                    role = MessageRole.SYSTEM,
+                    role = MessageRole.TOOL,
                 )
             ),
         )

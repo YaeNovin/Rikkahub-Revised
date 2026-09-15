@@ -643,6 +643,13 @@ class RouteActivity : ComponentActivity() {
                                 PromptPage()
                             }
 
+                            entry<Screen.LorebookHelp> {
+                                me.rerere.rikkahub.ui.pages.extensions.LorebookHelpPage()
+                            }
+                            entry<Screen.LorebookSources> {
+                                me.rerere.rikkahub.ui.pages.extensions.LorebookSourcesPage()
+                            }
+
                             entry<Screen.Skills> {
                                 SkillsPage()
                             }
@@ -892,6 +899,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Prompts : Screen
+
+    @Serializable
+    data object LorebookHelp : Screen
+
+    @Serializable
+    data object LorebookSources : Screen
 
     @Serializable
     data object Skills : Screen

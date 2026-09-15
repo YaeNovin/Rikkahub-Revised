@@ -1616,7 +1616,7 @@ private fun PromptInjectionDiagnosticsDialog(
                             )
                         )
                     }
-                    items(diagnostics.entries, key = { "${it.lorebookId}:${it.entryId}" }) { entry ->
+                    items(diagnostics.entries, key = { "${it.lorebookId}:${it.entryId}:${it.recursionLevel}:${it.status}" }) { entry ->
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = "${entry.lorebookName} · ${entry.entryName}",
@@ -1639,8 +1639,18 @@ private fun PromptInjectionDiagnosticsDialog(
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
+                            entry.source?.let { source ->
+                                Text(
+                                    if (source == "recursion") "匹配来源：递归第 ${entry.recursionLevel} 层" else "匹配来源：聊天上下文",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             entry.detail?.let { Text(if (it == "truncated") "内容已按预算截断" else it, color = MaterialTheme.colorScheme.tertiary) }
-                            if (entry.remainingActiveTurns > 0 || entry.remainingCooldownTurns > 0) Text("后续持续 ${entry.remainingActiveTurns} 轮 · 冷却 ${entry.remainingCooldownTurns} 轮", style = MaterialTheme.typography.bodySmall)
+                            if (entry.remainingActiveTurns > 0 || entry.remainingCooldownTurns > 0) {
+                                val unit = if (entry.timingUnit == me.rerere.rikkahub.data.model.LorebookTimingUnit.MESSAGES) "条消息" else "轮"
+                                Text("后续持续 ${entry.remainingActiveTurns} $unit · 冷却 ${entry.remainingCooldownTurns} $unit", style = MaterialTheme.typography.bodySmall)
+                            }
                             var showContent by remember(entry.entryId, entry.injectedContent) { mutableStateOf(false) }
                             if (entry.injectedContent != null) {
                                 TextButton(onClick = { showContent = !showContent }) { Text(if (showContent) "收起实际注入正文" else "查看实际注入正文") }
@@ -1682,6 +1692,7 @@ private fun promptInjectionPositionLabel(position: InjectionPosition): String = 
     InjectionPosition.TOP_OF_CHAT -> stringResource(R.string.prompt_page_position_top_of_chat)
     InjectionPosition.BOTTOM_OF_CHAT -> stringResource(R.string.prompt_page_position_bottom_of_chat)
     InjectionPosition.AT_DEPTH -> stringResource(R.string.prompt_page_position_at_depth)
+    InjectionPosition.OUTLET -> "Outlet（由宏显式插入）"
 }
 
 private fun suggestionActionInput(

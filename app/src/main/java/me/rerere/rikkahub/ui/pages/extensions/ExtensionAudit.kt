@@ -288,18 +288,17 @@ internal fun buildExtensionAudit(
                 addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.DUPLICATE_NAME)
             }
             if (entry.enabled && !entry.constantActive && entry.keywords.none { it.isNotBlank() } &&
-                !(settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT && entry.keywordExpression.isNotBlank())) {
+                !((settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT || entry.sourceFormat != me.rerere.rikkahub.data.model.LorebookSourceFormat.NATIVE) && entry.keywordExpression.isNotBlank())) {
                 addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.MISSING_TRIGGER)
             }
             if (entry.scanDepth < 0 || entry.scanDepth > 1000) {
                 addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.INVALID_SCAN_DEPTH)
             }
-            if (entry.useRegex && entry.keywords.any { keyword ->
-                    keyword.isNotBlank() && runCatching { Regex(keyword) }.isFailure
-                }
-            ) {
+            val matchRule = if (settings.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT || entry.sourceFormat != me.rerere.rikkahub.data.model.LorebookSourceFormat.NATIVE) entry else entry.copy(keywordExpression = "")
+            if (matchRule.evaluateKeywords("").error != null) {
                 addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.INVALID_REGEX)
             }
+            if (entry.enabled && entry.unsupportedPosition != null) addIssue(ExtensionCategory.PROMPTS, key, entryTitle, ExtensionIssueKind.INVALID_INJECTION_DEPTH)
         }
         val entryText = lorebook.entries.joinToString("\n") {
             "${it.name}\n${it.keywords.joinToString()}\n${it.keywordExpression}\n${it.settingKeys.joinToString()}\n${it.content}"
@@ -445,10 +444,10 @@ private fun validateInjection(
     }
     if (injection.name.isBlank()) add(ExtensionIssueKind.EMPTY_NAME)
     if (injection.content.isBlank()) add(ExtensionIssueKind.EMPTY_CONTENT)
-    if (injection.position == InjectionPosition.AT_DEPTH && injection.injectDepth < 1) {
+    if (injection.position == InjectionPosition.AT_DEPTH && injection.injectDepth < if (injection is PromptInjection.RegexInjection) 0 else 1) {
         add(ExtensionIssueKind.INVALID_INJECTION_DEPTH)
     }
-    if (injection.role !in setOf(MessageRole.USER, MessageRole.ASSISTANT)) {
+    if (injection.role !in (if (injection is PromptInjection.RegexInjection) setOf(MessageRole.SYSTEM, MessageRole.USER, MessageRole.ASSISTANT) else setOf(MessageRole.USER, MessageRole.ASSISTANT))) {
         add(ExtensionIssueKind.INVALID_ROLE)
     }
 }

@@ -672,9 +672,9 @@
   <string name="extensions_page_issue_invalid_regex">触发条件包含无效的正则表达式</string>
   <string name="extensions_page_issue_invalid_keyword_expression">世界书包含无效的关键词组合表达式</string>
   <string name="extensions_page_issue_missing_trigger">非常驻条目没有设置触发关键词</string>
-  <string name="extensions_page_issue_invalid_depth">注入深度必须至少为 1</string>
+  <string name="extensions_page_issue_invalid_depth">注入位置或深度无效，请检查条目设置</string>
   <string name="extensions_page_issue_invalid_scan_depth">世界书扫描深度须为 0–1000，0 表示不扫描</string>
-  <string name="extensions_page_issue_invalid_role">注入角色必须为用户或助手</string>
+  <string name="extensions_page_issue_invalid_role">注入角色不受支持；世界书也支持系统角色</string>
   <string name="extensions_page_issue_missing_skill_manifest">技能目录中缺少 SKILL.md</string>
   <string name="extensions_page_issue_unreadable_skill_manifest">无法读取 SKILL.md</string>
   <string name="extensions_page_issue_missing_skill_name">SKILL.md 缺少有效名称</string>
@@ -682,7 +682,7 @@
   <string name="extensions_page_issue_missing_reference">有助手仍引用已经不存在的项目</string>
   <string name="extensions_page_issue_inaccessible_workspace">工作区目录缺失或无法访问</string>
   <string name="extensions_page_issue_broken_workspace">工作区已被标记为损坏</string>
-  <string name="extensions_page_issue_setting_conflict">同一设定存在相同优先级的冲突条目</string>
+  <string name="extensions_page_issue_setting_conflict">潜在冲突：同一设定、相同优先级存在不同内容</string>
   <string name="extensions_page_issue_setting_overlap">多个世界书条目影响同一个设定</string>
   <string name="extensions_page_issue_mutually_exclusive_modes">同一助手启用了同一互斥组中的多个模式</string>
   <string name="favorite_page_no_favorites">暂无收藏</string>
@@ -2927,7 +2927,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="log_page_filter_requests">请求</string>
   <string name="log_page_filter_text">诊断文本</string>
   <string name="log_page_count">当前 %1$d 条，共 %2$d 条</string>
-  <string name="log_page_retention">错误日志保留 7 天，最多 200 条；其他日志仅保留本次运行的最近 100 条。页面可见时自动刷新。</string>
+  <string name="log_page_retention">请求日志保存在本机，退出后仍保留，最多 500 条／32 MiB，超限清理最早记录。错误日志保留 7 天，最多 200 条；普通事件保留本次运行最近 100 条。页面可见时自动刷新。完整正文可能包含对话隐私，请谨慎分享。</string>
   <string name="log_page_empty">暂无符合条件的日志</string>
   <string name="log_page_requests_tab">请求日志</string>
   <string name="log_page_software_tab">软件日志</string>

@@ -198,12 +198,19 @@ private class CharaCardV2Parser : TavernCardParser {
             append(scenario ?: "Empty")
         }
 
-        val lorebook = parseEmbeddedTavernLorebook(data, name)
+        val lorebook = parseEmbeddedTavernLorebook(data, name, me.rerere.rikkahub.data.model.LorebookSourceFormat.CHARACTER_CARD_V2)
         return TavernImportResult(Assistant(
             name = name,
             presetMessages = if (firstMessage != null) listOf(UIMessage.assistant(firstMessage)) else emptyList(),
             systemPrompt = prompt,
             background = background,
+            lorebookCharacterFields = buildMap {
+                put("matchCharacterDescription", description.orEmpty())
+                put("matchCharacterPersonality", personality.orEmpty())
+                put("matchScenario", scenario.orEmpty())
+                put("matchCreatorNotes", data["creator_notes"]?.jsonPrimitiveOrNull?.contentOrNull.orEmpty())
+                put("matchCharacterDepthPrompt", (data["extensions"] as? JsonObject)?.get("depth_prompt")?.let { it as? JsonObject }?.get("prompt")?.jsonPrimitiveOrNull?.contentOrNull.orEmpty())
+            },
             lorebookIds = lorebook?.let { setOf(it.id) }.orEmpty(),
         ), lorebook?.let(::listOf).orEmpty())
     }
@@ -238,12 +245,19 @@ private class CharaCardV3Parser : TavernCardParser {
             append(scenario ?: "Empty")
         }
 
-        val lorebook = parseEmbeddedTavernLorebook(data, name)
+        val lorebook = parseEmbeddedTavernLorebook(data, name, me.rerere.rikkahub.data.model.LorebookSourceFormat.CHARACTER_CARD_V3)
         return TavernImportResult(Assistant(
             name = name,
             presetMessages = if (firstMessage != null) listOf(UIMessage.assistant(firstMessage)) else emptyList(),
             systemPrompt = prompt,
             background = background,
+            lorebookCharacterFields = buildMap {
+                put("matchCharacterDescription", description.orEmpty())
+                put("matchCharacterPersonality", personality.orEmpty())
+                put("matchScenario", scenario.orEmpty())
+                put("matchCreatorNotes", data["creator_notes"]?.jsonPrimitiveOrNull?.contentOrNull.orEmpty())
+                put("matchCharacterDepthPrompt", (data["extensions"] as? JsonObject)?.get("depth_prompt")?.let { it as? JsonObject }?.get("prompt")?.jsonPrimitiveOrNull?.contentOrNull.orEmpty())
+            },
             lorebookIds = lorebook?.let { setOf(it.id) }.orEmpty(),
         ), lorebook?.let(::listOf).orEmpty())
     }
@@ -281,15 +295,17 @@ private suspend fun importAssistantFromUri(
                 "image/png" -> {
                     val result = ImageUtils.getTavernCharacterMeta(context, uri)
                     result.map { base64Data ->
+                        require(base64Data.length <= 24 * 1024 * 1024) { "角色卡元数据过大，请拆分世界书后导入" }
                         val json = String(Base64.decode(base64Data, Base64.DEFAULT))
+                        require(json.length <= 16 * 1024 * 1024) { "角色卡元数据超过 16 MiB" }
                         val bg = filesManager.createChatFilesByContents(listOf(uri)).first().toString()
                         json to bg
                     }.getOrElse { throw it }
                 }
 
                 "application/json" -> {
-                    val json = context.contentResolver.openInputStream(uri)?.bufferedReader()
-                        .use { it?.readText() }
+                    val json = context.contentResolver.openInputStream(uri)
+                        .use { input -> input?.let { me.rerere.rikkahub.data.export.readLorebookJson(it) } }
                         ?: error(context.getString(R.string.assistant_importer_read_json_failed))
                     json to null
                 }
@@ -300,6 +316,8 @@ private suspend fun importAssistantFromUri(
         val json = Json.parseToJsonElement(jsonString).jsonObject
         val imported = parseAssistantFromJson(context = context, json = json, background = backgroundStr)
         onImport(imported.assistant, imported.lorebooks)
+    } catch (exception: kotlinx.coroutines.CancellationException) {
+        throw exception
     } catch (exception: Exception) {
         exception.printStackTrace()
         toaster.show(
@@ -309,9 +327,9 @@ private suspend fun importAssistantFromUri(
     }
 }
 
-internal fun parseEmbeddedTavernLorebook(data: JsonObject, characterName: String): Lorebook? {
+internal fun parseEmbeddedTavernLorebook(data: JsonObject, characterName: String, sourceFormat: me.rerere.rikkahub.data.model.LorebookSourceFormat = me.rerere.rikkahub.data.model.LorebookSourceFormat.CHARACTER_CARD_V2): Lorebook? {
     val book = data["character_book"] as? JsonObject ?: return null
-    return me.rerere.rikkahub.data.export.decodeTavernLorebook(book, "$characterName 世界书")
+    return me.rerere.rikkahub.data.export.decodeTavernLorebook(book, "$characterName 世界书", sourceFormat)
 }
 
 private fun mapTavernPosition(value: JsonElement?): InjectionPosition {
@@ -320,8 +338,10 @@ private fun mapTavernPosition(value: JsonElement?): InjectionPosition {
         return when (position) {
             0 -> InjectionPosition.BEFORE_SYSTEM_PROMPT
             1 -> InjectionPosition.AFTER_SYSTEM_PROMPT
-            2, 3 -> InjectionPosition.TOP_OF_CHAT
+            2, 3 -> InjectionPosition.AFTER_SYSTEM_PROMPT
             4 -> InjectionPosition.AT_DEPTH
+            5, 6 -> InjectionPosition.TOP_OF_CHAT
+            7 -> InjectionPosition.OUTLET
             else -> InjectionPosition.AFTER_SYSTEM_PROMPT
         }
     }
@@ -330,6 +350,7 @@ private fun mapTavernPosition(value: JsonElement?): InjectionPosition {
         "after_char", "after_system", "after_system_prompt" -> InjectionPosition.AFTER_SYSTEM_PROMPT
         "at_depth", "depth" -> InjectionPosition.AT_DEPTH
         "before_example", "after_example", "top_of_chat" -> InjectionPosition.TOP_OF_CHAT
+        "outlet" -> InjectionPosition.OUTLET
         else -> InjectionPosition.AFTER_SYSTEM_PROMPT
     }
 }

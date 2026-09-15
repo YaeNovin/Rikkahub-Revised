@@ -9,6 +9,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.LorebookEntryRuntimeState
 import me.rerere.rikkahub.data.model.PromptInjectionEvaluation
 import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
+import me.rerere.rikkahub.data.model.LorebookGenerationTrigger
 import kotlin.uuid.Uuid
 
 class TransformerContext(
@@ -18,6 +19,8 @@ class TransformerContext(
     val settings: Settings,
     val conversationModeInjectionIds: Set<Uuid> = emptySet(),
     val conversationLorebookIds: Set<Uuid> = emptySet(),
+    val disabledLorebookIds: Set<Uuid> = emptySet(),
+    val allowLorebookNetwork: Boolean = false,
     val temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
     val lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
     val conversationUserTurn: Int? = null,
@@ -27,7 +30,14 @@ class TransformerContext(
     val workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
     val conversationId: Uuid? = null,
     val conversationMessages: List<UIMessage> = emptyList(),
-)
+    val userName: String = "user",
+    val assistantName: String = assistant.name.ifBlank { "assistant" },
+    val generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.NORMAL,
+    val assistantTagNames: Set<String> = settings.assistantTags.filter { it.id in assistant.tags }.map { it.name }.toSet(),
+) {
+    // One snapshot for keyword expansion, worldbook budgeting and later message interpolation.
+    internal var promptVariableValues: Map<String, String>? = null
+}
 
 interface MessageTransformer {
     /**
@@ -79,6 +89,8 @@ suspend fun List<UIMessage>.transforms(
     settings: Settings,
     conversationModeInjectionIds: Set<Uuid> = emptySet(),
     conversationLorebookIds: Set<Uuid> = emptySet(),
+    disabledLorebookIds: Set<Uuid> = emptySet(),
+    allowLorebookNetwork: Boolean = false,
     temporaryModeInjections: Map<Uuid, Int> = emptyMap(),
     lorebookRuntimeStates: Map<Uuid, LorebookEntryRuntimeState> = emptyMap(),
     conversationUserTurn: Int? = null,
@@ -88,6 +100,10 @@ suspend fun List<UIMessage>.transforms(
     workspaceFileOperationMode: WorkspaceFileOperationMode = WorkspaceFileOperationMode.TOOLS,
     conversationId: Uuid? = null,
     conversationMessages: List<UIMessage> = emptyList(),
+    userName: String = "user",
+    assistantName: String = assistant.name.ifBlank { "assistant" },
+    generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.NORMAL,
+    assistantTagNames: Set<String> = settings.assistantTags.filter { it.id in assistant.tags }.map { it.name }.toSet(),
 ): List<UIMessage> {
     val ctx = TransformerContext(
         context = context,
@@ -96,6 +112,8 @@ suspend fun List<UIMessage>.transforms(
         settings = settings,
         conversationModeInjectionIds = conversationModeInjectionIds,
         conversationLorebookIds = conversationLorebookIds,
+        disabledLorebookIds = disabledLorebookIds,
+        allowLorebookNetwork = allowLorebookNetwork,
         temporaryModeInjections = temporaryModeInjections,
         lorebookRuntimeStates = lorebookRuntimeStates,
         conversationUserTurn = conversationUserTurn,
@@ -105,6 +123,10 @@ suspend fun List<UIMessage>.transforms(
         workspaceFileOperationMode = workspaceFileOperationMode,
         conversationId = conversationId,
         conversationMessages = conversationMessages,
+        userName = userName,
+        assistantName = assistantName,
+        generationTrigger = generationTrigger,
+        assistantTagNames = assistantTagNames,
     )
     return transformers.fold(this) { acc, transformer ->
         transformer.transform(ctx, acc)

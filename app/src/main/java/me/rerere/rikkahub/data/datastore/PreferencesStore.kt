@@ -57,6 +57,7 @@ import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.model.withQuickMessageIds
+import me.rerere.rikkahub.data.model.withoutDeletedBooks
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.ui.theme.CustomTheme
 import me.rerere.rikkahub.ui.theme.PresetThemes
@@ -185,6 +186,7 @@ class SettingsStore(
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
         val LOREBOOK_TOTAL_BUDGET = intPreferencesKey("lorebook_total_budget")
+        val LOREBOOK_SOURCES = stringPreferencesKey("lorebook_sources")
         val QUICK_MESSAGES = stringPreferencesKey("quick_messages")
         val EXTENSION_MANAGEMENT_MODE = stringPreferencesKey("extension_management_mode")
         val QUICK_MESSAGE_SORT_MODE = stringPreferencesKey("quick_message_sort_mode")
@@ -312,6 +314,7 @@ class SettingsStore(
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
                 lorebookTotalTokenBudget = (preferences[LOREBOOK_TOTAL_BUDGET] ?: 0).coerceIn(0, 1000000),
+                lorebookSources = preferences[LOREBOOK_SOURCES]?.let { JsonInstant.decodeFromString<me.rerere.rikkahub.data.model.LorebookSources>(it) } ?: me.rerere.rikkahub.data.model.LorebookSources(),
                 lorebooks = preferences[LOREBOOKS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -536,6 +539,7 @@ class SettingsStore(
             preferences[MODE_INJECTIONS] = JsonInstant.encodeToString(settings.modeInjections)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(settings.lorebooks)
             preferences[LOREBOOK_TOTAL_BUDGET] = settings.lorebookTotalTokenBudget.coerceIn(0, 1000000)
+            preferences[LOREBOOK_SOURCES] = JsonInstant.encodeToString(settings.lorebookSources)
             preferences[QUICK_MESSAGES] = JsonInstant.encodeToString(settings.quickMessages)
             preferences[EXTENSION_MANAGEMENT_MODE] = settings.extensionManagementMode.name
             preferences[QUICK_MESSAGE_SORT_MODE] = settings.quickMessageSortMode.name
@@ -552,6 +556,26 @@ class SettingsStore(
 
     suspend fun update(fn: (Settings) -> Settings) = settingsUpdateMutex.withLock {
         updateUnlocked(fn(settingsFlow.value))
+    }
+
+    /** Prompt edits report success only after persistence; failed writes leave live books intact. */
+    suspend fun updatePromptExtensions(fn: (Settings) -> Settings) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        settingsUpdateMutex.withLock {
+            val current = settingsFlow.value
+            check(!current.init) { "设置尚未加载，请稍后重试" }
+            val edited = fn(current)
+            val modes = JsonInstant.encodeToString(edited.modeInjections)
+            val books = JsonInstant.encodeToString(edited.lorebooks)
+            val budget = edited.lorebookTotalTokenBudget.coerceIn(0, 1000000)
+            val sources = edited.lorebookSources.withoutDeletedBooks(edited.lorebooks.mapTo(hashSetOf()) { it.id })
+            dataStore.edit { preferences ->
+                preferences[MODE_INJECTIONS] = modes
+                preferences[LOREBOOKS] = books
+                preferences[LOREBOOK_TOTAL_BUDGET] = budget
+                preferences[LOREBOOK_SOURCES] = JsonInstant.encodeToString(sources)
+            }
+            settingsFlow.value = current.copy(modeInjections = edited.modeInjections, lorebooks = edited.lorebooks, lorebookTotalTokenBudget = budget, lorebookSources = sources)
+        }
     }
 
     suspend fun updateDisplaySetting(
@@ -584,26 +608,38 @@ class SettingsStore(
     suspend fun updateAdvancedAppearance(
         fn: (AdvancedAppearanceSetting) -> AdvancedAppearanceSetting,
     ) = settingsUpdateMutex.withLock {
-        val currentSettings = settingsFlow.value
-        if (currentSettings.init) {
-            dataStore.edit { preferences ->
-                val current = decodeAdvancedAppearanceSetting(
-                    preferences[ADVANCED_APPEARANCE_SETTING]
-                )
-                val updated = fn(current)
-                if (updated != current) {
-                    preferences[ADVANCED_APPEARANCE_SETTING] = JsonInstant.encodeToString(updated)
-                }
-            }
-            return@withLock
+        // The disk flow and immediate UI publication may arrive in different orders.
+        // Always transform the current persisted record inside the atomic edit, so an
+        // accent extraction/slider update cannot restore yesterday's text color mode.
+        val saved = dataStore.edit { preferences ->
+            val current = decodeAdvancedAppearanceSetting(preferences[ADVANCED_APPEARANCE_SETTING])
+            val updated = fn(current)
+            if (updated != current) preferences[ADVANCED_APPEARANCE_SETTING] = JsonInstant.encodeToString(updated)
         }
-        val updated = fn(currentSettings.advancedAppearanceSetting)
-        if (updated == currentSettings.advancedAppearanceSetting) return@withLock
+        if (!settingsFlow.value.init) settingsFlow.value = settingsFlow.value.copy(
+            advancedAppearanceSetting = decodeAdvancedAppearanceSetting(saved[ADVANCED_APPEARANCE_SETTING]),
+        )
+    }
 
-        dataStore.edit { preferences ->
-            preferences[ADVANCED_APPEARANCE_SETTING] = JsonInstant.encodeToString(updated)
+    /** Theme source switches touch only palette preferences and use the same atomic
+     * appearance record as text-mode changes, never a stale whole-Settings snapshot. */
+    internal suspend fun updateThemeSelection(transform: (Settings) -> Settings) = settingsUpdateMutex.withLock {
+        val saved = dataStore.edit { preferences ->
+            val current = settingsFlow.value.copy(
+                dynamicColor = preferences[DYNAMIC_COLOR] ?: true,
+                themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
+                advancedAppearanceSetting = decodeAdvancedAppearanceSetting(preferences[ADVANCED_APPEARANCE_SETTING]),
+            )
+            val updated = transform(current)
+            preferences[DYNAMIC_COLOR] = updated.dynamicColor
+            preferences[THEME_ID] = updated.themeId
+            preferences[ADVANCED_APPEARANCE_SETTING] = JsonInstant.encodeToString(updated.advancedAppearanceSetting)
         }
-        settingsFlow.value = settingsFlow.value.copy(advancedAppearanceSetting = updated)
+        if (!settingsFlow.value.init) settingsFlow.value = settingsFlow.value.copy(
+            dynamicColor = saved[DYNAMIC_COLOR] ?: true,
+            themeId = saved[THEME_ID] ?: PresetThemes[0].id,
+            advancedAppearanceSetting = decodeAdvancedAppearanceSetting(saved[ADVANCED_APPEARANCE_SETTING]),
+        )
     }
 
     /** Composer material spans two records: commit them together, including when
@@ -815,6 +851,7 @@ data class Settings(
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),
     val lorebookTotalTokenBudget: Int = 0,
+    val lorebookSources: me.rerere.rikkahub.data.model.LorebookSources = me.rerere.rikkahub.data.model.LorebookSources(),
     val quickMessages: List<QuickMessage> = emptyList(),
     val extensionManagementMode: ExtensionManagementMode = ExtensionManagementMode.NORMAL,
     val quickMessageSortMode: QuickMessageSortMode = QuickMessageSortMode.DEFAULT,

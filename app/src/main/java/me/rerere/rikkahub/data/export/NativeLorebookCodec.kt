@@ -8,6 +8,14 @@ import kotlin.uuid.Uuid
 internal fun decodeLorebookDocument(text: String, fallbackName: String): Lorebook {
     val root = ExportSerializer.DefaultJson.parseToJsonElement(text) as? JsonObject
         ?: throw IllegalArgumentException("世界书文件根节点必须是 JSON 对象")
+    when ((root["spec"] as? JsonPrimitive)?.contentOrNull) {
+        "lorebook_v3" -> return decodeTavernLorebook(root["data"] as? JsonObject ?: error("V3 世界书缺少 data 对象"), fallbackName, LorebookSourceFormat.CHARACTER_CARD_V3)
+        "chara_card_v2", "chara_card_v3" -> {
+            val book = (root["data"] as? JsonObject)?.get("character_book") as? JsonObject ?: error("角色卡未附带世界书")
+            val source = if ((root["spec"] as? JsonPrimitive)?.contentOrNull == "chara_card_v3") LorebookSourceFormat.CHARACTER_CARD_V3 else LorebookSourceFormat.CHARACTER_CARD_V2
+            return decodeTavernLorebook(book, fallbackName, source)
+        }
+    }
     if ("type" in root || "data" in root || "version" in root) {
         require((root["type"] as? JsonPrimitive)?.contentOrNull == "lorebook") { "文件不是原生世界书导出（type 应为 lorebook）" }
         val version = (root["version"] as? JsonPrimitive)?.intOrNull ?: if ("version" !in root) 1 else -1
@@ -33,8 +41,9 @@ internal fun decodeNativeLorebook(data: JsonObject): Lorebook {
             throw IllegalArgumentException("第 ${index + 1} 个原生条目字段无效（请检查角色、注入位置、数字及扫描模式）：${e.message}", e)
         }
         decoded.validationErrors(true).forEach { warnings += "${decoded.name.ifBlank { "条目 ${index + 1}" }}：$it" }
-        decoded.copy(id = Uuid.random(), scanDepth = decoded.scanDepth.coerceIn(0, 1000), injectDepth = decoded.injectDepth.coerceIn(1, 1000),
-            triggerProbability = decoded.triggerProbability.coerceIn(0, 100), stickyTurns = decoded.stickyTurns.coerceIn(1, 10000),
+        decoded.copy(id = Uuid.random(), scanDepth = decoded.scanDepth.coerceIn(0, 1000), injectDepth = decoded.injectDepth.coerceIn(0, 1000),
+            triggerProbability = decoded.triggerProbability.coerceIn(0, 100), stickyTurns = decoded.stickyTurns.coerceIn(if (decoded.timingUnit == LorebookTimingUnit.MESSAGES) 0 else 1, 10000),
+            delayMessages = decoded.delayMessages.coerceIn(0, 10000),
             cooldownTurns = decoded.cooldownTurns.coerceIn(0, 10000), selectionWeight = decoded.selectionWeight.coerceIn(0, 10000))
     }
     val original = try {

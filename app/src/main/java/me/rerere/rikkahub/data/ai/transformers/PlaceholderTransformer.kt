@@ -107,24 +107,27 @@ private fun PlaceholderCtx.resolve(key: String): String = PromptVariableResoluti
 object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
     private val defaultProvider = DefaultPlaceholderProvider
 
+    internal suspend fun resolveValues(ctx: TransformerContext): Map<String, String> {
+        ctx.promptVariableValues?.let { return it }
+        val repository = getKoin().getOrNull<WorkspaceRepository>()
+        return PromptVariableResolutionContext(
+            settings = ctx.settings, model = ctx.model, assistant = ctx.assistant,
+            workspace = assistantWorkspace(ctx.assistant, repository), workspaceCwd = ctx.workspaceCwd, context = ctx.context,
+        ).resolvePromptVariables().also { ctx.promptVariableValues = it }
+    }
+
     override suspend fun transform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val settingsStore = get<SettingsStore>()
-        val workspaceRepository = runCatching { get<WorkspaceRepository>() }.getOrNull()
-        val workspace = assistantWorkspace(ctx.assistant, workspaceRepository)
+        val resolvedValues = resolveValues(ctx)
+        val replacements = defaultProvider.placeholders.keys.map { it to resolvedValues[it].orEmpty() }.toTypedArray()
         return messages.map {
             it.copy(
                 parts = it.parts.map { part ->
                     if (part is UIMessagePart.Text) {
                         part.copy(
-                            text = replacePlaceholders(
-                                text = part.text,
-                                ctx = ctx,
-                                settingsStore = settingsStore,
-                                workspace = workspace,
-                            )
+                            text = part.text.applyPlaceholders(*replacements)
                         )
                     } else {
                         part
@@ -132,27 +135,6 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
                 }
             )
         }
-    }
-
-    private fun replacePlaceholders(
-        text: String,
-        ctx: TransformerContext,
-        settingsStore: SettingsStore,
-        workspace: me.rerere.rikkahub.data.db.entity.WorkspaceEntity?,
-    ): String {
-        val resolvedValues = PromptVariableResolutionContext(
-            settings = settingsStore.settingsFlow.value,
-            model = ctx.model,
-            assistant = ctx.assistant,
-            workspace = workspace,
-            workspaceCwd = ctx.workspaceCwd,
-            context = ctx.context,
-        ).resolvePromptVariables()
-        return text.applyPlaceholders(
-            *defaultProvider.placeholders.map { (key, placeholderInfo) ->
-                key to resolvedValues[key].orEmpty()
-            }.toTypedArray()
-        )
     }
 
     private suspend fun assistantWorkspace(
