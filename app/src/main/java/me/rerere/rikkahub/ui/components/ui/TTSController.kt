@@ -3,6 +3,12 @@ package me.rerere.rikkahub.ui.components.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -11,7 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,7 +50,29 @@ fun TTSController() {
     val ttsState = LocalTTSState.current
 
     val isSpeaking by ttsState.isSpeaking.collectAsState()
+    val error by ttsState.error.collectAsState()
     var isVisible by remember { mutableStateOf(false) }
+    var showDetails by remember { mutableStateOf(false) }
+    val currentPlayback by ttsState.playbackState.collectAsState()
+    val uriHandler = LocalUriHandler.current
+    LaunchedEffect(error) { if (error != null) { isVisible = true; showDetails = true } }
+    if (showDetails) AlertDialog(
+        onDismissRequest = { showDetails = false },
+        title = { Text("语音详情") },
+        text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            error?.let { Text("错误：$it", color = MaterialTheme.colorScheme.onSurface) }
+            currentPlayback.metadata["spoken_text"]?.let { Text("实际朗读文本：\n$it") }
+            currentPlayback.metadata["subtitle"]?.let { Text("字幕：\n$it") }
+            currentPlayback.metadata["subtitle_url"]?.takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let {
+                TextButton(colors = appearanceTextButtonColors(), onClick = { uriHandler.openUri(it) }) { Text("查看供应商字幕文件") }
+            }
+            currentPlayback.metadata["request_id"]?.let { Text("请求 ID：$it") }
+            if (error == null && currentPlayback.metadata.keys.none { it in listOf("spoken_text", "subtitle", "subtitle_url") })
+                Text("此段音频没有附加字幕或改写文本。")
+        } },
+        confirmButton = { TextButton(colors = appearanceTextButtonColors(), onClick = { showDetails = false }) { Text("关闭") } },
+    )
 
     LaunchedEffect(isSpeaking) {
         if (isSpeaking) {
@@ -59,12 +87,9 @@ fun TTSController() {
     ) {
         val playbackState by ttsState.playbackState.collectAsState()
         var expand by remember { mutableStateOf(false) }
-        Surface(
+        IsolatedOverlaySurface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
-            modifier = Modifier.padding(8.dp),
-            shadowElevation = 4.dp,
+            modifier = Modifier.padding(8.dp).shadow(4.dp, CircleShape),
         ) {
             Row(
                 modifier = Modifier.padding(4.dp),
@@ -92,7 +117,8 @@ fun TTSController() {
                     ) {
                         SpeedButton(playbackState, ttsState)
 
-                        FastForwardButton(ttsState = ttsState)
+                        if (playbackState.metadata["streaming"] != "true") FastForwardButton(ttsState = ttsState)
+                        TextButton(colors = appearanceTextButtonColors(), onClick = { showDetails = true }) { Text("详情") }
                     }
                 }
 
@@ -133,7 +159,7 @@ private fun PlayPauseButton(
     FilledTonalIconButton(
         onClick = {
             when (playbackState.status) {
-                PlaybackStatus.Playing -> {
+                PlaybackStatus.Playing, PlaybackStatus.Buffering -> {
                     ttsState.pause()
                 }
 
@@ -148,14 +174,14 @@ private fun PlayPauseButton(
         )
     ) {
         Icon(
-            imageVector = if (playbackState.status == PlaybackStatus.Playing) HugeIcons.Pause else HugeIcons.Play,
+            imageVector = if (playbackState.status == PlaybackStatus.Playing || playbackState.status == PlaybackStatus.Buffering) HugeIcons.Pause else HugeIcons.Play,
             contentDescription = null,
         )
         if (playbackState.status == PlaybackStatus.Playing || playbackState.status == PlaybackStatus.Buffering || playbackState.status == PlaybackStatus.Paused) {
             CircularProgressIndicator(
                 progress = {
                     if (playbackState.status == PlaybackStatus.Playing) {
-                        playbackState.positionMs.toFloat() / playbackState.durationMs
+                        (playbackState.positionMs.toFloat() / playbackState.durationMs.coerceAtLeast(1)).coerceIn(0f, 1f)
                     } else {
                         0f
                     }
@@ -167,7 +193,7 @@ private fun PlayPauseButton(
             CircularProgressIndicator(
                 progress = {
                     if (playbackState.status == PlaybackStatus.Playing) {
-                        playbackState.currentChunkIndex.toFloat() / playbackState.totalChunks
+                        (playbackState.currentChunkIndex.toFloat() / playbackState.totalChunks.coerceAtLeast(1)).coerceIn(0f, 1f)
                     } else {
                         0f
                     }
@@ -187,6 +213,7 @@ private fun SpeedButton(
     ttsState: CustomTtsState
 ) {
     TextButton(
+        colors = appearanceTextButtonColors(),
         onClick = {
             when (playbackState.speed) {
                 0.8f -> {

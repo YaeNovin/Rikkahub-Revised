@@ -21,9 +21,9 @@ internal fun buildTextToSpeechTool(
 ): Tool = Tool(
     name = "text_to_speech",
     description = """
-        Speak text aloud to the user using the device's text-to-speech engine.
+        Speak text aloud to the user using their configured text-to-speech service.
         Use this when the user asks you to read something aloud, or when audio output is appropriate.
-        The tool returns immediately; audio plays in the background on the device.
+        The tool returns when the playback request is queued, not when synthesis or playback succeeds.
         Provide natural, readable text without markdown formatting.
     """.trimIndent().replace("\n", " "),
     systemPrompt = { _, _ ->
@@ -46,9 +46,12 @@ internal fun buildTextToSpeechTool(
     execute = {
         val text = it.jsonObject["text"]?.jsonPrimitive?.contentOrNull
             ?: error("text is required")
+        require(text.isNotBlank()) { "text must not be blank" }
+        require(settingsStore.settingsFlow.value.getSelectedTTSProvider() != null) { "No TTS provider selected" }
         eventBus.emit(AppEvent.Speak(text))
         val payload = buildJsonObject {
             put("success", true)
+            put("status", "queued")
         }
         listOf(UIMessagePart.Text(payload.toString()))
     }

@@ -159,7 +159,7 @@ internal fun AsrButton(
                             color = contentColor,
                         )
                         Text(
-                            text = stringResource(R.string.asr_button_stop),
+                            text = if (state.status == ASRStatus.Stopping) "正在收尾…" else stringResource(R.string.asr_button_stop),
                             color = contentColor,
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1

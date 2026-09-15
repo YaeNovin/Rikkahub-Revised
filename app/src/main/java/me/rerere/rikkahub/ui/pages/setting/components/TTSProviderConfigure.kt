@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting.components
 
+import me.rerere.rikkahub.ui.components.ui.appearanceOutlinedTextFieldColors
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.AppearanceFormItem as FormItem
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.SelectTextField
 import me.rerere.tts.provider.TTSProviderSetting
@@ -36,6 +38,7 @@ fun TTSProviderConfigure(
             description = { Text(stringResource(R.string.setting_tts_page_provider_type_description)) },
         ) {
             SelectTextField(
+                colors = appearanceOutlinedTextFieldColors(),
                 value = when (setting) {
                     is TTSProviderSetting.OpenAI -> "OpenAI"
                     is TTSProviderSetting.Gemini -> "Gemini"
@@ -138,6 +141,7 @@ fun TTSProviderConfigure(
             description = { Text(stringResource(R.string.setting_tts_page_name_description)) }
         ) {
             OutlinedTextField(
+                colors = appearanceOutlinedTextFieldColors(),
                 value = setting.name,
                 onValueChange = { newName ->
                     onValueChange(setting.copyProvider(name = newName))
@@ -175,6 +179,7 @@ private fun OpenAITTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -190,6 +195,7 @@ private fun OpenAITTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -200,19 +206,7 @@ private fun OpenAITTSConfiguration(
     }
 
     // Model
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.model,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(stringResource(R.string.setting_tts_page_model_placeholder_openai)) }
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice
     val voices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
@@ -222,6 +216,7 @@ private fun OpenAITTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voice,
             options = voices,
             onValueChange = { newVoice ->
@@ -236,169 +231,13 @@ private fun OpenAITTSConfiguration(
 }
 
 @Composable
-private fun MiMoTTSConfiguration(
-    setting: TTSProviderSetting.MiMo,
-    onValueChange: (TTSProviderSetting) -> Unit
-) {
-    // MiMo 配置均为自由输入 默认值只是占位
-    // API Key
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_api_key)) },
-        description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.apiKey,
-            onValueChange = { newApiKey ->
-                onValueChange(setting.copy(apiKey = newApiKey))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("mimo-xxx") },
-        )
-    }
-
-    // Base URL
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_base_url)) },
-        description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.baseUrl,
-            onValueChange = { newBaseUrl ->
-                onValueChange(setting.copy(baseUrl = newBaseUrl))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("https://api.xiaomimimo.com/v1") }
-        )
-    }
-
-    // Model
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.model,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("mimo-v2-tts") }
-        )
-    }
-
-    // Voice
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_voice)) },
-        description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.voice,
-            onValueChange = { newVoice ->
-                onValueChange(setting.copy(voice = newVoice))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("mimo_default") }
-        )
-    }
+private fun MiMoTTSConfiguration(setting: TTSProviderSetting.MiMo, onValueChange: (TTSProviderSetting) -> Unit) {
+    MiMoSpeechOptions(setting, onValueChange)
 }
 
 @Composable
-private fun MiniMaxTTSConfiguration(
-    setting: TTSProviderSetting.MiniMax,
-    onValueChange: (TTSProviderSetting) -> Unit
-) {
-    // API Key
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_api_key)) },
-        description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.apiKey,
-            onValueChange = { newApiKey ->
-                onValueChange(setting.copy(apiKey = newApiKey))
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-
-    // Base URL
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_base_url)) },
-        description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.baseUrl,
-            onValueChange = { newBaseUrl ->
-                onValueChange(setting.copy(baseUrl = newBaseUrl))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(stringResource(R.string.setting_tts_page_base_url_placeholder)) }
-        )
-    }
-
-    // Model
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.model,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("speech-2.5-hd-preview") }
-        )
-    }
-
-    // Voice ID
-    val voiceIds = listOf(
-        "male-qn-qingse",
-        "male-qn-jingying",
-        "male-qn-badao",
-        "male-qn-daxuesheng",
-        "female-shaonv",
-        "female-yujie",
-        "female-chengshu",
-        "female-tianmei",
-        "audiobook_male_1",
-        "audiobook_female_1",
-        "cartoon_pig"
-    )
-
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_voice_id)) },
-        description = { Text(stringResource(R.string.setting_tts_page_voice_id_description)) }
-    ) {
-        SelectTextField(
-            value = setting.voiceId,
-            options = voiceIds,
-            onValueChange = { newVoiceId ->
-                onValueChange(setting.copy(voiceId = newVoiceId))
-            },
-            onOptionSelected = { voiceId ->
-                onValueChange(setting.copy(voiceId = voiceId))
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-
-    // Speed
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_speed)) },
-        description = { Text(stringResource(R.string.setting_tts_page_speed_description)) }
-    ) {
-        OutlinedNumberInput(
-            value = setting.speed,
-            onValueChange = { newSpeed ->
-                if (newSpeed in 0.25f..4.0f) {
-                    onValueChange(setting.copy(speed = newSpeed))
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = stringResource(R.string.setting_tts_page_speed)
-        )
-    }
+private fun MiniMaxTTSConfiguration(setting: TTSProviderSetting.MiniMax, onValueChange: (TTSProviderSetting) -> Unit) {
+    MiniMaxSpeechOptions(setting, onValueChange)
 }
 
 @Composable
@@ -412,6 +251,7 @@ private fun GeminiTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -427,6 +267,7 @@ private fun GeminiTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -437,19 +278,7 @@ private fun GeminiTTSConfiguration(
     }
 
     // Model
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.model,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(stringResource(R.string.setting_tts_page_model_placeholder_gemini)) }
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice Name
     FormItem(
@@ -457,6 +286,7 @@ private fun GeminiTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_name_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voiceName,
             onValueChange = { newVoiceName ->
                 onValueChange(setting.copy(voiceName = newVoiceName))
@@ -478,6 +308,7 @@ private fun SystemTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_speech_rate_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.speechRate,
             onValueChange = { newRate ->
                 if (newRate in 0.1f..3.0f) {
@@ -495,6 +326,7 @@ private fun SystemTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_pitch_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.pitch,
             onValueChange = { newPitch ->
                 if (newPitch in 0.1f..2.0f) {
@@ -518,6 +350,7 @@ private fun QwenTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -533,6 +366,7 @@ private fun QwenTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -543,19 +377,7 @@ private fun QwenTTSConfiguration(
     }
 
     // Model
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.model,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("qwen3-tts-flash") }
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice
     val voices = listOf(
@@ -572,6 +394,7 @@ private fun QwenTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voice,
             options = voices,
             onValueChange = { newVoice ->
@@ -592,6 +415,7 @@ private fun QwenTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_language_type_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.languageType,
             options = languageTypes,
             onValueChange = { newLanguageType ->
@@ -616,6 +440,7 @@ private fun GroqTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -631,6 +456,7 @@ private fun GroqTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -641,19 +467,7 @@ private fun GroqTTSConfiguration(
     }
 
     // Model
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        OutlinedTextField(
-            value = setting.model,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("canopylabs/orpheus-v1-english") }
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice
     val voices = listOf("austin", "natalie", "kailin")
@@ -663,6 +477,7 @@ private fun GroqTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voice,
             options = voices,
             onValueChange = { newVoice ->
@@ -687,6 +502,7 @@ private fun XAITTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -702,6 +518,7 @@ private fun XAITTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -725,6 +542,7 @@ private fun XAITTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voiceId,
             options = voices,
             onValueChange = { newVoiceId ->
@@ -765,6 +583,7 @@ private fun XAITTSConfiguration(
         label = { Text(stringResource(R.string.setting_tts_page_language)) },
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.language,
             options = languages,
             onValueChange = { newLanguage ->
@@ -790,6 +609,7 @@ private fun ElevenLabsTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -805,6 +625,7 @@ private fun ElevenLabsTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -815,29 +636,7 @@ private fun ElevenLabsTTSConfiguration(
     }
 
     // Model
-    val models = listOf(
-        "eleven_multilingual_v2" to "Eleven Multilingual v2",
-        "eleven_v3" to "Eleven v3",
-        "eleven_flash_v2_5" to "Eleven Flash v2.5"
-    )
-
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        SelectTextField(
-            value = setting.model,
-            options = models,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            onOptionSelected = { (modelId, _) ->
-                onValueChange(setting.copy(model = modelId))
-            },
-            optionToString = { (modelId, displayName) -> "$displayName ($modelId)" },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice ID
     FormItem(
@@ -845,6 +644,7 @@ private fun ElevenLabsTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voiceId,
             onValueChange = { newVoiceId ->
                 onValueChange(setting.copy(voiceId = newVoiceId))
@@ -860,6 +660,7 @@ private fun ElevenLabsTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_stability_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.stability,
             onValueChange = { newStability ->
                 onValueChange(setting.copy(stability = newStability.coerceIn(0f, 1f)))
@@ -875,6 +676,7 @@ private fun ElevenLabsTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_similarity_boost_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.similarityBoost,
             onValueChange = { newSimilarityBoost ->
                 onValueChange(setting.copy(similarityBoost = newSimilarityBoost.coerceIn(0f, 1f)))
@@ -896,6 +698,7 @@ private fun FishAudioTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -911,6 +714,7 @@ private fun FishAudioTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -921,30 +725,7 @@ private fun FishAudioTTSConfiguration(
     }
 
     // Model (下拉选择框 + 文本输入框，完全同 ElevenLabs 格式)
-    val models = listOf(
-        "s2.1-pro" to "S2.1-Pro (推荐)",
-        "s2.1-pro-free" to "S2.1-Pro Free (免费)",
-        "s2-pro" to "S2-Pro",
-        "s1" to "S1"
-    )
-
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        SelectTextField(
-            value = setting.model,
-            options = models,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            onOptionSelected = { (modelId, _) ->
-                onValueChange(setting.copy(model = modelId))
-            },
-            optionToString = { (modelId, displayName) -> "$displayName ($modelId)" },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice ID (reference_id)
     FormItem(
@@ -952,6 +733,7 @@ private fun FishAudioTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_id_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.referenceId,
             onValueChange = { newReferenceId ->
                 onValueChange(setting.copy(referenceId = newReferenceId))
@@ -967,6 +749,7 @@ private fun FishAudioTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_temperature_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.temperature,
             onValueChange = { newTemperature ->
                 onValueChange(setting.copy(temperature = newTemperature.coerceIn(0f, 1f)))
@@ -982,6 +765,7 @@ private fun FishAudioTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_fish_audio_speed_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.speed,
             onValueChange = { newSpeed ->
                 onValueChange(setting.copy(speed = newSpeed.coerceIn(0.5f, 2f)))
@@ -1003,6 +787,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_stepfun_api_key_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.apiKey,
             onValueChange = { newApiKey ->
                 onValueChange(setting.copy(apiKey = newApiKey))
@@ -1018,6 +803,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_base_url_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.baseUrl,
             onValueChange = { newBaseUrl ->
                 onValueChange(setting.copy(baseUrl = newBaseUrl))
@@ -1028,30 +814,7 @@ private fun StepTTSConfiguration(
     }
 
     // Model
-    val models = listOf(
-        "step-tts-mini" to "step-tts-mini (轻量, 便宜)",
-        "step-tts-vivid" to "step-tts-vivid (情感丰富)",
-        "stepaudio-2.5-tts" to "stepaudio-2.5-tts (语境感知, 支持 instruction)",
-        "step-tts-2" to "step-tts-2 (上一代)",
-    )
-
-    FormItem(
-        label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
-    ) {
-        SelectTextField(
-            value = setting.model,
-            options = models,
-            onValueChange = { newModel ->
-                onValueChange(setting.copy(model = newModel))
-            },
-            onOptionSelected = { (modelId, _) ->
-                onValueChange(setting.copy(model = modelId))
-            },
-            optionToString = { (_, description) -> description },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
+    TtsSpeechModelPicker(setting, onValueChange)
 
     // Voice
     // 部分常用 voice-id, 完整列表见官方开发指南
@@ -1095,6 +858,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_voice_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.voice,
             options = voices,
             onValueChange = { newVoice ->
@@ -1116,6 +880,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_stepfun_response_format_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.responseFormat,
             options = formats,
             onValueChange = { newFormat ->
@@ -1134,6 +899,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_stepfun_speed_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.speed,
             onValueChange = { newSpeed ->
                 if (newSpeed in 0.5f..2.0f) {
@@ -1151,6 +917,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_stepfun_volume_description)) }
     ) {
         OutlinedNumberInput(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.volume,
             onValueChange = { newVolume ->
                 if (newVolume in 0.1f..2.0f) {
@@ -1170,6 +937,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_sample_rate_description)) }
     ) {
         SelectTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.sampleRate.toString(),
             options = sampleRates,
             readOnly = true,
@@ -1187,6 +955,7 @@ private fun StepTTSConfiguration(
         description = { Text(stringResource(R.string.setting_tts_page_stepfun_instruction_description)) }
     ) {
         OutlinedTextField(
+            colors = appearanceOutlinedTextFieldColors(),
             value = setting.instruction,
             onValueChange = { newInstruction ->
                 // 服务端上限 200 字符, 客户端做一层保护

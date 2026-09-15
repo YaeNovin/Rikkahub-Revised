@@ -1,4 +1,7 @@
 package me.rerere.rikkahub.ui.components.ai
+import me.rerere.rikkahub.ui.components.ui.AppearanceOptionSurface
+import me.rerere.rikkahub.ui.components.ui.appearanceOutlinedTextFieldColors
+import me.rerere.rikkahub.ui.components.ui.appearanceTextButtonColors
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -194,7 +197,11 @@ fun ChatInput(
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     val asrPermission = rememberPermissionState(PermissionRecordAudio)
     PermissionManager(permissionState = asrPermission)
-    var asrBaseText by remember { mutableStateOf("") }
+    var asrDraft by remember(state) { mutableStateOf("") }
+    var ownsAsr by remember(state) { mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(state) {
+        onDispose { if (ownsAsr) asr.cancel() }
+    }
     LaunchedEffect(asrState.status) {
         when (asrState.status) {
             ASRStatus.Listening -> {
@@ -233,6 +240,35 @@ fun ChatInput(
                         MediaFileInputRow(state = state)
                     }
 
+                    if (ownsAsr) {
+                        AppearanceOptionSurface(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (asrDraft.isNotBlank()) {
+                                    if (asrState.isRecording) Text(asrDraft, maxLines = 3)
+                                    else androidx.compose.material3.OutlinedTextField(
+                                        colors = appearanceOutlinedTextFieldColors(),
+                                        value = asrDraft, onValueChange = { asrDraft = it },
+                                        modifier = Modifier.fillMaxWidth(), maxLines = 4,
+                                        label = { Text("转写草稿") })
+                                }
+                                androidx.compose.foundation.layout.FlowRow {
+                                    androidx.compose.material3.TextButton(
+                                        colors = appearanceTextButtonColors(),
+                                        enabled = !asrState.isRecording && asrDraft.isNotBlank(),
+                                        onClick = {
+                                            state.textContent.edit {
+                                                replace(selection.min, selection.max, asrDraft)
+                                            }
+                                            asrDraft = ""; ownsAsr = false
+                                        }) { Text("插入输入框") }
+                                    if (asrState.canRetry) androidx.compose.material3.TextButton(colors = appearanceTextButtonColors(), onClick = { asr.retry() }) { Text("重试转写") }
+                                    androidx.compose.material3.TextButton(colors = appearanceTextButtonColors(), onClick = {
+                                        asr.cancel(); asrDraft = ""; ownsAsr = false
+                                    }) { Text("取消录音") }
+                                }
+                            }
+                        }
+                    }
                     TextInputRow(
                         state = state,
                         completionProviders = completionProviders,
@@ -333,16 +369,16 @@ fun ChatInput(
                                     if (!asrPermission.allRequiredPermissionsGranted) {
                                         asrPermission.requestPermissions()
                                     } else {
-                                        asrBaseText = state.textContent.text.toString()
+                                        asrDraft = ""
+                                        ownsAsr = true
                                         asr.start { transcript ->
-                                            val spacer =
-                                                if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
-                                            state.setMessageText(asrBaseText + spacer + transcript)
+                                            asrDraft = transcript
                                         }
                                     }
                                 }
 
-                                ASRStatus.Connecting, ASRStatus.Stopping -> Unit
+                                ASRStatus.Connecting -> { asr.cancel(); ownsAsr = false }
+                                ASRStatus.Stopping -> Unit
                             }
                         },
                     )

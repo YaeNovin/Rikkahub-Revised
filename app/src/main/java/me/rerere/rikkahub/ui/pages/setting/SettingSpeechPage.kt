@@ -1,4 +1,5 @@
 package me.rerere.rikkahub.ui.pages.setting
+import me.rerere.tts.provider.normalized
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
@@ -25,9 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import me.rerere.rikkahub.ui.components.ui.AppearanceCard
 import me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu as DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -181,9 +180,6 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
                 editingTTSProvider = null
             },
             sheetState = bottomSheetState,
-            dragHandle = {
-                BottomSheetDefaults.DragHandle()
-            }
         ) {
             Column(
                 modifier = Modifier
@@ -221,7 +217,11 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
                     TextButton(
                         onClick = {
                             val newProviders = settings.ttsProviders.map {
-                                if (it.id == provider.id) currentProvider else it
+                                if (it.id == provider.id) when (val value = currentProvider) {
+                                    is TTSProviderSetting.MiniMax -> value.normalized()
+                                    is TTSProviderSetting.MiMo -> value.normalized()
+                                    else -> value
+                                } else it
                             }
                             vm.updateSettings(settings.copy(ttsProviders = newProviders))
                             editingTTSProvider = null
@@ -244,9 +244,6 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
                 editingASRProvider = null
             },
             sheetState = bottomSheetState,
-            dragHandle = {
-                BottomSheetDefaults.DragHandle()
-            }
         ) {
             Column(
                 modifier = Modifier
@@ -284,7 +281,7 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
                     TextButton(
                         onClick = {
                             val newProviders = settings.asrProviders.map {
-                                if (it.id == provider.id) currentProvider else it
+                                if (it.id == provider.id) (currentProvider as? ASRProviderSetting.MiMo)?.normalized() ?: currentProvider else it
                             }
                             vm.updateSettings(settings.copy(asrProviders = newProviders))
                             editingASRProvider = null
@@ -384,9 +381,9 @@ private fun TTSPlaybackSpeedSetting(
 ) {
     var sliderValue by remember(speed) { mutableFloatStateOf(speed) }
 
-    Card(
+    AppearanceCard(
         modifier = modifier.fillMaxWidth(),
-            colors = CustomColors.cardColors,
+        colors = CustomColors.cardColors,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -402,7 +399,7 @@ private fun TTSPlaybackSpeedSetting(
                 )
                 Text(
                     text = "x${"%.1f".format(sliderValue)}",
-                    color = MaterialTheme.colorScheme.primary,
+                    color = LocalContentColor.current,
                 )
             }
             Slider(
@@ -415,7 +412,7 @@ private fun TTSPlaybackSpeedSetting(
             Text(
                 text = stringResource(R.string.setting_tts_page_default_playback_speed_description),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LocalContentColor.current.copy(alpha = LocalContentColor.current.alpha * .8f),
             )
         }
     }
@@ -523,9 +520,6 @@ private fun AddTTSProviderButton(onAdd: (TTSProviderSetting) -> Unit) {
                 showBottomSheet = false
             },
             sheetState = bottomSheetState,
-            dragHandle = {
-                BottomSheetDefaults.DragHandle()
-            }
         ) {
             Column(
                 modifier = Modifier
@@ -641,9 +635,6 @@ private fun AddASRProviderButton(onAdd: (ASRProviderSetting) -> Unit) {
                 showBottomSheet = false
             },
             sheetState = bottomSheetState,
-            dragHandle = {
-                BottomSheetDefaults.DragHandle()
-            }
         ) {
             Column(
                 modifier = Modifier
@@ -708,15 +699,10 @@ private fun TTSProviderItem(
     val isSpeaking by tts.isSpeaking.collectAsState()
     val isAvailable by tts.isAvailable.collectAsState()
 
-    Card(
+    AppearanceCard(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                CustomColors.listItemColors.containerColor
-            }
-        )
+        outlined = isSelected,
+        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -737,11 +723,7 @@ private fun TTSProviderItem(
                     Text(
                         text = provider.name.ifEmpty { stringResource(R.string.setting_tts_page_default_name) },
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
+                        color = LocalContentColor.current
                     )
 
                     Text(
@@ -759,7 +741,7 @@ private fun TTSProviderItem(
                             is TTSProviderSetting.FishAudio -> "Fish Audio"
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = LocalContentColor.current.copy(alpha = LocalContentColor.current.alpha * .8f)
                     )
                 }
 
@@ -855,15 +837,10 @@ private fun ASRProviderItem(
 ) {
     var showDropdownMenu by remember { mutableStateOf(false) }
 
-    Card(
+    AppearanceCard(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                CustomColors.listItemColors.containerColor
-            }
-        )
+        outlined = isSelected,
+        colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -884,11 +861,7 @@ private fun ASRProviderItem(
                     Text(
                         text = provider.name.ifEmpty { stringResource(R.string.setting_asr_page_default_name) },
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
+                        color = LocalContentColor.current
                     )
 
                     Text(
@@ -900,7 +873,7 @@ private fun ASRProviderItem(
                             is ASRProviderSetting.Step -> "Step"
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = LocalContentColor.current.copy(alpha = LocalContentColor.current.alpha * .8f)
                     )
                 }
 
