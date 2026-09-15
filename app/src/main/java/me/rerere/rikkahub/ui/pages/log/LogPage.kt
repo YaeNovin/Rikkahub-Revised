@@ -47,7 +47,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
 import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
@@ -648,50 +647,9 @@ private fun ProviderHttpRequestDetails(log: LogEntry.ProviderRequestLog) {
     }
 }
 
-private enum class ResponseBodyFormat(val label: String) { JSON("JSON"), HTML("HTML/XML"), SSE("SSE"), TEXT("TEXT") }
-
-private fun responseBodyFormat(body: String): ResponseBodyFormat {
-    val value = body.trimStart()
-    if (runCatching { JsonInstantPretty.parseToJsonElement(body) }.isSuccess) return ResponseBodyFormat.JSON
-    if (value.startsWith("<") && value.contains('>')) return ResponseBodyFormat.HTML
-    if (body.lineSequence().any { it.trimStart().startsWith("data:") || it.trimStart().startsWith("event:") }) return ResponseBodyFormat.SSE
-    return ResponseBodyFormat.TEXT
-}
-
-private fun prettyMarkup(body: String): String = body
-    .replace(Regex(">\\s*<"), ">\\n<")
-    .lineSequence()
-    .flatMap { line -> line.trim().split(Regex("(?=<)|(?<=>)")) }
-    .map(String::trim)
-    .filter(String::isNotBlank)
-    .joinToString("\\n")
-
 @Composable
 private fun FormattedResponseBody(body: String) {
-    val format = remember(body) { responseBodyFormat(body) }
-    val parsed = remember(body) {
-        if (format == ResponseBodyFormat.JSON) runCatching { JsonInstantPretty.parseToJsonElement(body) }.getOrNull() else null
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("响应正文", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Text(format.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        }
-        Surface(
-            modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp,
-        ) {
-            if (parsed != null) {
-                JsonTree(json = parsed, modifier = Modifier.padding(8.dp), initialExpandLevel = 2)
-            } else {
-                val text = if (format == ResponseBodyFormat.HTML) prettyMarkup(body) else body.trim()
-                SelectionContainer {
-                    Text(text = text, modifier = Modifier.padding(10.dp).horizontalScroll(rememberScrollState()),
-                        fontFamily = JetbrainsMono, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
+    LogBodyContent(label = "响应正文", body = body)
 }
 
 @Composable
@@ -793,7 +751,10 @@ private fun ProviderParameterItem(key: String, value: String) {
             key,
         )
     } ?: key
-    HeaderItem(label, localizedProviderParameterValue(value))
+    val instruction = key.lowercase().replace("_", "") in setOf("body.systeminstruction", "body.systemlnstruction")
+    if (instruction || me.rerere.rikkahub.ui.components.ui.isLongDisplayText(value)) {
+        LogBodyContent(label, value, systemInstruction = instruction)
+    } else HeaderItem(label, localizedProviderParameterValue(value))
 }
 
 @Composable

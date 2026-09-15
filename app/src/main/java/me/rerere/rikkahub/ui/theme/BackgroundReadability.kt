@@ -88,9 +88,9 @@ fun BackgroundReadabilityTheme(
     }
 
     val baseScheme = MaterialTheme.colorScheme
-    val readableScheme = remember(baseScheme, foreground) {
-        baseScheme.withReadableForeground(foreground)
-    }
+    // MaterialTheme can update ColorScheme in place. Copy live roles rather than
+    // retaining a scheme keyed only by object identity when the foreground is unchanged.
+    val readableScheme = baseScheme.withReadableForeground(foreground)
     CompositionLocalProvider(LocalBackgroundBaseColorScheme provides (LocalBaseThemeColorScheme.current ?: baseScheme),
         androidx.compose.material3.LocalContentColor provides foreground,
         LocalChatBackgroundForeground provides foreground) {

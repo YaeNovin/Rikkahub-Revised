@@ -31,6 +31,24 @@ internal fun backgroundSamplesWithOverlay(samples: List<Color>, base: Color, top
         base.copy(alpha = (topAlpha + (bottomAlpha - topAlpha) * progress).coerceIn(0f, 1f)).compositeOver(color)
     }
 
+internal data class BackgroundSampleKey(val source: String?, val opacity: Float, val base: Color)
+
+/** Mode changes retry failed extraction, but successful samples are reused without network IO.
+ * A source change creates a fresh holder immediately, never a frame using the prior wallpaper.
+ */
+@Composable
+internal fun rememberReadabilitySamples(key: BackgroundSampleKey, retryKey: Any, extract: suspend () -> List<Color>?): List<Color>? {
+    val samples = remember(key) { mutableStateOf<List<Color>?>(null) }
+    val currentExtract by rememberUpdatedState(extract)
+    LaunchedEffect(key, retryKey) {
+        if (samples.value != null || key.source.isNullOrBlank() || key.opacity <= 0f) return@LaunchedEffect
+        try { samples.value = currentExtract()?.takeIf { it.isNotEmpty() } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { samples.value = null }
+    }
+    return samples.value
+}
+
 @Composable
 fun rememberBackgroundReadability(background: String?, backgroundOpacity: Float, useGradientBackground: Boolean,
     gradientFollowTheme: Boolean = false, gradientPreset: GradientBackgroundPreset = GradientBackgroundPreset.CLASSIC,
@@ -44,23 +62,28 @@ fun rememberBackgroundReadability(background: String?, backgroundOpacity: Float,
     val fallback = remember(scheme.background, dark) {
         adaptiveBackgroundReadability(listOf(scheme.background.copy(alpha = 1f)), dark)
     }
-    if (useGradientBackground) return remember(scheme, dark, gradientFollowTheme, gradientPreset, gradientCustomColors, backgroundOpacity, gradientIntensity, gradientVignette, mode, wallpaperSeed) {
-        val samples = gradientReadabilitySamples(createGradientBackgroundPalette(scheme, dark, gradientFollowTheme, gradientPreset, gradientCustomColors),
-            backgroundOpacity, gradientIntensity, scheme.background.copy(alpha = 1f))
-        val allSamples = samples + samples.map { Color.Black.copy(alpha = gradientVignette.coerceIn(0f, 1f) * .28f).compositeOver(it) }
-        val appSeed = if (mode == TextColorMode.APP_BACKGROUND && backgroundOpacity > 0f) backgroundTextSeed(samples) else null
-        val seed = textPaletteSeed(mode, appSeed, wallpaperSeed)
-        BackgroundReadability(backgroundTextForeground(mode, allSamples, seed, scheme.onBackground,
-            backgroundOpacity > 0f), allSamples, seedArgb = seed)
+    if (useGradientBackground) {
+        // Compute the inexpensive palette first: ColorScheme may be mutated in place by
+        // MaterialTheme. Its identity alone is not a valid remember key for color roles.
+        val palette = createGradientBackgroundPalette(scheme, dark, gradientFollowTheme, gradientPreset, gradientCustomColors)
+        return remember(palette, scheme.background, scheme.onBackground, backgroundOpacity, gradientIntensity, gradientVignette, mode, wallpaperSeed) {
+            val samples = gradientReadabilitySamples(palette,
+                backgroundOpacity, gradientIntensity, scheme.background.copy(alpha = 1f))
+            val allSamples = samples + samples.map { Color.Black.copy(alpha = gradientVignette.coerceIn(0f, 1f) * .28f).compositeOver(it) }
+            val appSeed = if (mode == TextColorMode.APP_BACKGROUND && backgroundOpacity > 0f) backgroundTextSeed(samples) else null
+            val seed = textPaletteSeed(mode, appSeed, wallpaperSeed)
+            BackgroundReadability(backgroundTextForeground(mode, allSamples, seed, scheme.onBackground,
+                backgroundOpacity > 0f), allSamples, seedArgb = seed)
+        }
     }
-    val result by produceState(fallback, background, backgroundOpacity, scheme.background, dark, overlayTopAlpha, overlayBottomAlpha) {
-        value = fallback
-        if (!background.isNullOrBlank()) try {
-            extractBackgroundSamples(context, background, backgroundOpacity, scheme.background.copy(alpha = 1f))?.let {
-                value = adaptiveBackgroundReadability(backgroundSamplesWithOverlay(it, scheme.background, overlayTopAlpha, overlayBottomAlpha), dark)
-                    .copy(rawBackgrounds = it)
-            }
-        } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { value = fallback }
+    val sampleKey = BackgroundSampleKey(background, backgroundOpacity, scheme.background.copy(alpha = 1f))
+    val rawSamples = rememberReadabilitySamples(sampleKey, mode) {
+        extractBackgroundSamples(context, requireNotNull(background), backgroundOpacity, sampleKey.base)
+    }
+    val result = remember(rawSamples, sampleKey.base, dark, overlayTopAlpha, overlayBottomAlpha, fallback) {
+        rawSamples?.let {
+            adaptiveBackgroundReadability(backgroundSamplesWithOverlay(it, sampleKey.base, overlayTopAlpha, overlayBottomAlpha), dark).copy(rawBackgrounds = it)
+        } ?: fallback
     }
     return remember(result, mode, wallpaperSeed, background, backgroundOpacity, scheme.onBackground) {
         val appSeed = if (mode == TextColorMode.APP_BACKGROUND && !background.isNullOrBlank() && backgroundOpacity > 0f) {

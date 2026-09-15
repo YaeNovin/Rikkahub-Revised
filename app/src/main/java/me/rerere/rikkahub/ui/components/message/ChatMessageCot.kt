@@ -2,6 +2,12 @@ package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.ServerToolMetadata
+import me.rerere.ai.ui.ServerToolProtocol
+import me.rerere.ai.ui.metadataAs
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 思考步骤类型，用于分组 Reasoning、客户端 Tool 和 ServerTool
@@ -33,6 +39,10 @@ sealed interface MessagePartBlock {
  * 连续的 Reasoning、客户端 Tool 和 ServerTool 会被分组到一个 ThinkingBlock 中
  */
 fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
+    val googleCallIds = filterIsInstance<UIMessagePart.ServerTool>().mapNotNull {
+        it.metadataAs<ServerToolMetadata>()?.takeIf { it.protocol == ServerToolProtocol.GOOGLE_GENERATE_CONTENT }
+            ?.call?.get("toolCall")?.let { it as? JsonObject }?.get("id")?.jsonPrimitive?.contentOrNull
+    }.toSet()
     val result = mutableListOf<MessagePartBlock>()
     var currentThinkingSteps = mutableListOf<ThinkingStep>()
 
@@ -54,6 +64,12 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
             }
 
             is UIMessagePart.ServerTool -> {
+                // The result retains its wire position for replay, while the paired call
+                // already displays its completed status. Do not draw a duplicate step.
+                val responseId = part.metadataAs<ServerToolMetadata>()
+                    ?.takeIf { it.protocol == ServerToolProtocol.GOOGLE_GENERATE_CONTENT }
+                    ?.result?.get("toolResponse")?.let { it as? JsonObject }?.get("id")?.jsonPrimitive?.contentOrNull
+                if (responseId != null && responseId in googleCallIds) return@fastForEachIndexed
                 currentThinkingSteps.add(ThinkingStep.ServerToolStep(part))
             }
 

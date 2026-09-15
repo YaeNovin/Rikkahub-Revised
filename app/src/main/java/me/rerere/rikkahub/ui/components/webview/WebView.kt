@@ -153,6 +153,15 @@ private class RenderingWebView(context: Context) : WebView(context) {
 /** Keep the Compose layout node stable. WebView attachment/destruction must not
  * mutate the view tree while Compose is placing or releasing an AndroidView. */
 private class RenderingWebViewHost(context: Context) : FrameLayout(context) {
+    fun configureFocus(inlinePreview: Boolean) {
+        // Prevent native rootViewRequestFocus from re-entering LazyColumn subcomposition
+        // while AndroidViewHolder is removed. onRelease is too late to clear focus.
+        // Touch, zoom and links still work; HTML form editing remains available fullscreen.
+        isFocusable = false
+        isFocusableInTouchMode = false
+        descendantFocusability = if (inlinePreview) FOCUS_BLOCK_DESCENDANTS else FOCUS_AFTER_DESCENDANTS
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pending: Runnable? = null
     private var latestUpdate: (RenderingWebViewHost.() -> Unit)? = null
@@ -373,6 +382,7 @@ fun WebView(
             AndroidView(
                 factory = { context ->
                     RenderingWebViewHost(context).apply {
+                        configureFocus(deferUntilVisible || preferParentVerticalScroll)
                         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
                         releaseRenderer = { view ->
                     if (state.webView === view) {
@@ -397,6 +407,7 @@ fun WebView(
                     val interfaces = state.interfaces
                     val javaScriptEnabled = state.javaScriptEnabled
                     host.updateLater {
+                    configureFocus(deferUntilVisible || preferParentVerticalScroll)
                     if (!active) { removeRenderer(); return@updateLater }
                     if (renderer?.released == true) removeRenderer()
                     val view = renderer ?: RenderingWebView(context).also { created ->

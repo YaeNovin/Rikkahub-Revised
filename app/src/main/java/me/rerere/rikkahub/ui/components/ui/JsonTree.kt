@@ -8,10 +8,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBottomSheet
@@ -26,7 +26,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonArray
@@ -66,15 +65,7 @@ fun JsonTree(
             onDismissRequest = { selectedString = null },
             sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
         ) {
-            Text(
-                text = content,
-                fontFamily = JetbrainsMono,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                style = MaterialTheme.typography.bodySmall
-            )
+            LongTextContent(content, Modifier.fillMaxWidth().height(400.dp))
         }
     }
 }
@@ -280,20 +271,21 @@ private fun KeyText(key: String) {
 private fun ValueText(primitive: JsonPrimitive, onClick: (() -> Unit)? = null) {
     val (text, color) = when {
         primitive.isString -> {
-            val content = (primitive.contentOrNull ?: "")
+            val raw = primitive.contentOrNull.orEmpty()
+            val content = raw.take(240)
                 .replace("\\", "\\\\")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t")
-            "\"$content\"" to Color(0xFF6A8759)
+            "\"$content${if (raw.length > 240) "… (${raw.length} 字符，点击查看)" else ""}\"" to MaterialTheme.colorScheme.onSurface
         }
 
         primitive.booleanOrNull != null -> {
-            primitive.content to Color(0xFFCC7832)
+            primitive.content to MaterialTheme.colorScheme.tertiary
         }
 
         primitive.longOrNull != null || primitive.doubleOrNull != null -> {
-            primitive.content to Color(0xFF6897BB)
+            primitive.content to MaterialTheme.colorScheme.secondary
         }
 
         else -> {

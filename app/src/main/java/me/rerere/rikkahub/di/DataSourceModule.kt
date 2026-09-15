@@ -140,6 +140,7 @@ val dataSourceModule = module {
     }
 
     single { MemoryEmbeddingService(repository = get(), providerManager = get()) }
+    single { me.rerere.rikkahub.data.ai.transformers.LorebookVectorMatcher(providerManager = get()) }
 
     single { ConversationMemoryIndexService(dao = get(), providerManager = get(), memoryRepository = get()) }
 

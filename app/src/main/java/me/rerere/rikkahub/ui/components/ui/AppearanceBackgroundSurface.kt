@@ -140,13 +140,11 @@ fun IsolatedAppearanceSurface(
         } ?: isolatedSurfaceForeground(backgroundReady, backingColor, baseScheme.background,
             safeOpacity, originalScheme.onSurface, backgroundForeground)
     }
-    val contentScheme = remember(baseScheme, contentColor, effectiveStyle) {
-            baseScheme.copy(
-                onSurface = contentColor,
-                onSurfaceVariant = contentColor.copy(alpha = 0.78f),
-                onBackground = contentColor,
-            )
-    }
+    val contentScheme = baseScheme.copy(
+        onSurface = contentColor,
+        onSurfaceVariant = contentColor.copy(alpha = 0.78f),
+        onBackground = contentColor,
+    )
     val styledModifier = modifier
         .then(LocalGlassBackdrop.current?.let { Modifier.trackGlassInteraction(it) } ?: Modifier)
         .then(

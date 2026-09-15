@@ -10,7 +10,7 @@ private const val TAG = "CrashHandler"
 private const val PREFS_NAME = "crash_handler"
 private const val KEY_CRASHED = "crashed"
 private const val KEY_STACKTRACE = "stacktrace"
-private const val MAX_STACKTRACE_LENGTH = 8000
+private const val MAX_STACKTRACE_LENGTH = 32_000
 private const val KEY_CRASH_TIME = "crash_time"
 private const val KEY_IMPORTED_CRASH = "imported_crash"
 

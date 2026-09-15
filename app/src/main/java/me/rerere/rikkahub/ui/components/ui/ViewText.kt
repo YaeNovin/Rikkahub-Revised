@@ -57,6 +57,10 @@ fun ViewText(
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
                 movementMethod = LinkMovementMethod.getInstance()
+                // This is a read-only label, not an editor. LinkMovementMethod enables
+                // focus by default, which can re-enter lazy layout during native removal.
+                isFocusable = false
+                isFocusableInTouchMode = false
                 setText(text)
                 setComposeTextStyle(density, mergedStyle)
             }

@@ -77,6 +77,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.resolve
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
 import me.rerere.rikkahub.data.model.WorkspaceFileOperationMode
@@ -202,9 +203,7 @@ internal fun FilesPicker(
         // Extensions (Quick Messages + Prompt Injections + Skills)
         val effectiveModeIds = assistant.modeInjectionIds +
             if (assistant.allowConversationPromptInjection) conversation.modeInjectionIds else emptySet()
-        val effectiveLorebookIds = (assistant.lorebookIds +
-            if (assistant.allowConversationPromptInjection) conversation.lorebookIds else emptySet()) -
-            if (assistant.allowConversationPromptInjection) conversation.disabledLorebookIds else emptySet()
+        val effectiveLorebookIds = settings.lorebookSources.resolve(assistant, conversation.lorebookIds, conversation.disabledLorebookIds).keys
         val modeAndLorebookCount = effectiveModeIds.size + effectiveLorebookIds.size
         val activeCount =
             assistant.quickMessageIds.size +
@@ -238,7 +237,7 @@ internal fun FilesPicker(
         )
 
         if (onShowPromptDiagnostics != null && hasEnabledPromptDiagnostics(
-                assistant, conversation, settings.modeInjections, settings.lorebooks,
+                assistant, conversation, settings.modeInjections, settings.lorebooks, settings.lorebookSources,
             )) {
             ListItem(
                 leadingContent = {

@@ -1316,38 +1316,14 @@ private fun ModelCard(
     SwipeToDismissBox(
         state = swipeToDismissBoxState,
         backgroundContent = {
-            AnimatedVisibility(
-                visible = swipeToDismissBoxState.dismissDirection == SwipeToDismissBoxValue.EndToStart,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                swipeToDismissBoxState.reset()
-                            }
-                        }
-                    ) {
-                        Icon(HugeIcons.Cancel01, null)
-                    }
-                    FilledIconButton(
-                        onClick = {
-                            scope.launch {
-                                onDelete()
-                                swipeToDismissBoxState.reset()
-                            }
-                        }
-                    ) {
-                        Icon(
-                            HugeIcons.Delete01,
-                            contentDescription = stringResource(R.string.chat_page_delete)
-                        )
-                    }
+            me.rerere.rikkahub.ui.components.ui.SwipeRevealActions(swipeToDismissBoxState) {
+                IconButton(onClick = { scope.launch { swipeToDismissBoxState.reset() } }) {
+                    Icon(HugeIcons.Cancel01, null)
+                }
+                FilledIconButton(onClick = {
+                    scope.launch { onDelete(); swipeToDismissBoxState.reset() }
+                }) {
+                    Icon(HugeIcons.Delete01, contentDescription = stringResource(R.string.chat_page_delete))
                 }
             }
         },
@@ -1355,13 +1331,7 @@ private fun ModelCard(
         gesturesEnabled = true,
         modifier = modifier
     ) {
-        OutlinedCard(
-            colors = CardDefaults.outlinedCardColors(
-                // The swipe actions live behind this card. Keep the foreground opaque so
-                // they are revealed only by moving the card, never through its background.
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-        ) {
+        me.rerere.rikkahub.ui.components.ui.AppearanceCard(outlined = true) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

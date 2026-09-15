@@ -167,6 +167,7 @@ fun <T> SelectTextField(
     readOnly: Boolean = false,
     placeholder: @Composable (() -> Unit)? = null,
     optionToString: @Composable (T) -> String = { it.toString() },
+    colors: androidx.compose.material3.TextFieldColors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(),
 ) {
     var expanded by remember { mutableStateOf(false) }
     var anchorWidth by remember { mutableIntStateOf(0) }
@@ -179,6 +180,7 @@ fun <T> SelectTextField(
             onValueChange = onValueChange,
             readOnly = readOnly,
             placeholder = placeholder,
+            colors = colors,
             modifier = Modifier
                 .fillMaxWidth()
                 .onGloballyPositioned { anchorWidth = it.size.width },
@@ -208,8 +210,8 @@ fun <T> SelectTextField(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             modifier = Modifier
-                .width(with(density) { anchorWidth.toDp() })
-                .heightIn(max = 240.dp),
+                .width(with(density) { anchorWidth.toDp() }),
+            maxHeight = 240.dp,
             shape = menuShape,
         ) {
             options.fastForEach { option ->
