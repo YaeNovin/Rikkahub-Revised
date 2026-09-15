@@ -1,6 +1,6 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-09-12
+Notice date: 2026-09-15
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
@@ -12,7 +12,22 @@ This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
 
-## 2026-09-12 Grouped Upload Scope / 分组上传范围
+## 2026-09-15 开发源码更新（未发布）
+
+本次在 `2.4.8-revised.8` 源码基线上提交世界书、工具协议、语音、日志与外观修复，
+不变更版本号、历史标签或已发布的安装包。最新源码与 `.8` 发行资产应区分使用。
+新增功能、验证结果及边界见 [源码更新记录](changes-2026-09-15.md)；
+文档上传、更新、保留及停止跟踪范围见 [文档索引](README.md)。
+
+## 2026-09-15 Development source update (unreleased)
+
+This upload adds world-book, tool-protocol, speech, logging, and appearance
+changes on top of the `2.4.8-revised.8` source baseline. It does not change
+version numbers, existing tags, or published binaries. See the
+[source update](changes-2026-09-15.md) for validation and limits, and the
+[documentation index](README.md) for publication and retention decisions.
+
+## 2026-09-12 Grouped Upload Scope / 历史分组上传范围
 
 The source changes are organized as grouped commits so provider,
 application, rendering, shared-platform, and documentation changes can be

@@ -25,3 +25,15 @@ local.properties
 /gradle-home-test/
 /common/gradle/
 /common/.idea/
+
+# Build outputs and local evidence are not source artifacts.
+build/
+*.apk
+*.aab
+/android-home-test/
+/docs/local/
+
+# Installed provider reference skills: retain the lockfile, not downloaded copies.
+/.agents/skills/claude-api/
+/.agents/skills/gemini-api-dev/
+/.agents/skills/gemini-interactions-api/

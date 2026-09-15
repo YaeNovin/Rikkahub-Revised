@@ -29,7 +29,7 @@ Rikkahub Revised 是一个基于 RikkaHub 2.4.8 的独立修改发行版。Andro
 | `locale-tui/` | Python Textual 工具 | Android 多语言资源维护 | 字符串浏览、缺失翻译、Dead Entry 检查与 AI 翻译 |
 | `docs/` | 公开文档与项目素材 | 修改声明、贡献者、签名、第三方归属、工程文档、README 图片与参考资料 | 本文档位于此目录；各语言 README 保留在仓库根目录 |
 | `.github/` | GitHub 配置 | Issue 模板与自动化工作流 | 每日构建、Issue 模板校验 |
-| `.agents/`、`.claude/` | 开发辅助配置 | 面向 AI 编程工具的本地约定与技能 | 不参与应用运行或 APK 打包 |
+| `.agents/`、`.claude/`、`skills-lock.json` | 开发辅助配置 | 项目维护约定及外部技能来源记录 | 项目专用技能保留；下载的 Claude/Gemini 技能副本仅本地保留，不参与应用运行或 APK 打包 |
 | `gradlew`、`gradlew.bat`、`gradle/wrapper/` | Gradle Wrapper | 固定 Gradle 运行环境 | Android 构建、测试、Lint 的统一入口 |
 
 ## 2. 模块依赖关系
@@ -148,7 +148,18 @@ flowchart LR
 | 建议与灵感卡片 | `ChatSuggestionContract`、`SuggestionGenerationGate`、`InspirationCards` | 全局/助手配置、变量草稿、单一滚动面板与自定义卡片 |
 | 日志与 GitHub 卡片 | `LogBodyCapture`、`LogExport`、`LogAnalysisStore`、`GitHubRepository` | Gzip 读取、请求参数、分析保存与导出、Room 缓存和限流回退 |
 
-完整功能文档见[索引](../README.md)。审核记录中的测试结论属于对应日期，不能替代当前提交的验证。
+2026-09-15 开发源码新增入口（未包含在已发布 `.8` 安装包中）：
+
+| 功能 | 主要实现 | 配套内容 |
+| --- | --- | --- |
+| 世界书运行与来源 | `LorebookSources`、`LorebookDecorators`、`LorebookMerge`、`LorebookVectorMatcher` | 递归、向量候选、Persona/Global/Chat 绑定与角色卡导入 |
+| 世界书编辑与帮助 | `LorebookEditorState`、`LorebookEntryEditor`、`LorebookSourcesPage`、`LorebookHelpPage` | 分区编辑、草稿/版本冲突、扫描深度教程及运行时测试 |
+| Gemini 混合工具 | `ai/.../google/GoogleServerTools.kt`、`GoogleStreamDecoder`、`AskUserProtocol` | 服务端工具与本地工具分离、签名回传、兼容参数解包 |
+| 日志持久化与长文本 | `common/.../android/RequestLogStore.kt`、`LogBodyContent`、`LongTextContent` | 原子写入、保留上限、正文/系统提示词折叠；不上传用户日志 |
+| 语音模型及参数 | `SpeechCapabilities`、`SpeechRequests`、`SpeechModelCatalog`、`SpeechSse`、`TranscriptAccumulator` | 参数归一化、目录筛选、音频分片/转写排序、设置与播放 UI |
+| 表面与菜单视口 | `AppearanceCard`、`AppearanceFormColors`、`MenuViewport`、`SwipeRevealActions` | 有界测量、背景固定于可见视口、选项独立滚动及真机回归 |
+
+完整功能文档见[索引](README.md)。审核记录中的测试结论属于对应日期，不能替代当前提交的验证。
 
 | 开发目标 | 首要修改位置 | 通常还需检查 |
 | --- | --- | --- |
@@ -179,9 +190,11 @@ flowchart LR
 
 `web` 模块的 `preBuild` 会执行 `web-ui` 的 `pnpm run build`，因此 Android 构建前需要先在 `web-ui/` 安装依赖。Firebase 与 Crashlytics 默认关闭，普通构建不需要 `app/google-services.json`；只有显式启用 Firebase 时才需要提供与 Revised 应用 ID 匹配的维护者配置。
 
-默认使用根目录的 Gradle 9.5.0 Wrapper。JVM 定向测试使用模块的
+默认使用根目录的 Gradle 9.5.0 Wrapper，守护进程按配置使用 JetBrains JDK 21；
+源码目标仍为 Java 17。JVM 定向测试使用模块的
 `testDebugUnitTest --tests '完整测试类名'`；`test` 聚合任务不接受 `--tests`。
-QA 用 `:app:assembleQa`，设备测试用独立 Debug 测试包。QA 保留旧包名
+QA 用 `:app:assembleQa`；本项目未注册 `:app:testQaUnitTest`，应用 JVM 测试使用
+`:app:testDebugUnitTest`。设备测试用独立 Debug 测试包。QA 保留旧包名
 `me.rerere.rikkahub`，Release 使用 `.revised`，不能跨包名覆盖安装。
 通用脚本的运行前提见 [scripts/README.md](../scripts/README.md)，生成报告和截图不上传。
 

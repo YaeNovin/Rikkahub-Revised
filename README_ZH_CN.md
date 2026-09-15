@@ -115,9 +115,22 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 - 增加按对话记忆控制、记忆生命周期、上下文统计、灵感卡片、聊天建议、请求日志
   格式化及外观/文字配色优化。
 
-本次安装包基于分组提交后的最新源码重新构建，使用版本号 184 和原有正式版
+`.8` 安装包基于对应发行标签的源码构建，使用版本号 184 和原有正式版
 签名证书，支持覆盖更新。完整双语更新说明见
 [release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md)。
+
+### 2.4.8-revised.8 之后的开发源码（尚未发布）
+
+默认分支还包含以下后续修改，现有 `.8` 安装包不包含这些更新：
+
+- 完善世界书导入、递归、来源绑定、条目编辑、测试和帮助，并明确 SillyTavern 兼容边界。
+- 修正 Gemini 内置工具与函数工具混用，以及 `ask_user` 参数解析。
+- 请求日志持久化保存，响应正文和长系统提示词支持折叠阅读。
+- 优化 ASR 收尾与 TTS 播放，增加 MiniMax/MiMo 能力约束参数和语音模型筛选获取。
+- 修复长下拉列表测量崩溃、菜单背景异常放大，统一新增控件的外观与文字配色适配。
+
+详情见 [2026-09-15 源码更新](docs/changes-2026-09-15.md)及[文档索引](docs/README.md)。
+聊天模型调用图片模型并通过问答确认的流程仍是讨论方案，不属于本次已实现功能。
 
 完整的修改记录、上游对比和发行要求见
 [MODIFICATIONS.md](docs/MODIFICATIONS.md)。
@@ -139,8 +152,10 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 
 构建环境要求：
 
-- JDK 17
-- Android SDK API 37 与 Build Tools 37
+- Gradle 守护进程使用 JetBrains JDK 21（见 `gradle/gradle-daemon-jvm.properties`）；
+  Java/Kotlin 源码目标仍为 Java 17
+- Android SDK API 37，以及 Android Gradle 插件选择的 Build Tools
+  （当前本地验证使用 Build Tools 36.0.0）
 - 支持 Submodule 的 Git
 
 克隆完整源码并初始化子模块：

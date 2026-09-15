@@ -1,5 +1,7 @@
 # 过渡与加载效果审查（2026-09-09）
 
+> 历史审查记录：保留下方当轮实现、待办与验证边界，不表示列出的 QA 包仍是最新版本，也不作为当前功能清单。请结合[文档索引](README.md)及后续源码更新阅读。
+
 范围：检索 app/src/main/java 下 AnimatedContent、AnimatedVisibility、animateContentSize、无限动画、进度指示与 shimmer 调用，进一步审阅聊天页、导航、WebView、渐变背景、思考流光和 Shimmer 核心实现。属于代码层面全量入口盘点及重点链路审阅，不代表每个页面已完成真机动画验证。
 
 ## 本次落地

@@ -142,10 +142,29 @@ or changes the following areas:
   context accounting, inspiration cards, chat suggestions, request-log
   formatting, and appearance/text-color improvements.
 
-The package was rebuilt from the current source after the grouped commits. It
+The `.8` package was built from its release-tag source after the grouped commits. It
 uses version code 184 and the existing release certificate for in-place updates.
 The complete bilingual release notes are in
 [release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md).
+
+### Development source after 2.4.8-revised.8 (not yet released)
+
+The default branch also contains newer source changes. These changes are not
+included in the existing `.8` download:
+
+- Expanded world-book import, recursion, source bindings, entry editing, testing,
+  and help, with explicit SillyTavern compatibility limits.
+- Hardened Gemini mixed built-in/function tools and `ask_user` argument handling.
+- Added durable request logs and collapsible long response/instruction views.
+- Improved ASR completion and TTS playback; added model-aware MiniMax/MiMo
+  parameters and filtered speech-model discovery.
+- Fixed long dropdown measurement crashes, enlarged menu backgrounds, and
+  appearance/text-color integration across the new controls.
+
+See the [2026-09-15 source update](docs/changes-2026-09-15.md) and
+[documentation index](docs/README.md) for guides, validation limits, and proposals.
+The chat-model-driven image-generation/confirmation flow is a proposal, not an
+implemented addition in this upload.
 
 For the auditable modification record, upstream comparison, and release
 requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).
@@ -168,8 +187,10 @@ change is identified in [MODIFICATIONS.md](docs/MODIFICATIONS.md).
 
 Prerequisites:
 
-- JDK 17
-- Android SDK with API 37 and Build Tools 37
+- JetBrains JDK 21 for the Gradle daemon (see `gradle/gradle-daemon-jvm.properties`);
+  Java/Kotlin source targets remain Java 17
+- Android SDK with API 37 and the Build Tools selected by the Android Gradle plugin
+  (the current local validation uses Build Tools 36.0.0)
 - Git with submodule support
 
 Clone the complete source and initialize its submodule:
