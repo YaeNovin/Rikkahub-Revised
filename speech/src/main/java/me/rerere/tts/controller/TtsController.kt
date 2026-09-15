@@ -47,16 +47,17 @@ class TtsController(
     private var currentProvider: TTSProviderSetting? = null
     private var workerJob: Job? = null
     private var isPaused = false
+    private var sessionId = 0L
 
     // 队列与缓存（基于稳定 ID）
     private val queue: java.util.concurrent.ConcurrentLinkedQueue<TtsChunk> = java.util.concurrent.ConcurrentLinkedQueue()
     private val allChunks: MutableList<TtsChunk> = mutableListOf()
     private val cache = java.util.concurrent.ConcurrentHashMap<UUID, kotlinx.coroutines.Deferred<TTSResponse>>()
-    private var lastPrefetchedIndex: Int = -1
+    private var lastSpokenText: String? = null
 
     // 行为参数
-    private val chunkDelayMs = 120L
-    private val prefetchCount = 4
+    private val chunkDelayMs = 30L
+    private val prefetchCount = 2
 
     // 状态流（保留与旧版兼容的 StateFlow）
     private val _isAvailable = MutableStateFlow(false)
@@ -95,6 +96,7 @@ class TtsController(
 
     /** 选择/取消选择 Provider */
     fun setProvider(provider: TTSProviderSetting?) {
+        if (currentProvider != provider) { stop(); lastSpokenText = null }
         currentProvider = provider
         _isAvailable.update { provider != null }
         if (provider == null) stop()
@@ -115,6 +117,7 @@ class TtsController(
 
         val newChunks = chunker.split(text)
         if (newChunks.isEmpty()) return
+        lastSpokenText = if (flush) text else listOfNotNull(lastSpokenText, text).joinToString("\n")
 
         if (flush) {
             internalReset()
@@ -122,13 +125,14 @@ class TtsController(
             queue.addAll(newChunks)
             _currentChunk.update { 0 }
         } else {
+            if (allChunks.isEmpty()) _currentChunk.value = 0
             // 追加时，重映射 index 以保持全局顺序
             val startIndex = (allChunks.lastOrNull()?.index ?: -1) + 1
             val remapped = newChunks.mapIndexed { i, c -> c.copy(index = startIndex + i) }
             allChunks.addAll(remapped)
             queue.addAll(remapped)
         }
-        _totalChunks.update { queue.size }
+        _totalChunks.update { allChunks.size }
         _error.update { null }
 
         _playbackState.update {
@@ -144,6 +148,7 @@ class TtsController(
     }
 
     private fun internalReset() {
+        sessionId++
         // Reset current session while keeping provider availability
         workerJob?.cancel()
         audio.stop()
@@ -153,7 +158,6 @@ class TtsController(
         allChunks.clear()
         cache.values.forEach { it.cancel(CancellationException("Reset")) }
         cache.clear()
-        lastPrefetchedIndex = -1
         _isSpeaking.update { false }
         _currentChunk.update { 0 }
         _totalChunks.update { 0 }
@@ -170,6 +174,10 @@ class TtsController(
 
     /** 恢复播放 */
     fun resume() {
+        if (workerJob?.isActive != true) {
+            lastSpokenText?.let { speak(it) }
+            return
+        }
         isPaused = false
         audio.resume()
         _playbackState.update { it.copy(status = PlaybackStatus.Playing) }
@@ -188,13 +196,13 @@ class TtsController(
     /** 跳过下一段（不打断当前正在播放） */
     fun skipNext() {
         if (queue.isNotEmpty()) {
-            queue.poll()
-            _totalChunks.update { queue.size }
+            queue.poll()?.let { skipped -> cache.remove(skipped.id)?.cancel() }
         }
     }
 
     /** 停止并清空状态 */
     fun stop() {
+        sessionId++
         workerJob?.cancel()
         audio.stop()
         audio.clear()
@@ -203,7 +211,6 @@ class TtsController(
         allChunks.clear()
         cache.values.forEach { it.cancel(CancellationException("Stopped")) }
         cache.clear()
-        lastPrefetchedIndex = -1
         _isSpeaking.update { false }
         _currentChunk.update { 0 }
         _totalChunks.update { 0 }
@@ -218,6 +225,13 @@ class TtsController(
     }
 
     // region 内部：播放调度
+    private fun streamsPcm(provider: TTSProviderSetting): Boolean = when (provider) {
+        is TTSProviderSetting.MiMo -> provider.streaming
+        is TTSProviderSetting.MiniMax -> provider.streaming && provider.format == "pcm"
+        is TTSProviderSetting.Qwen -> true
+        else -> false
+    }
+
     private fun startWorker() {
         val provider = currentProvider
         if (provider == null) {
@@ -225,9 +239,9 @@ class TtsController(
             return
         }
 
+        val session = sessionId
         workerJob = scope.launch {
             _isSpeaking.update { true }
-            var processedCount = _currentChunk.value
             try {
                 while (isActive) {
                     if (isPaused) {
@@ -238,8 +252,8 @@ class TtsController(
                     val chunk = queue.poll() ?: break
 
                     // 更新状态（1-based）
-                    _currentChunk.update { processedCount + 1 }
-                    _totalChunks.update { queue.size + 1 }
+                    _currentChunk.update { chunk.index + 1 }
+                    _totalChunks.update { allChunks.size }
                     _playbackState.update {
                         it.copy(
                             currentChunkIndex = _currentChunk.value,
@@ -251,32 +265,40 @@ class TtsController(
                     prefetchFrom(chunk.index + 1)
 
                     val response = try {
-                        awaitOrCreate(chunk, provider)
+                        if (streamsPcm(provider)) null else awaitOrCreate(chunk, provider)
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
                         Log.e(TAG, "Synthesis error", e)
                         _error.update { e.message ?: "TTS synthesis error" }
-                        processedCount++
+                        cache.remove(chunk.id)?.cancel()
                         continue
                     }
 
                     // 播放
                     try {
-                        audio.play(response)
+                        while (isPaused && isActive) delay(50)
+                        if (response == null) audio.playStreaming(synthesizer.stream(provider, chunk))
+                        else audio.play(response)
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
                         Log.e(TAG, "Playback error", e)
                         _error.update { e.message ?: "Audio playback error" }
+                    } finally {
+                        cache.remove(chunk.id)?.cancel()
                     }
 
                     if (queue.isNotEmpty()) delay(chunkDelayMs)
 
-                    processedCount++
                 }
             } finally {
-                _isSpeaking.update { false }
-                if (queue.isEmpty()) {
-                    _playbackState.update { it.copy(status = PlaybackStatus.Ended) }
+                if (session == sessionId) {
+                    _isSpeaking.update { false }
+                    if (queue.isEmpty()) {
+                        cache.values.forEach { it.cancel() }
+                        cache.clear()
+                        allChunks.clear()
+                        _playbackState.update { it.copy(status = if (_error.value == null) PlaybackStatus.Ended else PlaybackStatus.Error) }
+                    }
                 }
             }
         }
@@ -284,7 +306,8 @@ class TtsController(
 
     private fun prefetchFrom(startIndex: Int) {
         val provider = currentProvider ?: return
-        val begin = startIndex.coerceAtLeast(lastPrefetchedIndex + 1)
+        if (streamsPcm(provider)) return
+        val begin = startIndex.coerceAtLeast(0)
         val endExclusive = (begin + prefetchCount).coerceAtMost(allChunks.size)
         if (begin >= endExclusive) return
 
@@ -294,7 +317,6 @@ class TtsController(
                 scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
             }
         }
-        lastPrefetchedIndex = endExclusive - 1
     }
 
     private suspend fun awaitOrCreate(chunk: TtsChunk, provider: TTSProviderSetting): TTSResponse {

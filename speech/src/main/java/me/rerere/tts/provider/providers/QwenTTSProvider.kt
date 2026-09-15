@@ -1,6 +1,7 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
+import me.rerere.common.http.awaitAndUse
 import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
@@ -38,7 +39,7 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
             })
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
+        Log.i(TAG, "Speech request: model=${providerSetting.model}")
 
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl}/services/aigc/multimodal-generation/generation")
@@ -48,52 +49,53 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
+        httpClient.newCall(httpRequest).awaitAndUse { response ->
 
-        if (!response.isSuccessful) {
-            val errorBody = response.body.string()
-            Log.e(TAG, "Qwen TTS request failed: ${response.code} ${response.message}, body: $errorBody")
-            throw Exception("Qwen TTS request failed: ${response.code} ${response.message}")
-        }
+            if (!response.isSuccessful) {
+                val errorBody = response.body.string()
+                Log.e(TAG, "Qwen TTS request failed: ${response.code} ${response.message}, body: $errorBody")
+                throw Exception("Qwen TTS request failed: ${response.code} ${response.message}")
+            }
 
-        val reader = response.body.byteStream().bufferedReader()
+            val reader = response.body.byteStream().bufferedReader()
 
-        try {
-            var currentData = StringBuilder()
+            try {
+                var currentData = StringBuilder()
 
-            reader.lineSequence().forEach { line ->
-                when {
-                    line.startsWith("data:") -> {
-                        currentData.append(line.removePrefix("data:"))
-                    }
+                reader.lineSequence().forEach { line ->
+                    when {
+                        line.startsWith("data:") -> {
+                            currentData.append(line.removePrefix("data:"))
+                        }
 
-                    line.isEmpty() && currentData.isNotEmpty() -> {
-                        val result = parseSSEData(currentData.toString())
-                        if (result != null) {
-                            val (audioData, isLast) = result
-                            emit(
-                                AudioChunk(
-                                    data = audioData,
-                                    format = AudioFormat.PCM,
-                                    sampleRate = 24000,
-                                    isLast = isLast,
-                                    metadata = mapOf(
-                                        "provider" to "qwen",
-                                        "model" to providerSetting.model,
-                                        "voice" to providerSetting.voice,
-                                        "sampleRate" to "24000",
-                                        "channels" to "1",
-                                        "bitDepth" to "16"
+                        line.isEmpty() && currentData.isNotEmpty() -> {
+                            val result = parseSSEData(currentData.toString())
+                            if (result != null) {
+                                val (audioData, isLast) = result
+                                emit(
+                                    AudioChunk(
+                                        data = audioData,
+                                        format = AudioFormat.PCM,
+                                        sampleRate = 24000,
+                                        isLast = isLast,
+                                        metadata = mapOf(
+                                            "provider" to "qwen",
+                                            "model" to providerSetting.model,
+                                            "voice" to providerSetting.voice,
+                                            "sampleRate" to "24000",
+                                            "channels" to "1",
+                                            "bitDepth" to "16"
+                                        )
                                     )
                                 )
-                            )
+                            }
+                            currentData = StringBuilder()
                         }
-                        currentData = StringBuilder()
                     }
                 }
+            } finally {
+                reader.close()
             }
-        } finally {
-            reader.close()
         }
     }
 

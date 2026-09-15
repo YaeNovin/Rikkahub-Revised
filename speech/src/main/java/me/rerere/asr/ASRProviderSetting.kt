@@ -46,7 +46,7 @@ sealed class ASRProviderSetting {
         override val id: Uuid = Uuid.random(),
         override val name: String = "DashScope ASR",
         val apiKey: String = "",
-        val websocketUrl: String = "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+        val websocketUrl: String = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
         val model: String = "qwen3-asr-flash-realtime",
         val language: String = "",
         val sampleRate: Int = 16000,
@@ -104,6 +104,7 @@ sealed class ASRProviderSetting {
         val apiKey: String = "",
         val baseUrl: String = "https://api.xiaomimimo.com/v1",
         val model: String = "mimo-v2.5-asr",
+        val streaming: Boolean = false,
         // auto | zh | en; 留空时不下发 asr_options, 服务端默认 auto
         val language: String = "auto",
         val sampleRate: Int = 16000,

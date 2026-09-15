@@ -1,6 +1,7 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
+import me.rerere.common.http.awaitAndUse
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -72,46 +73,47 @@ class StepTTSProvider : TTSProvider<TTSProviderSetting.Step> {
             .post(requestBody.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
-        if (!response.isSuccessful) {
-            // 把错误响应体读出来方便排查 (4xx 通常返回 JSON 错误信息)
-            val errorBody = runCatching { response.body?.string() }.getOrNull().orEmpty()
-            throw Exception(
-                "Step TTS request failed: HTTP ${response.code} ${response.message}. body=$errorBody"
-            )
-        }
+        httpClient.newCall(httpRequest).awaitAndUse { response ->
+            if (!response.isSuccessful) {
+                // 把错误响应体读出来方便排查 (4xx 通常返回 JSON 错误信息)
+                val errorBody = runCatching { response.body?.string() }.getOrNull().orEmpty()
+                throw Exception(
+                    "Step TTS request failed: HTTP ${response.code} ${response.message}. body=$errorBody"
+                )
+            }
 
-        val audioBytes = response.body?.bytes()
-            ?: throw Exception("Step TTS returned empty body")
+            val audioBytes = response.body?.bytes()
+                ?: throw Exception("Step TTS returned empty body")
 
-        if (audioBytes.isEmpty()) {
-            throw Exception("Step TTS returned 0 bytes")
-        }
+            if (audioBytes.isEmpty()) {
+                throw Exception("Step TTS returned 0 bytes")
+            }
 
-        // StepFun 端的 format 字符串与 AudioFormat 枚举对齐
-        val audioFormat = when (providerSetting.responseFormat.lowercase()) {
-            "mp3" -> AudioFormat.MP3
-            "wav" -> AudioFormat.WAV
-            "pcm" -> AudioFormat.PCM
-            "ogg" -> AudioFormat.OGG
-            "opus" -> AudioFormat.OPUS
-            "aac" -> AudioFormat.AAC
-            else -> AudioFormat.MP3
-        }
+            // StepFun 端的 format 字符串与 AudioFormat 枚举对齐
+            val audioFormat = when (providerSetting.responseFormat.lowercase()) {
+                "mp3" -> AudioFormat.MP3
+                "wav" -> AudioFormat.WAV
+                "pcm" -> AudioFormat.PCM
+                "ogg" -> AudioFormat.OGG
+                "opus" -> AudioFormat.OPUS
+                "aac" -> AudioFormat.AAC
+                else -> AudioFormat.MP3
+            }
 
-        emit(
-            AudioChunk(
-                data = audioBytes,
-                format = audioFormat,
-                sampleRate = providerSetting.sampleRate,
-                isLast = true,
-                metadata = mapOf(
-                    "provider" to "step",
-                    "model" to providerSetting.model,
-                    "voice" to providerSetting.voice,
-                    "responseFormat" to providerSetting.responseFormat,
+            emit(
+                AudioChunk(
+                    data = audioBytes,
+                    format = audioFormat,
+                    sampleRate = providerSetting.sampleRate,
+                    isLast = true,
+                    metadata = mapOf(
+                        "provider" to "step",
+                        "model" to providerSetting.model,
+                        "voice" to providerSetting.voice,
+                        "responseFormat" to providerSetting.responseFormat,
+                    )
                 )
             )
-        )
+        }
     }
 }

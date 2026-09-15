@@ -29,6 +29,11 @@ import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.appendAmplitude
 import me.rerere.asr.calculateRmsAmplitude
+import me.rerere.tts.provider.normalized
+import me.rerere.tts.provider.buildMiMoAsrRequest
+import me.rerere.common.http.awaitAndUse
+import me.rerere.common.http.SseEvent
+import me.rerere.tts.provider.speechSseFlow
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -58,8 +63,9 @@ private const val MAX_SEGMENT_BYTES = 6 * 1024 * 1024
 class MiMoASRController(
     private val context: Context,
     private val httpClient: OkHttpClient,
-    private val provider: ASRProviderSetting.MiMo
+    provider: ASRProviderSetting.MiMo
 ) : ASRController {
+    private val provider = provider.normalized()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _state = MutableStateFlow(ASRState(isAvailable = true))
@@ -71,6 +77,9 @@ class MiMoASRController(
 
     // 同一时刻只允许一个 flush 协程在跑, 避免乱序拼结果
     private var flushJob: Job? = null
+    private var finishJob: Job? = null
+    private var failedSegment: ByteArray? = null
+    private var partialTranscript: String = ""
 
     private val bufferLock = Any()
     private var currentBuffer = ByteArrayOutputStream()
@@ -89,6 +98,9 @@ class MiMoASRController(
         }
 
         this.onTranscriptChange = onTranscriptChange
+        finishJob?.cancel()
+        failedSegment = null
+        partialTranscript = ""
         synchronized(bufferLock) {
             currentBuffer = ByteArrayOutputStream()
             segmentStartElapsedMs = SystemClock.elapsedRealtime()
@@ -107,26 +119,32 @@ class MiMoASRController(
     }
 
     override fun stop() {
-        recorderJob?.cancel()
+        if (finishJob?.isActive == true) return
+        val recording = recorderJob
+        recording?.cancel()
         releaseRecorder()
         _state.update { it.copy(status = ASRStatus.Stopping) }
 
         // 把剩余 PCM 做最后一次 flush, 完成后切回 Idle
-        scope.launch(Dispatchers.IO) {
+        finishJob = scope.launch(Dispatchers.IO) {
             try {
+                recording?.join()
                 // 等当前正在跑的 flushJob 完成, 避免并发 flush 导致结果乱序
                 flushJob?.join()
                 flushSegment()
+                if (synchronized(bufferLock) { currentBuffer.size() > 0 }) flushSegment()
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Final flush failed", e)
                 setError(e.message ?: "MiMo ASR final flush failed")
             } finally {
-                _state.update { it.copy(status = ASRStatus.Idle) }
+                _state.update { it.copy(status = if (it.errorMessage == null) ASRStatus.Idle else ASRStatus.Error) }
             }
         }
     }
 
     override fun dispose() {
+        finishJob?.cancel()
         recorderJob?.cancel()
         flushJob?.cancel()
         releaseRecorder()
@@ -143,17 +161,24 @@ class MiMoASRController(
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT
             )
+            if (minBufferSize <= 0) {
+                setError("设备不支持当前录音采样率或格式，请更换采样率。")
+                return@launch
+            }
             val bufferSize = minBufferSize
                 .coerceAtLeast(sampleRate / 10 * 2)
                 .coerceAtLeast(4096)
 
-            val recorder = AudioRecord(
+            val recorder = try { AudioRecord(
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize * 2
-            )
+            ) } catch (e: Exception) {
+                setError(e.message ?: "麦克风初始化失败。")
+                return@launch
+            }
             audioRecord = recorder
 
             try {
@@ -168,6 +193,7 @@ class MiMoASRController(
 
                         val shouldFlush = synchronized(bufferLock) {
                             currentBuffer.write(buffer, 0, read)
+                            check(currentBuffer.size() <= MAX_SEGMENT_BYTES + buffer.size) { "网络上传过慢，录音已停止，待处理音频可重试。" }
                             if (segmentMs <= 0) {
                                 currentBuffer.size() >= MAX_SEGMENT_BYTES
                             } else {
@@ -185,6 +211,8 @@ class MiMoASRController(
                     }
                 }
             } catch (e: Exception) {
+                if (!isActive) return@launch
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Audio recording failed", e)
                 setError(e.message ?: "Audio recording failed")
             } finally {
@@ -197,8 +225,12 @@ class MiMoASRController(
         // 同一时刻只跑一个 flush, 避免后发先至导致结果乱序
         if (flushJob?.isActive == true) return
         flushJob = scope.launch(Dispatchers.IO) {
-            runCatching { flushSegment() }
-                .onFailure { Log.e(TAG, "Segment flush failed", it) }
+            try { flushSegment() } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                setError(e.message ?: "语音识别失败，可重试。")
+                recorderJob?.cancel()
+                releaseRecorder()
+            }
         }
     }
 
@@ -207,7 +239,7 @@ class MiMoASRController(
      * 在 bufferLock 内拷贝出 PCM 并立刻重置缓冲区, 不持有锁等待网络, 避免阻塞录音写。
      */
     private suspend fun flushSegment() {
-        val pcmBytes = synchronized(bufferLock) {
+        val pcmBytes = failedSegment ?: synchronized(bufferLock) {
             if (currentBuffer.size() == 0) return
             val bytes = currentBuffer.toByteArray()
             currentBuffer = ByteArrayOutputStream()
@@ -215,6 +247,7 @@ class MiMoASRController(
             bytes
         }
 
+        try {
         val wavBytes = pcm16ToWav(
             pcm = pcmBytes,
             sampleRate = provider.sampleRate,
@@ -223,60 +256,61 @@ class MiMoASRController(
         )
         val b64 = Base64.encodeToString(wavBytes, Base64.NO_WRAP)
 
-        val message = JSONObject()
-            .put("role", "user")
-            .put(
-                "content",
-                JSONArray().put(
-                    JSONObject()
-                        .put("type", "input_audio")
-                        .put(
-                            "input_audio",
-                            JSONObject().put("data", "data:audio/wav;base64,$b64")
-                        )
-                )
-            )
-
-        val body = JSONObject()
-            .put("model", provider.model)
-            .put("messages", JSONArray().put(message))
-        if (provider.language.isNotBlank()) {
-            body.put("asr_options", JSONObject().put("language", provider.language))
-        }
-
+        val body = buildMiMoAsrRequest(provider, "data:audio/wav;base64,$b64")
         val request = Request.Builder()
-            .url("${provider.baseUrl.trimEnd('/')}/chat/completions")
-            .addHeader("api-key", provider.apiKey)
-            .addHeader("Content-Type", "application/json")
-            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        val text = withContext(Dispatchers.IO) {
-            httpClient.newCall(request).execute().use { resp ->
-                val respBody = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    throw IOException("MiMo ASR HTTP ${resp.code}: $respBody")
+            .url("${provider.baseUrl}/chat/completions")
+            .header("api-key", provider.apiKey)
+            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE)).build()
+        partialTranscript = ""
+        val text = if (provider.streaming) {
+            var finished = false
+            httpClient.speechSseFlow(request).collect { event ->
+                when (event) {
+                    is SseEvent.Event -> if (event.data.trim() != "[DONE]") {
+                        val root = JSONObject(event.data)
+                        check(!root.has("error")) { root.optJSONObject("error")?.optString("message") ?: "MiMo ASR 返回错误。" }
+                        val choice = root.optJSONArray("choices")?.optJSONObject(0)
+                        partialTranscript += choice?.optJSONObject("delta")?.optString("content").orEmpty()
+                        publishTranscript()
+                        val reason = choice?.optString("finish_reason").orEmpty()
+                        check(reason !in listOf("length", "content_filter")) { "MiMo 转写未完整完成，可重试。" }
+                        if (reason == "stop") finished = true
+                    }
+                    is SseEvent.Failure -> throw event.throwable ?: IOException("语音连接中断。")
+                    else -> Unit
                 }
-                val json = runCatching { JSONObject(respBody) }.getOrElse {
-                    throw IOException("MiMo ASR response is not valid JSON: $respBody")
-                }
-                json.optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content", "")
-                    ?.trim()
-                    ?: ""
             }
+            check(finished) { "转写连接提前关闭，可重试。" }
+            partialTranscript.trim()
+        } else httpClient.newCall(request).awaitAndUse { response ->
+            check(response.isSuccessful) { "MiMo ASR HTTP ${response.code}" }
+            val root = JSONObject(response.body.string())
+            check(!root.has("error")) { root.optJSONObject("error")?.optString("message") ?: "MiMo ASR 返回错误。" }
+            val choice = root.optJSONArray("choices")?.optJSONObject(0) ?: error("MiMo 未返回转写结果。")
+            check(choice.optString("finish_reason") == "stop") { "MiMo 转写未完整完成，可重试。" }
+            choice.optJSONObject("message")?.optString("content")?.trim().orEmpty()
         }
-
-        if (text.isNotEmpty()) {
-            completedTranscripts.add(text)
-            publishTranscript()
+        if (text.isNotEmpty()) completedTranscripts.add(text)
+        failedSegment = null
+        partialTranscript = ""
+        _state.update { it.copy(canRetry = false, errorMessage = null) }
+        publishTranscript()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            failedSegment = pcmBytes
+            _state.update { it.copy(canRetry = true) }
+            throw e
         }
     }
 
+    override fun retry() {
+        if (state.value.isRecording) return
+        _state.update { it.copy(errorMessage = null) }
+        stop()
+    }
+
     private fun publishTranscript() {
-        val transcript = completedTranscripts
+        val transcript = (completedTranscripts + partialTranscript)
             .filter { it.isNotBlank() }
             .joinToString(" ")
         _state.update { it.copy(transcript = transcript, errorMessage = null) }
@@ -287,7 +321,8 @@ class MiMoASRController(
         _state.update {
             it.copy(
                 status = ASRStatus.Error,
-                errorMessage = message
+                errorMessage = message,
+                canRetry = failedSegment != null || synchronized(bufferLock) { currentBuffer.size() > 0 },
             )
         }
     }

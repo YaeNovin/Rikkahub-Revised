@@ -4,12 +4,19 @@ import android.content.Context
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.json.*
+import me.rerere.common.http.awaitAndUse
+import me.rerere.tts.provider.normalized
+import me.rerere.tts.provider.capabilities
+import me.rerere.tts.provider.buildMiMoSpeechRequest
+import me.rerere.tts.provider.SpeechVoiceInput
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.common.http.SseEvent
-import me.rerere.common.http.sseFlow
+import me.rerere.tts.provider.speechSseFlow
 import me.rerere.tts.model.AudioChunk
 import me.rerere.tts.model.AudioFormat
 import me.rerere.tts.model.TTSRequest
@@ -30,12 +37,14 @@ private val mimoJson = Json { ignoreUnknownKeys = true }
 
 @Serializable
 private data class MiMoChunk(
-    val choices: List<MiMoChoice> = emptyList()
+    val choices: List<MiMoChoice> = emptyList(),
+    val error: JsonElement? = null,
 )
 
 @Serializable
 private data class MiMoChoice(
-    val delta: MiMoDelta? = null
+    val delta: MiMoDelta? = null,
+    @SerialName("finish_reason") val finishReason: String? = null,
 )
 
 @Serializable
@@ -54,6 +63,8 @@ internal fun decodeMiMoAudioData(data: String): ByteArray? {
     if (payload == "[DONE]") return null
     // 非 [DONE] 的 data 视为 JSON 片段 解析失败直接上抛
     val chunk = mimoJson.decodeFromString<MiMoChunk>(payload)
+    check(chunk.error == null) { "MiMo TTS: ${chunk.error}" }
+    check(chunk.choices.none { it.finishReason in listOf("length", "content_filter") }) { "MiMo 语音生成未完整完成。" }
     val encoded = chunk.choices.firstOrNull()?.delta?.audio?.data ?: return null
     // 空字符串视为无音频片段
     if (encoded.isBlank()) return null
@@ -65,6 +76,7 @@ internal class MiMoSseProcessor(
     private val voice: String
 ) {
     private var hasAudio = false
+    private var finished = false
     // metadata 只构造一次 贯穿整个流
     private val metadata = mapOf(
         "provider" to "mimo",
@@ -76,6 +88,8 @@ internal class MiMoSseProcessor(
         return when (event) {
             is SseEvent.Open -> null
             is SseEvent.Event -> {
+                if (event.data.trim() == "[DONE]") { finished = true; return null }
+                if (mimoJson.decodeFromString<MiMoChunk>(event.data).choices.any { it.finishReason == "stop" }) finished = true
                 // 只处理包含 audio.data 的增量事件 其他事件忽略
                 val pcmData = decodeMiMoAudioData(event.data) ?: return null
                 hasAudio = true
@@ -92,6 +106,7 @@ internal class MiMoSseProcessor(
                 if (!hasAudio) {
                     throw IllegalStateException("MiMo TTS returned no audio chunks")
                 }
+                check(finished) { "MiMo 音频流提前结束，未收到完成标志。" }
                 // 流关闭时补一个终结 chunk 便于播放器收尾
                 AudioChunk(
                     data = byteArrayOf(),
@@ -107,8 +122,8 @@ internal class MiMoSseProcessor(
     }
 }
 
-class MiMoTTSProvider : TTSProvider<TTSProviderSetting.MiMo> {
-    private val httpClient = OkHttpClient.Builder()
+class MiMoTTSProvider(client: OkHttpClient = OkHttpClient()) : TTSProvider<TTSProviderSetting.MiMo> {
+    private val httpClient = client.newBuilder()
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
@@ -139,39 +154,67 @@ class MiMoTTSProvider : TTSProvider<TTSProviderSetting.MiMo> {
         providerSetting: TTSProviderSetting.MiMo,
         request: TTSRequest
     ): Flow<AudioChunk> = flow {
-        // OpenAI 兼容的 chat/completions SSE 流式返回 音频增量在 delta.audio.data
-        val requestBody = buildJsonObject {
-            put("model", providerSetting.model)
-            put("messages", buildJsonArray {
-                add(buildJsonObject {
-                    put("role", "assistant")
-                    put("content", request.text)
-                })
-            })
-            put("audio", buildJsonObject {
-                put("format", "pcm16")
-                put("voice", providerSetting.voice)
-            })
-            put("stream", true)
-        }
-
-        // baseUrl 允许用户在设置页自定义 这里直接拼接路径
+        val setting = providerSetting.normalized()
+        val sample = if (setting.capabilities().voiceInput == SpeechVoiceInput.AUDIO_SAMPLE)
+            loadMiMoVoiceSample(context, setting.referenceAudioUri) else null
+        val requestBody = buildMiMoSpeechRequest(setting, request.text, sample)
         val httpRequest = Request.Builder()
-            .url("${providerSetting.baseUrl}/chat/completions")
-            // MiMo 使用 api-key 头传 token
-            .addHeader("api-key", providerSetting.apiKey)
-            .addHeader("Content-Type", "application/json")
-            // JsonObject 的 toString 会输出 JSON 字符串
-            .post(requestBody.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        val processor = MiMoSseProcessor(
-            model = providerSetting.model,
-            voice = providerSetting.voice
-        )
-
-        httpClient.sseFlow(httpRequest).collect { event ->
-            processor.process(event)?.let { emit(it) }
+            .url("${setting.baseUrl}/chat/completions")
+            .header("api-key", setting.apiKey)
+            .post(requestBody.toString().toRequestBody(JSON_MEDIA_TYPE)).build()
+        if (setting.streaming) {
+            val processor = MiMoSseProcessor(setting.model, setting.voice)
+            httpClient.speechSseFlow(httpRequest).collect { event ->
+                processor.process(event)?.let { emit(it) }
+                if (event is SseEvent.Event && event.data.trim() != "[DONE]") {
+                    val root = mimoJson.parseToJsonElement(event.data).jsonObject
+                    val delta = (root["choices"] as? JsonArray)?.firstOrNull()?.jsonObject?.get("delta") as? JsonObject
+                    val preview = delta?.get("final_text_preview")?.jsonPrimitive?.contentOrNull
+                    if (!preview.isNullOrEmpty()) emit(AudioChunk(byteArrayOf(), AudioFormat.PCM, MIMO_SAMPLE_RATE,
+                        metadata = mapOf("spoken_text" to preview)))
+                }
+            }
+        } else {
+            httpClient.newCall(httpRequest).awaitAndUse { response ->
+                check(response.isSuccessful) { "MiMo TTS HTTP ${response.code}" }
+                val root = mimoJson.parseToJsonElement(response.body.string()).jsonObject
+                check(root["error"] == null) { "MiMo TTS: ${root["error"]}" }
+                val choice = (root["choices"] as? JsonArray)?.firstOrNull()?.jsonObject
+                check(choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull == "stop") { "MiMo 语音生成未完整完成。" }
+                val message = choice["message"]?.jsonObject ?: error("MiMo 未返回语音消息。")
+                val encoded = message["audio"]?.jsonObject?.get("data")?.jsonPrimitive?.contentOrNull
+                    ?: error("MiMo 未返回音频。")
+                val bytes = Base64.getDecoder().decode(encoded)
+                check(bytes.isNotEmpty()) { "MiMo 返回了空音频。" }
+                emit(AudioChunk(bytes, speechAudioFormat(setting.format), MIMO_SAMPLE_RATE, isLast = true,
+                    metadata = buildMap {
+                        put("provider", "mimo"); put("model", setting.model)
+                        message["final_text_preview"]?.jsonPrimitive?.contentOrNull?.let { put("spoken_text", it) }
+                    }))
+            }
         }
     }
+}
+
+private fun loadMiMoVoiceSample(context: Context, value: String): String {
+    require(value.isNotBlank()) { "请选择 MP3/WAV 音色样本。" }
+    val uri = android.net.Uri.parse(value)
+    require(uri.scheme == "content") { "请通过文件选择器重新选择音色样本。" }
+    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val size = input.read(buffer)
+            if (size < 0) break
+            require(out.size() + size <= 7_800_000) { "音色样本过大，编码后须小于 10 MB。" }
+            out.write(buffer, 0, size)
+        }
+        out.toByteArray()
+    } ?: error("无法读取音色样本，请重新授权该文件。")
+    val wav = bytes.size >= 12 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
+        String(bytes, 8, 4, Charsets.US_ASCII) == "WAVE"
+    val mp3 = (bytes.size >= 3 && String(bytes, 0, 3, Charsets.US_ASCII) == "ID3") ||
+        (bytes.size >= 2 && bytes[0].toInt() and 0xff == 0xff && bytes[1].toInt() and 0xe0 == 0xe0)
+    require(wav || mp3) { "音色样本必须为有效的 MP3 或 WAV 音频。" }
+    return "data:${if (wav) "audio/wav" else "audio/mpeg"};base64," + Base64.getEncoder().encodeToString(bytes)
 }

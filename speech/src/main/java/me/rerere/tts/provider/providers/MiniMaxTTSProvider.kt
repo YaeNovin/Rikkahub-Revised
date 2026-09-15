@@ -1,149 +1,116 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.*
 import me.rerere.common.http.SseEvent
-import me.rerere.common.http.sseFlow
-import me.rerere.tts.model.AudioChunk
-import me.rerere.tts.model.AudioFormat
-import me.rerere.tts.model.TTSRequest
-import me.rerere.tts.provider.TTSProvider
-import me.rerere.tts.provider.TTSProviderSetting
+import me.rerere.tts.provider.speechSseFlow
+import me.rerere.common.http.awaitAndUse
+import me.rerere.tts.model.*
+import me.rerere.tts.provider.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
-private const val TAG = "MiniMaxTTSProvider"
+internal fun speechAudioFormat(format: String): AudioFormat = when (format.lowercase()) {
+    "pcm", "pcm16" -> AudioFormat.PCM
+    "pcmu_raw" -> AudioFormat.MULAW
+    "wav", "pcmu_wav" -> AudioFormat.WAV
+    "flac" -> AudioFormat.FLAC
+    "opus" -> AudioFormat.OPUS
+    else -> AudioFormat.MP3
+}
 
-@Serializable
-private data class MiniMaxResponseData(
-    val audio: String,
-    val status: Int,
-    val ced: String
-)
+internal class MiniMaxSpeechDecoder(private val setting: TTSProviderSetting.MiniMax) {
+    private val json = Json { ignoreUnknownKeys = true }
+    private var hasAudio = false
+    private var complete = false
 
-@Serializable
-private data class MiniMaxResponse(
-    val data: MiniMaxResponseData
-)
-
-class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
-    private val httpClient = OkHttpClient.Builder()
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
-
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
+    fun decode(payload: String): AudioChunk? {
+        if (payload.trim() == "[DONE]") return null
+        val root = json.parseToJsonElement(payload).jsonObject
+        val status = root["base_resp"] as? JsonObject
+        val code = status?.get("status_code")?.jsonPrimitive?.intOrNull ?: 0
+        check(code == 0) { "MiniMax TTS $code: " + status?.get("status_msg")?.jsonPrimitive?.contentOrNull.orEmpty() }
+        val data = root["data"] as? JsonObject ?: return null
+        val hex = data["audio"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val bytes = decodeSpeechHex(hex)
+        hasAudio = hasAudio || bytes.isNotEmpty()
+        complete = complete || data["status"]?.jsonPrimitive?.intOrNull == 2
+        val info = root["extra_info"] as? JsonObject
+        val metadata = buildMap {
+            put("provider", "minimax"); put("model", setting.model); put("voice", setting.voiceId)
+            put("channels", (info?.get("audio_channel")?.jsonPrimitive?.intOrNull ?: setting.channels).toString())
+            root["trace_id"]?.jsonPrimitive?.contentOrNull?.let { put("request_id", it) }
+            data["subtitle_file"]?.jsonPrimitive?.contentOrNull?.let { put("subtitle_url", it) }
+            data["subtitle"]?.let { put("subtitle", it.toString()) }
+            data["subtitles"]?.let { put("subtitle", it.toString()) }
+            info?.let { put("usage", it.toString()) }
+        }
+        return AudioChunk(bytes, speechAudioFormat(setting.format),
+            info?.get("audio_sample_rate")?.jsonPrimitive?.intOrNull ?: setting.sampleRate,
+            isLast = complete, metadata = metadata)
     }
 
-    override fun generateSpeech(
-        context: Context,
-        providerSetting: TTSProviderSetting.MiniMax,
-        request: TTSRequest
-    ): Flow<AudioChunk> = flow {
-        val requestBody = buildJsonObject {
-            put("model", providerSetting.model)
-            put("text", request.text)
-            put("stream", true)
-            put("output_format", "hex")
-            put("stream_options", buildJsonObject {
-                put("exclude_aggregated_audio", true)
-            })
-            put("voice_setting", buildJsonObject {
-                put("voice_id", providerSetting.voiceId)
-                put("speed", providerSetting.speed)
-            })
-        }
-
-        Log.i(TAG, "generateSpeech: $requestBody")
-
-        val httpRequest = Request.Builder()
-            .url("${providerSetting.baseUrl}/t2a_v2")
-            .addHeader("Authorization", "Bearer ${providerSetting.apiKey}")
-            .addHeader("Content-Type", "application/json")
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .build()
-
-        var hasEmittedAudio = false
-
-        httpClient.sseFlow(httpRequest).collect {
-            when (it) {
-                is SseEvent.Open -> Log.i(TAG, "SSE connection opened")
-                is SseEvent.Event -> {
-                    try {
-                        val data = json.decodeFromString<MiniMaxResponse>(it.data)
-
-                        // Convert hex string to bytes
-                        val audioBytes = hexStringToBytes(data.data.audio)
-
-                        emit(
-                            AudioChunk(
-                                data = audioBytes,
-                                format = AudioFormat.MP3, // MiniMax returns MP3 format
-                                sampleRate = 32000, // Default sample rate from MiniMax
-                                isLast = false, // Will be set to true on last chunk
-                                metadata = mapOf(
-                                    "provider" to "minimax",
-                                    "model" to providerSetting.model,
-                                    "voice" to providerSetting.voiceId,
-                                    "status" to data.data.status.toString(),
-                                    "ced" to data.data.ced
-                                )
-                            )
-                        )
-                        hasEmittedAudio = true
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to process audio chunk", e)
-                    }
-                }
-
-                is SseEvent.Closed -> {
-                    Log.i(TAG, "SSE connection closed")
-                    // Emit final chunk if we haven't already
-                    if (hasEmittedAudio) {
-                        emit(
-                            AudioChunk(
-                                data = byteArrayOf(), // Empty data for last chunk
-                                format = AudioFormat.MP3,
-                                sampleRate = 32000,
-                                isLast = true,
-                                metadata = mapOf("provider" to "minimax")
-                            )
-                        )
-                    }
-                }
-
-                is SseEvent.Failure -> {
-                    Log.e(TAG, "SSE connection failed", it.throwable)
-                    throw it.throwable ?: Exception("MiniMax TTS streaming failed")
-                }
-            }
-        }
+    fun finish() {
+        check(hasAudio) { "MiniMax 未返回音频，请检查音色、模型与服务状态。" }
+        check(complete) { "MiniMax 音频流提前结束，未收到完成状态。" }
     }
 }
 
-private fun hexStringToBytes(hexString: String): ByteArray {
-    val cleanHex = hexString.replace("\\s+".toRegex(), "")
-    val length = cleanHex.length
+internal fun decodeSpeechHex(hex: String): ByteArray {
+    val text = hex.filterNot(Char::isWhitespace)
+    require(text.length % 2 == 0) { "MiniMax 返回了不完整的音频编码。" }
+    return ByteArray(text.length / 2) { index ->
+        text.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+    }
+}
 
-    // Check for even number of characters
-    if (length % 2 != 0) {
-        throw IllegalArgumentException("Hex string must have even number of characters")
+class MiniMaxTTSProvider(client: OkHttpClient = OkHttpClient()) : TTSProvider<TTSProviderSetting.MiniMax> {
+    private val httpClient = client.newBuilder().readTimeout(120, TimeUnit.SECONDS).build()
+
+    override fun generateSpeech(context: Context, providerSetting: TTSProviderSetting.MiniMax,
+        request: TTSRequest): Flow<AudioChunk> = flow {
+        val setting = providerSetting.normalized()
+        val httpRequest = Request.Builder().url("${setting.baseUrl}/t2a_v2")
+            .header("Authorization", "Bearer ${setting.apiKey}")
+            .post(buildMiniMaxSpeechRequest(setting, request.text).toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        val decoder = MiniMaxSpeechDecoder(setting)
+        if (setting.streaming) {
+            httpClient.speechSseFlow(httpRequest).collect { event ->
+                when (event) {
+                    is SseEvent.Event -> decoder.decode(event.data)?.let { emit(it) }
+                    is SseEvent.Failure -> throw event.throwable ?: IllegalStateException("MiniMax 语音连接失败。")
+                    else -> Unit
+                }
+            }
+        } else {
+            httpClient.newCall(httpRequest).awaitAndUse { response ->
+                check(response.isSuccessful) { "MiniMax TTS HTTP ${response.code}" }
+                decoder.decode(response.body.string())?.let { emit(it) }
+            }
+        }
+        decoder.finish()
     }
 
-    val bytes = ByteArray(length / 2)
-    for (i in 0 until length step 2) {
-        val hexByte = cleanHex.substring(i, i + 2)
-        bytes[i / 2] = hexByte.toInt(16).toByte()
+    suspend fun listVoices(setting: TTSProviderSetting.MiniMax): List<String> {
+        val request = Request.Builder().url("${setting.baseUrl.trimEnd('/')}/get_voice")
+            .header("Authorization", "Bearer ${setting.apiKey}")
+            .post("""{"voice_type":"all"}""".toRequestBody("application/json".toMediaType())).build()
+        return httpClient.newCall(request).awaitAndUse { response ->
+            check(response.isSuccessful) { "获取音色失败：HTTP ${response.code}" }
+            val root = Json.parseToJsonElement(response.body.string()).jsonObject
+            val status = root["base_resp"] as? JsonObject
+            check((status?.get("status_code")?.jsonPrimitive?.intOrNull ?: 0) == 0) {
+                status?.get("status_msg")?.jsonPrimitive?.contentOrNull ?: "获取音色失败"
+            }
+            listOf("system_voice", "voice_cloning", "voice_generation").flatMap { key ->
+                (root[key] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("voice_id")?.jsonPrimitive?.contentOrNull }
+            }.distinct()
+        }
     }
-    return bytes
 }

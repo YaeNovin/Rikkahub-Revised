@@ -84,7 +84,26 @@ sealed class TTSProviderSetting {
         val baseUrl: String = "https://api.minimaxi.com/v1",
         val model: String = "speech-2.6-turbo",
         val voiceId: String = "female-shaonv",
-        val speed: Float = 1.0f
+        val speed: Float = 1.0f,
+        val volume: Float = 1.0f,
+        val pitch: Int = 0,
+        val emotion: String = "",
+        val languageBoost: String = "auto",
+        val format: String = "mp3",
+        val sampleRate: Int = 32000,
+        val bitrate: Int = 128000,
+        val channels: Int = 1,
+        val streaming: Boolean = true,
+        val forceCbr: Boolean = false,
+        val textNormalization: Boolean = false,
+        val latexRead: Boolean = false,
+        val pronunciationRules: String = "",
+        val subtitleEnabled: Boolean = false,
+        val subtitleType: String = "sentence",
+        val voiceModifyPitch: Int = 0,
+        val voiceModifyIntensity: Int = 0,
+        val voiceModifyTimbre: Int = 0,
+        val soundEffect: String = "",
     ) : TTSProviderSetting() {
         override fun copyProvider(
             id: Uuid,
@@ -170,7 +189,15 @@ sealed class TTSProviderSetting {
         val apiKey: String = "",
         val baseUrl: String = "https://api.xiaomimimo.com/v1",
         val model: String = "mimo-v2.5-tts",
-        val voice: String = "mimo_default"
+        val voice: String = "mimo_default",
+        val format: String = "pcm16",
+        val streaming: Boolean = true,
+        val styleInstruction: String = "",
+        val voiceDesign: String = "",
+        // Persist a SAF grant rather than a multi-megabyte base64 string in settings.
+        val referenceAudioUri: String = "",
+        val referenceAudioName: String = "",
+        val optimizeText: Boolean = false,
     ) : TTSProviderSetting() {
         override fun copyProvider(
             id: Uuid,

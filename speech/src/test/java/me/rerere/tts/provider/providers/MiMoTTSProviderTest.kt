@@ -12,6 +12,12 @@ import org.junit.Test
 import java.util.Base64
 
 class MiMoTTSProviderTest {
+    @Test(expected = IllegalStateException::class)
+    fun closed_stream_with_audio_but_no_finish_marker_is_rejected() {
+        val processor = MiMoSseProcessor("mimo-v2.5-tts", "mimo_default")
+        processor.process(SseEvent.Event(null, null, """{"choices":[{"delta":{"audio":{"data":"AQIDBA=="}}}]}"""))
+        processor.process(SseEvent.Closed)
+    }
     @Test
     fun decode_audio_data_from_sse_chunk() {
         val expected = byteArrayOf(1, 2, 3, 4)

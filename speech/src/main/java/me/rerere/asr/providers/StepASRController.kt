@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.common.http.awaitAndUse
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
@@ -78,6 +79,8 @@ class StepASRController(
 
     // 同一时刻只允许一个 flush 协程在跑, 避免乱序拼结果
     private var flushJob: Job? = null
+    private var finishJob: Job? = null
+    private var failedSegment: ByteArray? = null
 
     private val bufferLock = Any()
     private var currentBuffer = ByteArrayOutputStream()
@@ -95,6 +98,8 @@ class StepASRController(
             return
         }
 
+        finishJob?.cancel()
+        failedSegment = null
         this.onTranscriptChange = onTranscriptChange
         synchronized(bufferLock) {
             currentBuffer = ByteArrayOutputStream()
@@ -114,26 +119,32 @@ class StepASRController(
     }
 
     override fun stop() {
-        recorderJob?.cancel()
+        if (finishJob?.isActive == true) return
+        val recording = recorderJob
+        recording?.cancel()
         releaseRecorder()
         _state.update { it.copy(status = ASRStatus.Stopping) }
 
         // 把剩余 PCM 做最后一次 flush, 完成后切回 Idle
-        scope.launch(Dispatchers.IO) {
+        finishJob = scope.launch(Dispatchers.IO) {
             try {
+                recording?.join()
                 // 等当前正在跑的 flushJob 完成, 避免并发 flush 导致缓冲区竞争
                 flushJob?.join()
                 flushSegment()
+                if (synchronized(bufferLock) { currentBuffer.size() > 0 }) flushSegment()
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Final flush failed", e)
                 setError(e.message ?: "Step ASR final flush failed")
             } finally {
-                _state.update { it.copy(status = ASRStatus.Idle) }
+                _state.update { it.copy(status = if (it.errorMessage == null) ASRStatus.Idle else ASRStatus.Error) }
             }
         }
     }
 
     override fun dispose() {
+        finishJob?.cancel()
         recorderJob?.cancel()
         flushJob?.cancel()
         releaseRecorder()
@@ -150,17 +161,24 @@ class StepASRController(
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT
             )
+            if (minBufferSize <= 0) {
+                setError("设备不支持当前录音采样率或格式，请更换采样率。")
+                return@launch
+            }
             val bufferSize = minBufferSize
                 .coerceAtLeast(sampleRate / 10 * 2)
                 .coerceAtLeast(4096)
 
-            val recorder = AudioRecord(
+            val recorder = try { AudioRecord(
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize * 2
-            )
+            ) } catch (e: Exception) {
+                setError(e.message ?: "麦克风初始化失败。")
+                return@launch
+            }
             audioRecord = recorder
 
             try {
@@ -175,6 +193,7 @@ class StepASRController(
 
                         val shouldFlush = synchronized(bufferLock) {
                             currentBuffer.write(buffer, 0, read)
+                            check(currentBuffer.size() <= MAX_SEGMENT_BYTES + buffer.size) { "网络上传过慢，待处理录音可重试。" }
                             if (segmentMs <= 0) {
                                 currentBuffer.size() >= MAX_SEGMENT_BYTES
                             } else {
@@ -192,6 +211,8 @@ class StepASRController(
                     }
                 }
             } catch (e: Exception) {
+                if (!isActive) return@launch
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Audio recording failed", e)
                 setError(e.message ?: "Audio recording failed")
             } finally {
@@ -204,8 +225,12 @@ class StepASRController(
         // 同一时刻只跑一个 flush, 避免后发先至导致结果乱序
         if (flushJob?.isActive == true) return
         flushJob = scope.launch(Dispatchers.IO) {
-            runCatching { flushSegment() }
-                .onFailure { Log.e(TAG, "Segment flush failed", it) }
+            try { flushSegment() } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                setError(e.message ?: "语音识别失败，可重试。")
+                recorderJob?.cancel()
+                releaseRecorder()
+            }
         }
     }
 
@@ -216,7 +241,7 @@ class StepASRController(
      * 在 bufferLock 内拷贝出 PCM 并立刻重置缓冲区, 不持有锁等待网络, 避免阻塞录音写。
      */
     private suspend fun flushSegment() {
-        val pcmBytes = synchronized(bufferLock) {
+        val pcmBytes = failedSegment ?: synchronized(bufferLock) {
             if (currentBuffer.size() == 0) return
             val bytes = currentBuffer.toByteArray()
             currentBuffer = ByteArrayOutputStream()
@@ -271,7 +296,14 @@ class StepASRController(
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        val text = executeWithRetry(request).trim()
+        val text = try { executeWithRetry(request).trim() } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            failedSegment = pcmBytes
+            _state.update { it.copy(canRetry = true) }
+            throw e
+        }
+        failedSegment = null
+        _state.update { it.copy(canRetry = false, errorMessage = null) }
 
         if (text.isNotEmpty()) {
             completedTranscripts.add(text)
@@ -284,7 +316,7 @@ class StepASRController(
         for (attempt in 1..MAX_RETRY) {
             try {
                 return withContext(Dispatchers.IO) {
-                    httpClient.newCall(request).execute().use { resp ->
+                    httpClient.newCall(request).awaitAndUse { resp ->
                         if (!resp.isSuccessful) {
                             throw IOException("Step ASR HTTP ${resp.code}: ${resp.body.string()}")
                         }
@@ -422,11 +454,18 @@ class StepASRController(
         scope.launch { onTranscriptChange?.invoke(transcript) }
     }
 
+    override fun retry() {
+        if (state.value.isRecording) return
+        _state.update { it.copy(errorMessage = null) }
+        stop()
+    }
+
     private fun setError(message: String) {
         _state.update {
             it.copy(
                 status = ASRStatus.Error,
-                errorMessage = message
+                errorMessage = message,
+                canRetry = failedSegment != null || synchronized(bufferLock) { currentBuffer.size() > 0 },
             )
         }
     }

@@ -1,6 +1,7 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
+import me.rerere.common.http.awaitAndUse
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -36,7 +37,7 @@ class OpenAITTSProvider : TTSProvider<TTSProviderSetting.OpenAI> {
             put("response_format", "mp3") // Default to MP3
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
+        Log.i(TAG, "Speech request: model=${providerSetting.model}")
 
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl}/audio/speech")
@@ -45,25 +46,26 @@ class OpenAITTSProvider : TTSProvider<TTSProviderSetting.OpenAI> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
+        httpClient.newCall(httpRequest).awaitAndUse { response ->
 
-        if (!response.isSuccessful) {
-            throw Exception("TTS request failed: ${response.code} ${response.message}")
-        }
+            if (!response.isSuccessful) {
+                throw Exception("TTS request failed: ${response.code} ${response.message}")
+            }
 
-        val audioData = response.body.bytes()
+            val audioData = response.body.bytes()
 
-        emit(
-            AudioChunk(
-                data = audioData,
-                format = AudioFormat.MP3,
-                isLast = true,
-                metadata = mapOf(
-                    "provider" to "openai",
-                    "model" to providerSetting.model,
-                    "voice" to providerSetting.voice
+            emit(
+                AudioChunk(
+                    data = audioData,
+                    format = AudioFormat.MP3,
+                    isLast = true,
+                    metadata = mapOf(
+                        "provider" to "openai",
+                        "model" to providerSetting.model,
+                        "voice" to providerSetting.voice
+                    )
                 )
             )
-        )
+        }
     }
 }

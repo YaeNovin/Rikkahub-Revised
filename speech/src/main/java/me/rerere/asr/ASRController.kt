@@ -6,5 +6,6 @@ interface ASRController {
     val state: StateFlow<ASRState>
     fun start(onTranscriptChange: (String) -> Unit)
     fun stop()
+    fun retry() {}
     fun dispose()
 }

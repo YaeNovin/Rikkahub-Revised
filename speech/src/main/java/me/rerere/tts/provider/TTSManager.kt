@@ -61,7 +61,10 @@ class TTSManager(private val context: Context) {
             is TTSProviderSetting.Qwen -> qwenProvider.promptGuidance
             is TTSProviderSetting.Groq -> groqProvider.promptGuidance
             is TTSProviderSetting.XAI -> xaiProvider.promptGuidance
-            is TTSProviderSetting.MiMo -> miMoProvider.promptGuidance
+            is TTSProviderSetting.MiMo -> if (!providerSetting.capabilities().recognized) ""
+                else if (providerSetting.capabilities().voiceInput == SpeechVoiceInput.BUILT_IN) miMoProvider.promptGuidance
+                else miMoProvider.promptGuidance.lineSequence().filterNot { it.contains("singing", ignoreCase = true) }.joinToString("\n") +
+                    "\nThe selected voice design/clone model does not support singing. Use spoken delivery only."
             is TTSProviderSetting.ElevenLabs -> elevenLabsProvider.promptGuidance
             is TTSProviderSetting.FishAudio -> fishAudioProvider.promptGuidance
             is TTSProviderSetting.Step -> stepProvider.promptGuidance

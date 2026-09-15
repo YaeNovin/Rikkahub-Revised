@@ -1,6 +1,7 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
+import me.rerere.common.http.awaitAndUse
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -35,7 +36,7 @@ class GroqTTSProvider : TTSProvider<TTSProviderSetting.Groq> {
             put("response_format", "wav")
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
+        Log.i(TAG, "Speech request: model=${providerSetting.model}")
 
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl}/audio/speech")
@@ -44,28 +45,29 @@ class GroqTTSProvider : TTSProvider<TTSProviderSetting.Groq> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
+        httpClient.newCall(httpRequest).awaitAndUse { response ->
 
-        if (!response.isSuccessful) {
-            Log.e(TAG, "generateSpeech: ${response.code} ${response.message}")
-            Log.e(TAG, "generateSpeech: ${response.body?.string()}")
-            throw Exception("Groq TTS request failed: ${response.code} ${response.message}")
-        }
+            if (!response.isSuccessful) {
+                Log.e(TAG, "generateSpeech: ${response.code} ${response.message}")
+                Log.e(TAG, "generateSpeech: ${response.body?.string()}")
+                throw Exception("Groq TTS request failed: ${response.code} ${response.message}")
+            }
 
-        val audioData = response.body.bytes()
+            val audioData = response.body.bytes()
 
-        emit(
-            AudioChunk(
-                data = audioData,
-                format = AudioFormat.WAV,
-                isLast = true,
-                metadata = mapOf(
-                    "provider" to "groq",
-                    "model" to providerSetting.model,
-                    "voice" to providerSetting.voice,
-                    "response_format" to "wav"
+            emit(
+                AudioChunk(
+                    data = audioData,
+                    format = AudioFormat.WAV,
+                    isLast = true,
+                    metadata = mapOf(
+                        "provider" to "groq",
+                        "model" to providerSetting.model,
+                        "voice" to providerSetting.voice,
+                        "response_format" to "wav"
+                    )
                 )
             )
-        )
+        }
     }
 }

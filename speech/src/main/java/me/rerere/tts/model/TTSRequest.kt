@@ -14,5 +14,7 @@ enum class AudioFormat {
     OGG,
     AAC,
     OPUS,
-    PCM
+    PCM,
+    FLAC,
+    MULAW
 }
