@@ -148,7 +148,7 @@ flowchart LR
 | 建议与灵感卡片 | `ChatSuggestionContract`、`SuggestionGenerationGate`、`InspirationCards` | 全局/助手配置、变量草稿、单一滚动面板与自定义卡片 |
 | 日志与 GitHub 卡片 | `LogBodyCapture`、`LogExport`、`LogAnalysisStore`、`GitHubRepository` | Gzip 读取、请求参数、分析保存与导出、Room 缓存和限流回退 |
 
-2026-09-15 开发源码新增入口（未包含在已发布 `.8` 安装包中）：
+2026-09-15 新增入口（已收入 `.9`，不包含在历史 `.8` 安装包中）：
 
 | 功能 | 主要实现 | 配套内容 |
 | --- | --- | --- |

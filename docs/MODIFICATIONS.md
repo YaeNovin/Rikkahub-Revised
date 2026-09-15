@@ -6,20 +6,34 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.8`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.9`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
 
-## 2026-09-15 开发源码更新（未发布）
+## 2026-09-15 正式版 2.4.8-revised.9
+
+在已提交的最新源码上递增版本为 `2.4.8-revised.9`，版本码 185。正式包沿用现有签名，
+本次发布带版本号的 ARM64 APK 及校验文件；原 `.7`、`.8` 发行资产与标签保留不变。
+完整中文更新说明后接英文版本，见[发行说明](release-notes-2.4.8-revised.9.md)。
+
+## 2026-09-15 Release 2.4.8-revised.9
+
+The latest committed source is released as `2.4.8-revised.9`, version code 185,
+with the existing signing identity. This release publishes a versioned ARM64 APK
+and its checksum file. The original `.7` and `.8` tags/assets remain unchanged.
+The [release notes](release-notes-2.4.8-revised.9.md) contain the complete Chinese
+updates followed by their English version.
+
+## 2026-09-15 开发源码上传记录（后续收入 .9）
 
 本次在 `2.4.8-revised.8` 源码基线上提交世界书、工具协议、语音、日志与外观修复，
 不变更版本号、历史标签或已发布的安装包。最新源码与 `.8` 发行资产应区分使用。
 新增功能、验证结果及边界见 [源码更新记录](changes-2026-09-15.md)；
 文档上传、更新、保留及停止跟踪范围见 [文档索引](README.md)。
 
-## 2026-09-15 Development source update (unreleased)
+## 2026-09-15 Source upload record (subsequently included in .9)
 
 This upload adds world-book, tool-protocol, speech, logging, and appearance
 changes on top of the `2.4.8-revised.8` source baseline. It does not change

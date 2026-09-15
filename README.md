@@ -30,7 +30,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`2.4.8-revised.8`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.8) |
+| Current release | [`2.4.8-revised.9`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.9) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -46,18 +46,13 @@ Official Rikkahub Revised APKs are published only through this repository's
 
 | APK | Intended devices |
 | --- | --- |
-| `app-arm64-v8a-release.apk` | Most modern Android phones and tablets |
-| `app-x86_64-release.apk` | x86_64 emulators and compatible devices |
-| `app-universal-release.apk` | Universal fallback containing ARM64 and x86_64 native libraries |
-| `app-release.aab` | App-store or distribution-platform bundle |
+| `app-arm64-v8a-release-2.4.8-revised.9.apk` | ARM64 Android phones and tablets |
+| `SHA256SUMS.txt` | SHA-256 checksum for the published APK |
 
-Release asset filenames may include the release version suffix. For example,
-the current `.8` release publishes
-`app-arm64-v8a-release.apk`; the updater detects the device ABI
-from the asset name.
-
-The current `2.4.8-revised.8` Release contains the three APK variants, the AAB,
-and `SHA256SUMS.txt`. The in-app updater reads the latest public release from this repository and
+The `2.4.8-revised.9` release publishes an ARM64 APK with the version in its
+filename. The updater detects the device ABI from the name. x86_64 and Universal
+packages from older releases remain available on their original release pages;
+they are not `.9` builds. The in-app updater reads the latest public release from this repository and
 offers an APK compatible with the device ABI. Release descriptions contain only
 user-facing updates and fixes; package integrity and signing continuity are
 verified separately during publication.
@@ -82,7 +77,24 @@ repository.
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
 
-### Current Formal Release: 2.4.8-revised.8
+### Current Formal Release: 2.4.8-revised.9
+
+- Expanded world-book imports, recursion, source bindings, entry editing, tests,
+  and tutorials, with explicit SillyTavern compatibility limits.
+- Improved Gemini question prompts and mixed built-in/function tools.
+- Added durable request logs and collapsible long responses and instructions.
+- Improved speech recognition and playback, with model-aware MiniMax/MiMo
+  settings and filtered speech-model discovery.
+- Fixed long dropdown crashes, enlarged menu backgrounds, and web-content focus
+  crashes; improved appearance and text-color integration.
+
+Version code 185 uses the existing release certificate for in-place updates
+from previous Revised releases. See the complete
+[bilingual release notes](docs/release-notes-2.4.8-revised.9.md),
+[source update](docs/changes-2026-09-15.md), and [documentation index](docs/README.md).
+The chat-model-driven image-generation/confirmation flow remains a proposal.
+
+### Earlier Revised changes (through 2.4.8-revised.8)
 
 - Added the OrcaRouter provider with official website and documentation links.
 - Improved model- and protocol-aware parameters, reasoning depth, tool calls,
@@ -146,25 +158,6 @@ The `.8` package was built from its release-tag source after the grouped commits
 uses version code 184 and the existing release certificate for in-place updates.
 The complete bilingual release notes are in
 [release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md).
-
-### Development source after 2.4.8-revised.8 (not yet released)
-
-The default branch also contains newer source changes. These changes are not
-included in the existing `.8` download:
-
-- Expanded world-book import, recursion, source bindings, entry editing, testing,
-  and help, with explicit SillyTavern compatibility limits.
-- Hardened Gemini mixed built-in/function tools and `ask_user` argument handling.
-- Added durable request logs and collapsible long response/instruction views.
-- Improved ASR completion and TTS playback; added model-aware MiniMax/MiMo
-  parameters and filtered speech-model discovery.
-- Fixed long dropdown measurement crashes, enlarged menu backgrounds, and
-  appearance/text-color integration across the new controls.
-
-See the [2026-09-15 source update](docs/changes-2026-09-15.md) and
-[documentation index](docs/README.md) for guides, validation limits, and proposals.
-The chat-model-driven image-generation/confirmation flow is a proposal, not an
-implemented addition in this upload.
 
 For the auditable modification record, upstream comparison, and release
 requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).

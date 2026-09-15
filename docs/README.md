@@ -1,7 +1,7 @@
 # 文档索引与维护范围
 
-更新日期：2026-09-15。当前正式版为 `2.4.8-revised.8`；默认分支包含后续开发源码，
-以下指南按当前源码维护，不保证现有正式版安装包已包含全部功能。
+更新日期：2026-09-15。当前正式版为 `2.4.8-revised.9`；此前的开发源码更新已收入该版本。
+以下指南仍区分已实现能力、兼容限制和待实现方案。
 
 ## 使用与开发指南
 
@@ -20,7 +20,9 @@
 
 ## 版本与归属
 
-- [2026-09-15 开发源码更新（未发布）](changes-2026-09-15.md)
+- [2.4.8-revised.9 发行说明](release-notes-2.4.8-revised.9.md)
+- [2.4.8-revised.9 验证结果与限制](release-verification-2.4.8-revised.9.md)
+- [2026-09-15 源码更新及验证记录](changes-2026-09-15.md)
 - [2026-09-12 源码更新](changes-2026-09-12.md)
 - [2.4.8-revised.8 发行说明](release-notes-2.4.8-revised.8.md)
 - [2.4.8-revised.7 历史发行说明](release-notes-2.4.8-revised.7.md)
@@ -46,6 +48,7 @@
 
 | 处理 | 范围 | 原因 |
 | --- | --- | --- |
+| .9 发行更新 | `.9` 发行说明与验证记录、双语 README、签名契约、源码记录与工程索引 | 以新版本发布；安装包作为 Release 附件，不进入源码树 |
 | 新增上传 | 本索引、`changes-2026-09-15.md`、`speech-services.md`、`logging-reliability.md`、`worldbook-compatibility-audit.md` | 当前新增能力、测试及限制需要公开说明 |
 | 新增上传并标记讨论稿 | `chat-image-tool-and-confirmation-design.md` | 保留后续设计依据，明确未实现 |
 | 更新上传 | 两种语言 README、`MODIFICATIONS.md`、`PROJECT_STRUCTURE.md`、`worldbook-guide.md`、`ask-user-upgrade.md` | 区分发行版与开发源码，修正构建前提，补齐新实现入口 |
@@ -63,9 +66,9 @@ Room schema、离线渲染库、运行时模型资源和第三方许可证是构
 
 ## English overview
 
-The published release remains `2.4.8-revised.8`. The default branch contains newer,
-unreleased source; consult the bilingual [source update](changes-2026-09-15.md)
-and the [English README](../README.md) before comparing a build with a guide.
+The published release is `2.4.8-revised.9`, which includes the preceding source
+update. Consult the bilingual [release notes](release-notes-2.4.8-revised.9.md),
+[source update](changes-2026-09-15.md), and [English README](../README.md).
 Historical audits retain their original validation limits. The image-tool
 confirmation document is a proposal, not an implemented feature.
 

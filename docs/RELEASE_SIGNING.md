@@ -76,10 +76,12 @@ Before publishing an APK or AAB:
 - Repository: `https://github.com/YaeNovin/Rikkahub-Revised`
 - API: `https://api.github.com/repos/YaeNovin/Rikkahub-Revised/releases/latest`
 - First tag/version: `v2.4.8-revised.1` / `2.4.8-revised.1`
-- Current tag/version: `2.4.8-revised.8`
-- Current APK assets: `app-arm64-v8a-release.apk`, `app-x86_64-release.apk`, and `app-universal-release.apk`
-- Current App Bundle: `app-release.aab`
+- Current tag/version: `2.4.8-revised.9` (version code 185)
+- Current APK asset: `app-arm64-v8a-release-2.4.8-revised.9.apk`
+- Current release scope: ARM64 APK; no x86_64/Universal APK or App Bundle is published for this version
 - Current checksum asset: `SHA256SUMS.txt`
+- Previous `.7`/`.8` tags and assets remain unchanged on their original release pages
+- Current build validation and known limits: [2.4.8-revised.9 verification](release-verification-2.4.8-revised.9.md)
 - Historical tags may use the optional `v` prefix; the updater accepts both
   forms and compares the normalized version.
 

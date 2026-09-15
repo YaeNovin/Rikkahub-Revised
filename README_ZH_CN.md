@@ -28,7 +28,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`2.4.8-revised.8`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.8) |
+| 当前版本 | [`2.4.8-revised.9`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.9) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -44,14 +44,11 @@ Rikkahub Revised 的正式 APK 仅通过本仓库的
 
 | APK | 适用设备 |
 | --- | --- |
-| `app-arm64-v8a-release.apk` | 大多数现代 Android 手机和平板电脑 |
-| `app-x86_64-release.apk` | x86_64 模拟器及兼容设备 |
-| `app-universal-release.apk` | 同时包含 ARM64 与 x86_64 原生库的通用备用包 |
-| `app-release.aab` | 应用商店或分发平台使用的 App Bundle |
+| `app-arm64-v8a-release-2.4.8-revised.9.apk` | ARM64 Android 手机和平板电脑 |
+| `SHA256SUMS.txt` | 已发布 APK 的 SHA-256 校验值 |
 
-Release 资产文件名可能包含版本后缀。当前 `.8` 版本使用标准架构文件名；应用内更新功能会根据文件名识别设备 ABI。
-
-当前 `2.4.8-revised.8` Release 已包含三个 APK 架构包、AAB 和 `SHA256SUMS.txt`。
+`2.4.8-revised.9` 发布带版本号文件名的 ARM64 安装包，应用内更新功能会根据文件名识别设备 ABI。
+旧版的 x86_64 与通用包仍保留在对应历史 Release 页面，不属于 `.9` 安装包。
 应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
 APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
 流程中单独核验。
@@ -72,7 +69,20 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-### 当前正式版：2.4.8-revised.8
+### 当前正式版：2.4.8-revised.9
+
+- 完善世界书导入、递归、来源绑定、条目编辑、测试和教程，并明确 SillyTavern 兼容边界。
+- 修复 Gemini 问答参数及内置工具与函数工具混用问题。
+- 请求日志持久化保存，响应正文和长系统提示词支持折叠阅读。
+- 优化语音识别与朗读，增加 MiniMax/MiMo 模型参数约束和语音模型筛选获取。
+- 修复长下拉列表崩溃、菜单背景异常放大、网页内容焦点引发的崩溃，完善外观与文字配色。
+
+版本码为 185，沿用原有正式版签名，支持从旧版 Revised 覆盖更新。
+完整内容见[双语发行说明](docs/release-notes-2.4.8-revised.9.md)、
+[源码更新记录](docs/changes-2026-09-15.md)及[文档索引](docs/README.md)。
+聊天模型调用图片模型并通过问答确认的流程仍是讨论方案。
+
+### 历史 Revised 改动（截至 2.4.8-revised.8）
 
 - 新增 OrcaRouter 供应商，并提供官网和文档链接。
 - 优化按模型与协议适配的参数、思考深度、工具调用及第三方兼容接口。
@@ -118,19 +128,6 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 `.8` 安装包基于对应发行标签的源码构建，使用版本号 184 和原有正式版
 签名证书，支持覆盖更新。完整双语更新说明见
 [release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md)。
-
-### 2.4.8-revised.8 之后的开发源码（尚未发布）
-
-默认分支还包含以下后续修改，现有 `.8` 安装包不包含这些更新：
-
-- 完善世界书导入、递归、来源绑定、条目编辑、测试和帮助，并明确 SillyTavern 兼容边界。
-- 修正 Gemini 内置工具与函数工具混用，以及 `ask_user` 参数解析。
-- 请求日志持久化保存，响应正文和长系统提示词支持折叠阅读。
-- 优化 ASR 收尾与 TTS 播放，增加 MiniMax/MiMo 能力约束参数和语音模型筛选获取。
-- 修复长下拉列表测量崩溃、菜单背景异常放大，统一新增控件的外观与文字配色适配。
-
-详情见 [2026-09-15 源码更新](docs/changes-2026-09-15.md)及[文档索引](docs/README.md)。
-聊天模型调用图片模型并通过问答确认的流程仍是讨论方案，不属于本次已实现功能。
 
 完整的修改记录、上游对比和发行要求见
 [MODIFICATIONS.md](docs/MODIFICATIONS.md)。
