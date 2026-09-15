@@ -50,6 +50,9 @@ enum class ServerToolProtocol {
 
     @SerialName("anthropic_messages")
     ANTHROPIC_MESSAGES,
+
+    @SerialName("google_generate_content")
+    GOOGLE_GENERATE_CONTENT,
 }
 
 /**

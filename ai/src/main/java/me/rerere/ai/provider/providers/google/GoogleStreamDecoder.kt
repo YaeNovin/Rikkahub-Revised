@@ -16,6 +16,7 @@ import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.provider.stream.StreamChunkDecoder
 import me.rerere.ai.provider.stream.prematureStreamTermination
 import me.rerere.ai.ui.GoogleThoughtMetadata
+import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
@@ -40,6 +41,7 @@ internal class GoogleStreamDecoder(
     // continuation parts. Keep the most recent nameless-provider call available for merging.
     private var lastToolCallId: String? = null
     private var lastToolName: String? = null
+    private var awaitingToolArguments = false
 
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
@@ -92,12 +94,15 @@ internal class GoogleStreamDecoder(
     )
 
     private fun parsePart(part: JsonObject): UIMessagePart? = when {
+        part.containsKey("toolCall") || part.containsKey("toolResponse") -> parseGoogleServerToolPart(part)
         part.containsKey("text") -> {
             val text = part["text"]?.jsonPrimitive?.contentOrNull ?: ""
+            val metadata = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull
+                ?.let { GoogleThoughtMetadata(thoughtSignature = it).toMetadata() }
             if (part["thought"]?.jsonPrimitive?.booleanOrNull == true) {
-                UIMessagePart.Reasoning(text, Clock.System.now(), null)
+                UIMessagePart.Reasoning(text, Clock.System.now(), null, metadata)
             } else {
-                UIMessagePart.Text(text)
+                UIMessagePart.Text(text, metadata)
             }
         }
         part.containsKey("functionCall") -> {
@@ -116,6 +121,10 @@ internal class GoogleStreamDecoder(
                     "$responseId:tool-${++toolSequence}"
                 }
                 explicitToolName == null -> lastToolCallId
+                // Gemini/OpenAI-compatible relays may omit the provider call id on
+                // continuation parts. Reuse the open call while the name stays the same,
+                // otherwise its args would become a second, incomplete tool message.
+                lastToolCallId != null && lastToolName == explicitToolName && awaitingToolArguments -> lastToolCallId
                 else -> "$responseId:tool-${++toolSequence}"
             }
             val toolName = explicitToolName ?: if (functionCallId != null) {
@@ -128,6 +137,9 @@ internal class GoogleStreamDecoder(
             // dropping that marker prevents a spurious empty ask_user invocation.
             if (toolCallId == null || toolName.isNullOrBlank()) return null
             if (functionCallId != null) providerToolNames[functionCallId] = toolName
+            val argsElement = functionCall["args"] ?: functionCall["arguments"] ?: functionCall["input"] ?: functionCall["parameters"]
+            val isEmptyArgs = argsElement == null || argsElement is JsonNull || (argsElement is JsonObject && argsElement.isEmpty())
+            awaitingToolArguments = functionCallId == null && isEmptyArgs
             lastToolCallId = toolCallId
             lastToolName = toolName
             UIMessagePart.Tool(
@@ -137,7 +149,13 @@ internal class GoogleStreamDecoder(
                 toolName = toolName,
                 // A null args marker is an empty incremental fragment, not literal input. Treating
                 // it as the string "null" would corrupt the following JSON args fragment.
-                input = functionCall["args"]?.let { if (it is JsonNull) "" else it.toString() }
+                input = argsElement?.let {
+                    when {
+                        it is JsonNull -> ""
+                        it is JsonObject && it.isEmpty() -> ""
+                        else -> it.toString()
+                    }
+                }
                     .orEmpty(),
                 output = emptyList(),
                 metadata = GoogleThoughtMetadata(
@@ -193,6 +211,8 @@ internal class GoogleStreamDecoder(
         private var reasoningId: String? = null
         private var imageId: String? = null
         private val openToolIds = linkedSetOf<String>()
+        private val serverCalls = mutableMapOf<String, String>()
+        private val openServerCallIds = linkedSetOf<String>()
         var hasFinalOutput: Boolean = false
             private set
 
@@ -201,13 +221,29 @@ internal class GoogleStreamDecoder(
             var emittedImages = 0
             message.parts.forEach { part ->
                 when (part) {
-                    is UIMessagePart.Text -> if (part.text.isNotEmpty()) {
-                        hasFinalOutput = true
+                    is UIMessagePart.ServerTool -> {
+                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+                        val invocationId = part.googleServerInvocationId()
+                        val isResult = part.googleWirePart()?.containsKey("toolResponse") == true
+                        if (isResult && invocationId != null) serverCalls.remove(invocationId)?.let { callId ->
+                            // Update the UI call, but keep the raw result in its own ordered part.
+                            add(StreamChunk.ServerToolEnd(callId, output = part.output, status = part.status))
+                            openServerCallIds.remove(callId)
+                        }
+                        if (!isResult) {
+                            openServerCallIds += part.toolCallId
+                            if (invocationId != null) serverCalls[invocationId] = part.toolCallId
+                        }
+                        add(StreamChunk.ServerToolStart(part.toolCallId, part.toolName, part.input, part.metadata))
+                        if (isResult) add(StreamChunk.ServerToolEnd(part.toolCallId, output = part.output, status = part.status, metadata = part.metadata))
+                    }
+                    is UIMessagePart.Text -> if (part.text.isNotEmpty() || part.metadata != null) {
+                        if (part.text.isNotEmpty()) hasFinalOutput = true
                         addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
                         val id = textId ?: nextId(responseId, "text").also {
                             textId = it; add(StreamChunk.TextStart(it))
                         }
-                        add(StreamChunk.TextDelta(id, part.text))
+                        add(StreamChunk.TextDelta(id, part.text, part.metadata))
                     }
                     is UIMessagePart.Reasoning -> if (part.reasoning.isNotEmpty() || part.metadata != null) {
                         addAll(closeText()); addAll(closeImage()); addAll(closeTools())
@@ -253,6 +289,9 @@ internal class GoogleStreamDecoder(
 
         fun finish(reason: String?, responseId: String, model: String): List<StreamChunk> = buildList {
             addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+            openServerCallIds.forEach { add(StreamChunk.ServerToolEnd(it, status = ServerToolStatus.FAILED)) }
+            openServerCallIds.clear()
+            serverCalls.clear()
             add(StreamChunk.Finish(reason, responseId, model))
         }
 

@@ -973,7 +973,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 })
             }
         }
-    }.mergeCustomBody(params.customBody)
+    }.mergeCustomBody(params.customBody).withGoogleToolContextCirculation()
 
     private fun commonRoleToGoogleRole(role: MessageRole): String {
         return when (role) {
@@ -1231,7 +1231,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         return UIMessage(
             role = role,
-            parts = parts,
+            parts = completeGoogleServerCalls(parts),
             annotations = annotations
         )
     }
@@ -1253,15 +1253,19 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun parseMessagePart(jsonObject: JsonObject): UIMessagePart? {
+        parseGoogleServerToolPart(jsonObject)?.let { return it }
         return when {
             jsonObject.containsKey("text") -> {
                 val thought = jsonObject["thought"]?.jsonPrimitive?.booleanOrNull ?: false
                 val text = jsonObject["text"]?.jsonPrimitive?.content ?: ""
+                val metadata = jsonObject["thoughtSignature"]?.jsonPrimitive?.contentOrNull
+                    ?.let { GoogleThoughtMetadata(thoughtSignature = it).toMetadata() }
                 if (thought) UIMessagePart.Reasoning(
                     reasoning = text,
                     createdAt = Clock.System.now(),
-                    finishedAt = null
-                ) else UIMessagePart.Text(text)
+                    finishedAt = null,
+                    metadata = metadata,
+                ) else UIMessagePart.Text(text, metadata)
             }
 
             jsonObject.containsKey("functionCall") -> {
@@ -1282,7 +1286,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     // and is echoed only in the wire-level functionResponse.
                     toolCallId = Uuid.random().toString(),
                     toolName = toolName,
-                    input = functionCall["args"]?.let { if (it is JsonNull) "" else it.toString() }
+                    input = (functionCall["args"] ?: functionCall["arguments"] ?: functionCall["input"] ?: functionCall["parameters"])
+                        ?.let { if (it is JsonNull || (it is JsonObject && it.isEmpty())) "" else it.toString() }
                         .orEmpty(),
                     output = emptyList(),
                     metadata = GoogleThoughtMetadata(
@@ -1403,8 +1408,15 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         uploadedFiles: Map<String, UploadedGoogleFile> = emptyMap(),
         mediaResolution: String? = null,
     ): JsonObject? = when (this) {
+        is UIMessagePart.ServerTool -> googleWirePart()
+
         is UIMessagePart.Text -> buildJsonObject {
             put("text", text)
+            metadataAs<GoogleThoughtMetadata>()?.thoughtSignature?.let { put("thoughtSignature", it) }
+        }
+
+        is UIMessagePart.Reasoning -> metadataAs<GoogleThoughtMetadata>()?.thoughtSignature?.let { signature ->
+            buildJsonObject { put("text", reasoning); put("thought", true); put("thoughtSignature", signature) }
         }
 
         is UIMessagePart.Image -> {

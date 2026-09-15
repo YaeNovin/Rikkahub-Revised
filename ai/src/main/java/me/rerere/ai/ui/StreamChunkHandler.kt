@@ -90,13 +90,13 @@ class StreamChunkHandler(private val model: Model? = null) {
                 val index = textPartIndexes[chunk.id]
                 // 容忍 Provider 未发送 Start：首次收到 Delta 时直接创建对应 part。
                 if (index == null || parts.getOrNull(index) !is UIMessagePart.Text) {
-                    copy(parts = parts + UIMessagePart.Text(chunk.text)).also {
+                    copy(parts = parts + UIMessagePart.Text(chunk.text, chunk.metadata)).also {
                         textPartIndexes[chunk.id] = parts.size
                     }
                 } else {
                     copy(parts = parts.toMutableList().apply {
                         val text = get(index) as UIMessagePart.Text
-                        set(index, text.copy(text = text.text + chunk.text))
+                        set(index, text.copy(text = text.text + chunk.text, metadata = mergeMetadata(text.metadata, chunk.metadata)))
                     })
                 }
             }

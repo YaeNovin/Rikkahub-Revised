@@ -411,6 +411,19 @@ class GoogleImageProtocolTest {
     }
 
     @Test
+    fun `merges Gemini function call name and args without provider id`() {
+        val decoder = GoogleStreamDecoder(responseId = "response", model = "gemini-2.5-flash")
+        val first = decoder.accept(SseEvent(data = """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"ask_user","args":{}}}]}}]}"""))
+        val second = decoder.accept(SseEvent(data = """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"ask_user","args":{"questions":[{"question":"Continue?"}]}}}]},"finishReason":"STOP"}]}"""))
+        val handler = StreamChunkHandler(Model(modelId = "gemini-2.5-flash"))
+        var messages = listOf(UIMessage.user("Configure it"))
+        (first.chunks + second.chunks + decoder.onClosed()).forEach { chunk -> messages = handler.handle(messages, chunk) }
+        val tool = messages.last().parts.single() as me.rerere.ai.ui.UIMessagePart.Tool
+        assertEquals("ask_user", tool.toolName)
+        assertTrue(me.rerere.ai.ui.AskUserProtocol.parseRequest(tool.input).isSuccess)
+    }
+
+    @Test
     fun `ignores an empty Gemini function call marker before a named call`() {
         val decoder = GoogleStreamDecoder(
             responseId = "response",

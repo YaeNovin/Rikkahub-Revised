@@ -10,6 +10,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.util.json
 import java.util.Locale
 
@@ -166,12 +168,75 @@ object AskUserProtocol {
         require(input.length <= MAX_ANSWER_LENGTH * 2) {
             "ask_user request is too large"
         }
-        parseRequest(json.parseToJsonElement(input.ifBlank { "{}" }))
+        parseRequest(normalizeRequestElement(json.parseToJsonElement(input.ifBlank { "{}" })))
             .getOrThrow()
     }
 
+    /**
+     * Provider tool adapters normally hand us an object, but compatible Gemini/OpenAI gateways
+     * have been observed to wrap arguments in a JSON string or in an `arguments`/`input` member.
+     * Unwrap those transport-only envelopes before applying the canonical contract. We deliberately
+     * A legacy singular `question` is accepted only as a compatibility envelope and is
+     * normalized to the canonical `questions` array before validation.
+     */
+    private fun normalizeRequestElement(element: JsonElement): JsonElement {
+        var current = element
+        repeat(3) {
+            current = when (current) {
+                is JsonPrimitive -> {
+                    val primitive = current
+                    if (!primitive.isString) return primitive
+                    runCatching { json.parseToJsonElement(primitive.content) }.getOrDefault(primitive)
+                }
+                is JsonObject -> {
+                    val envelope = current["arguments"] ?: current["input"] ?: current["parameters"] ?: current["args"] ?: current["payload"] ?: current["form"]
+                    when {
+                        current["questions"] != null -> {
+                            val questions = current["questions"]
+                            if (questions is JsonPrimitive && questions.isString) {
+                                val parsed = runCatching { json.parseToJsonElement(questions.content) }.getOrNull()
+                                when (parsed) {
+                                    is JsonArray -> JsonObject(mapOf("questions" to parsed))
+                                    is JsonObject -> JsonObject(mapOf("questions" to JsonArray(listOf(parsed))))
+                                    else -> return current
+                                }
+                            } else if (questions is JsonObject) {
+                                JsonObject(mapOf("questions" to JsonArray(listOf(questions))))
+                            } else return current
+                        }
+                        envelope != null -> envelope
+                        current["items"] is JsonArray -> JsonObject(mapOf("questions" to current["items"]!!))
+                        current["fields"] is JsonArray -> JsonObject(mapOf("questions" to current["fields"]!!))
+                        current["question"] is JsonObject -> {
+                            val question = current["question"] as JsonObject
+                            val normalized = if (question["id"] == null) buildJsonObject {
+                                question.forEach { (key, value) -> put(key, value) }
+                                put("id", "question_1")
+                            } else question
+                            JsonObject(mapOf("questions" to JsonArray(listOf(normalized))))
+                        }
+                        current["question"] is JsonPrimitive -> {
+                            val sourceObject = current as JsonObject
+                            val questionText = (sourceObject["question"] as JsonPrimitive).content
+                            val question = buildJsonObject {
+                                sourceObject.forEach { (key, value) -> if (key != "question") put(key, value) }
+                                if (sourceObject["id"] == null) put("id", "question_1")
+                                put("question", questionText)
+                            }
+                            JsonObject(mapOf("questions" to JsonArray(listOf(question))))
+                        }
+                        else -> return current
+                    }
+                }
+                else -> return current
+            }
+        }
+        return current
+    }
+
     fun parseRequest(element: JsonElement): Result<Request> = runCatching {
-        val root = element as? JsonObject
+        val normalized = normalizeRequestElement(element)
+        val root = normalized as? JsonObject
             ?: error("ask_user arguments must be a JSON object")
         require(root.keys.all { it == "questions" }) { "ask_user only accepts questions at the top level" }
         val questionsElement = root["questions"]
@@ -186,11 +251,14 @@ object AskUserProtocol {
         val parsed = questions.mapIndexed { index, element ->
             val rawObject = element as? JsonObject
                 ?: error("ask_user question[$index] must be an object")
-            require(rawObject.keys.all { it in AskUserContract.questionFields }) {
-                "ask_user question[$index] has unknown fields: ${rawObject.keys - AskUserContract.questionFields}. Use selection_type for type and presentation for layout."
+            val normalizedObject = if (rawObject["id"] == null && rawObject["question"] is JsonPrimitive) {
+                JsonObject(rawObject + ("id" to JsonPrimitive("question_${index + 1}")))
+            } else rawObject
+            require(normalizedObject.keys.all { it in AskUserContract.questionFields }) {
+                "ask_user question[$index] has unknown fields: ${normalizedObject.keys - AskUserContract.questionFields}. Use selection_type for type and presentation for layout."
             }
             // Some compatible gateways materialize omitted optional parameters as null.
-            val obj = JsonObject(rawObject.filter { (key, value) -> value !is JsonNull || key in setOf("id", "question") })
+            val obj = JsonObject(normalizedObject.filter { (key, value) -> value !is JsonNull || key in setOf("id", "question") })
             val id = obj.stringField("id", "question[$index].id")
             val question = obj.stringField("question", "question[$index].question")
             require(id.length <= MAX_ID_LENGTH) { "ask_user question[$index].id is too long" }

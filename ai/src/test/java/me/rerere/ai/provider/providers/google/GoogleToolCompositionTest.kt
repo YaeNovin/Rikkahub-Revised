@@ -4,6 +4,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
@@ -32,6 +34,7 @@ class GoogleToolCompositionTest {
         assertEquals(1, tools.size)
         assertTrue("functionDeclarations" in tools.single().jsonObject)
         assertFalse(tools.any { "urlContext" in it.jsonObject })
+        assertFalse("toolConfig" in body)
     }
 
     @Test
@@ -45,6 +48,7 @@ class GoogleToolCompositionTest {
         assertTrue(tools.any { "functionDeclarations" in it })
         assertTrue(tools.any { "googleSearch" in it })
         assertTrue(tools.any { "urlContext" in it })
+        assertEquals(true, body.getValue("toolConfig").jsonObject.getValue("includeServerSideToolInvocations").jsonPrimitive.booleanOrNull)
     }
 
     private fun buildRequest(

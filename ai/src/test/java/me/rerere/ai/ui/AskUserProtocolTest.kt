@@ -1,11 +1,23 @@
 package me.rerere.ai.ui
 
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AskUserProtocolTest {
+    @Test
+    fun `request accepts provider string and arguments envelopes`() {
+        val canonical = "{\"questions\":[{\"id\":\"q\",\"question\":\"Choose\"}]}"
+        assertTrue(AskUserProtocol.parseRequest(JsonPrimitive(canonical)).isSuccess)
+        assertTrue(AskUserProtocol.parseRequest("{\"arguments\":$canonical}").isSuccess)
+        assertTrue(AskUserProtocol.parseRequest("{\"input\":${JsonPrimitive(canonical)}}").isSuccess)
+        assertTrue(AskUserProtocol.parseRequest("{\"question\":\"Choose\"}").isSuccess)
+        assertTrue(AskUserProtocol.parseRequest("{\"question\":{\"question\":\"Choose\"}}").isSuccess)
+        assertTrue(AskUserProtocol.parseRequest("{\"questions\":[{\"question\":\"Choose\"}]}").isSuccess)
+        assertEquals(AskUserProtocol.SelectionType.SINGLE, AskUserProtocol.parseRequest("{\"question\":\"Choose\",\"selection_type\":\"single\",\"options\":[\"a\"]}").getOrThrow().questions.single().selectionType)
+    }
     @Test
     fun `valid request supports optional text and multi select`() {
         val request = AskUserProtocol.parseRequest(

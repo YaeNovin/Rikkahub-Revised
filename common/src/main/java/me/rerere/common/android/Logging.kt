@@ -89,6 +89,7 @@ object Logging {
         encodeDefaults = true
     }
     private var errorLogFile: File? = null
+    private var requestLogStore: RequestLogStore? = null
     private var loggingPreferences: SharedPreferences? = null
 
     @Volatile
@@ -108,6 +109,9 @@ object Logging {
                 File(context.filesDir, ERROR_LOG_DIRECTORY),
                 ERROR_LOG_FILE,
             )
+            requestLogStore = RequestLogStore(File(context.filesDir, "logs/requests")) { error ->
+                android.util.Log.w("Logging", "Request log persistence failed", error)
+            }
             errorLogs.clear()
             val restored = errorLogFile
                 ?.takeIf(File::isFile)
@@ -153,12 +157,14 @@ object Logging {
     fun updateResponseBody(id: Uuid, body: String) {
         synchronized(lock) {
             val index = recentLogs.indexOfFirst { it.id == id }
-            if (index < 0) return
-            recentLogs[index] = when (val entry = recentLogs[index]) {
+            val original = recentLogs.getOrNull(index) ?: requestLogStore?.read()?.firstOrNull { it.id == id } ?: return
+            val updated = when (val entry = original) {
                 is LogEntry.RequestLog -> entry.copy(responseBody = body)
                 is LogEntry.ProviderRequestLog -> entry.copy(responseBody = body)
-                else -> entry
+                else -> return
             }
+            if (index >= 0) recentLogs[index] = updated
+            requestLogStore?.save(updated)
         }
     }
 
@@ -219,13 +225,15 @@ object Logging {
             if (recentLogs.size > MAX_RECENT_LOGS) {
                 recentLogs.removeLastOrNull()
             }
+            if (entry is LogEntry.RequestLog || entry is LogEntry.ProviderRequestLog) requestLogStore?.save(entry)
         }
     }
 
     fun getRecentLogs(): List<LogEntry> {
         synchronized(lock) {
             if (pruneErrorLogsLocked()) persistErrorLogsLocked()
-            return (recentLogs + errorLogs).sortedByDescending(LogEntry::timestamp)
+            return (recentLogs + requestLogStore?.read().orEmpty() + errorLogs)
+                .distinctBy { it.id }.sortedByDescending(LogEntry::timestamp)
         }
     }
 
@@ -237,13 +245,13 @@ object Logging {
 
     fun getRequestLogs(): List<LogEntry.RequestLog> {
         synchronized(lock) {
-            return recentLogs.filterIsInstance<LogEntry.RequestLog>()
+            return getRecentLogs().filterIsInstance<LogEntry.RequestLog>()
         }
     }
 
     fun getProviderRequestLogs(): List<LogEntry.ProviderRequestLog> {
         synchronized(lock) {
-            return recentLogs.filterIsInstance<LogEntry.ProviderRequestLog>()
+            return getRecentLogs().filterIsInstance<LogEntry.ProviderRequestLog>()
         }
     }
 
@@ -251,6 +259,7 @@ object Logging {
         synchronized(lock) {
             recentLogs.clear()
             errorLogs.clear()
+            requestLogStore?.clear()
             persistErrorLogsLocked()
         }
     }
@@ -266,12 +275,8 @@ object Logging {
     private fun persistErrorLogsLocked() {
         val destination = errorLogFile ?: return
         runCatching {
-            destination.parentFile?.mkdirs()
-            val temporaryFile = File(destination.parentFile, ".${destination.name}.tmp")
-            temporaryFile.writeText(persistenceJson.encodeToString(errorLogs.toList()))
-            temporaryFile.copyTo(destination, overwrite = true)
-            temporaryFile.delete()
-        }
+            atomicWrite(destination, persistenceJson.encodeToString(errorLogs.toList()).toByteArray(Charsets.UTF_8))
+        }.onFailure { android.util.Log.w("Logging", "Error log persistence failed", it) }
     }
 
     private fun errorLogCutoff(nowMillis: Long = System.currentTimeMillis()): Long =
