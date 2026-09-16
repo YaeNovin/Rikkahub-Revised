@@ -79,6 +79,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
@@ -242,6 +243,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val chatChromeHazeState = rememberHazeState()
     val navigationHazeState = rememberHazeState()
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     // Handle back press when drawer is open
     BackHandler(enabled = drawerState.isOpen) {
@@ -250,9 +252,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    // Hide keyboard when drawer is open
+    // Clear focus as well as hiding the IME so a focused editor cannot reopen it
+    // while the modal drawer is animating or after a drawer destination is chosen.
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen) {
+            focusManager.clearFocus(force = true)
             softwareKeyboardController?.hide()
         }
     }
@@ -489,10 +493,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     )
                 }
             ) {
-                val drawerOccludesContent = drawerState.currentValue != DrawerValue.Closed ||
-                    drawerState.targetValue != DrawerValue.Closed
-                if (!drawerOccludesContent) {
-                    ChatPageContent(
+                // Keep content measured during the drawer transition; removing it collapses
+                // the drawer anchors and makes the toolbar trigger appear non-functional.
+                ChatPageContent(
                     inputState = inputState,
                     loadingJob = loadingJob,
                     processingStatus = processingStatus,
@@ -516,8 +519,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     branchSourceAvailable = branchSourceAvailable,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
-                    )
-                }
+                )
             }
             BackHandler(drawerState.isOpen) {
                 scope.launch { drawerState.close() }

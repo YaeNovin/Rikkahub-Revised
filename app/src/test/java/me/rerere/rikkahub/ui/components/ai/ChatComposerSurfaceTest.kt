@@ -24,6 +24,17 @@ class ChatComposerSurfaceTest {
         val settings = settings(true).copy(advancedAppearanceSetting = AdvancedAppearanceSetting(enableInputPerformanceEffects = false))
         assertEquals(ChatComposerStyle(.6f, 0f), resolveChatComposerStyle(settings, true, 24f))
     }
+    @Test fun `transient IME performance mode stops optical effects without changing the configured tint`() {
+        val settings = settings(true)
+        assertEquals(
+            ChatComposerStyle(.6f, 0f),
+            resolveChatComposerStyle(settings, blurSupported = true, maxBlur = 24f, opticalEffectsAllowed = false),
+        )
+        assertEquals(
+            ChatComposerStyle(.6f, 20f),
+            resolveChatComposerStyle(settings, blurSupported = true, maxBlur = 24f),
+        )
+    }
     @Test fun `legacy dock only configuration moves to common input settings`() {
         val result = migrateComposerDisplay(DisplaySetting(enableBlurEffect = false), AdvancedAppearanceSetting(enableChatDockGlass = true, chatDockGlassOpacity = .5f, chatDockGlassBlurRadius = 12f))
         assertTrue(result.enableBlurEffect)

@@ -38,7 +38,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -158,14 +157,7 @@ fun ChatInput(
     var showSendTargetMenu by remember(imageModel?.id) { mutableStateOf(false) }
 
     val imeVisible = WindowInsets.isImeVisible
-    val containerShape = if (imeVisible) {
-        MaterialTheme.shapes.largeIncreased.copy(
-            bottomStart = CornerSize(0.dp),
-            bottomEnd = CornerSize(0.dp),
-        )
-    } else {
-        MaterialTheme.shapes.largeIncreased
-    }
+    val containerShape = MaterialTheme.shapes.largeIncreased
 
     fun sendMessage() {
         focusManager.clearFocus(force = true)
@@ -229,9 +221,15 @@ fun ChatInput(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp)
-                .padding(bottom = if (imeVisible) 0.dp else 8.dp),
+                .padding(bottom = 8.dp),
         ) {
-            ChatComposerSurface(settings = settings, hazeState = hazeState, shape = containerShape, modifier = Modifier.fillMaxWidth()) {
+            ChatComposerSurface(
+                settings = settings,
+                hazeState = hazeState,
+                shape = containerShape,
+                suppressOpticalEffects = imeVisible,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),

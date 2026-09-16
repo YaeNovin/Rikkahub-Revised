@@ -25,9 +25,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 
 internal data class ChatComposerStyle(val opacity: Float, val blurRadius: Float)
 
-internal fun resolveChatComposerStyle(settings: Settings, blurSupported: Boolean, maxBlur: Float): ChatComposerStyle {
+internal fun resolveChatComposerStyle(
+    settings: Settings,
+    blurSupported: Boolean,
+    maxBlur: Float,
+    opticalEffectsAllowed: Boolean = true,
+): ChatComposerStyle {
     val display = settings.displaySetting
-    val effects = settings.advancedAppearanceSetting.enableInputPerformanceEffects
+    val effects = settings.advancedAppearanceSetting.enableInputPerformanceEffects && opticalEffectsAllowed
     // Tint is a cheap static layer, not a performance effect. Turning off blur
     // must not silently make a deliberately transparent composer opaque.
     val opacity = display.inputSurfaceOpacity.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
@@ -39,10 +44,22 @@ internal fun resolveChatComposerStyle(settings: Settings, blurSupported: Boolean
 /** The tint and optical layer share the real chat scene behind this surface,
  * including messages. Input text and buttons never enter the sampled scene. */
 @Composable
-internal fun ChatComposerSurface(settings: Settings, hazeState: HazeState, shape: Shape, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+internal fun ChatComposerSurface(
+    settings: Settings,
+    hazeState: HazeState,
+    shape: Shape,
+    modifier: Modifier = Modifier,
+    suppressOpticalEffects: Boolean = false,
+    content: @Composable BoxScope.() -> Unit,
+) {
     val capabilities = LocalAdvancedAppearanceCapabilities.current
-    val style = resolveChatComposerStyle(settings, capabilities.supportsRealtimeBlur, capabilities.maxLiveBlurRadius)
-    val glass = settings.chatComposerMaterial() == ChatComposerMaterial.LIQUID_GLASS &&
+    val style = resolveChatComposerStyle(
+        settings,
+        capabilities.supportsRealtimeBlur,
+        capabilities.maxLiveBlurRadius,
+        opticalEffectsAllowed = !suppressOpticalEffects,
+    )
+    val glass = !suppressOpticalEffects && settings.chatComposerMaterial() == ChatComposerMaterial.LIQUID_GLASS &&
         settings.advancedAppearanceSetting.enableInputPerformanceEffects && capabilities.supportsRealtimeBlur
     val baseColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 1f)
     val tint = baseColor.copy(alpha = style.opacity)

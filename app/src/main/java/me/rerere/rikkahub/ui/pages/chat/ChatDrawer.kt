@@ -426,7 +426,7 @@ fun ChatDrawerContent(
 
                 DrawerAction(
                     icon = {
-                        Icon(HugeIcons.Settings03, null)
+                        Icon(HugeIcons.Settings03, stringResource(R.string.settings))
                     },
                     label = { Text(stringResource(R.string.settings)) },
                     onClick = {
