@@ -20,6 +20,7 @@
 
 ## 版本与归属
 
+- [上游组件迁移台账与实机回归边界](upstream-component-migration.md)
 - [2.4.8-revised.9 发行说明](release-notes-2.4.8-revised.9.md)
 - [2.4.8-revised.9 验证结果与限制](release-verification-2.4.8-revised.9.md)
 - [2026-09-15 源码更新及验证记录](changes-2026-09-15.md)
