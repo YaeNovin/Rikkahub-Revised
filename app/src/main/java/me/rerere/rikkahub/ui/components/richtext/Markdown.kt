@@ -49,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -131,6 +132,7 @@ internal val RichTextParsingDispatcher = Dispatchers.Default.limitedParallelism(
 
 val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
+internal val LocalPreserveSoftLineBreaks = staticCompositionLocalOf { false }
 
 // 预处理markdown内容
 private fun preProcess(content: String): String = normalizeMarkdownLatex(protectRawSvg(content))
@@ -419,9 +421,16 @@ fun MarkdownBlock(
     content: String,
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
-    onClickCitation: (String) -> Unit = {}
+    onClickCitation: (String) -> Unit = {},
+    preserveSoftLineBreaks: Boolean = false,
 ) {
-    MarkdownBlockBody(content, modifier, style, onClickCitation)
+    if (preserveSoftLineBreaks) {
+        CompositionLocalProvider(LocalPreserveSoftLineBreaks provides true) {
+            MarkdownBlockBody(content, modifier, style, onClickCitation)
+        }
+    } else {
+        MarkdownBlockBody(content, modifier, style, onClickCitation)
+    }
 }
 
 @Composable

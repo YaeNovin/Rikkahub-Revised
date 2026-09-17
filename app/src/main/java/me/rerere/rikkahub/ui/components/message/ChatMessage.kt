@@ -577,7 +577,8 @@ private fun MessagePartsBlock(
                                                 scope = AssistantAffectScope.USER,
                                                 visual = true,
                                             ),
-                                            onClickCitation = handleClickCitation
+                                            onClickCitation = handleClickCitation,
+                                            preserveSoftLineBreaks = true,
                                         )
                                     }
                                 }

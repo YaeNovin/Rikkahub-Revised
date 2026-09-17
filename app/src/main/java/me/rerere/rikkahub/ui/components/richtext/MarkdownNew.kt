@@ -112,6 +112,9 @@ private fun cachedMarkdownDocument(content: String): Document? =
 internal fun isMarkdownDocumentCached(content: String): Boolean =
     cachedMarkdownDocument(content) != null
 
+internal fun textNodeContent(node: TextNode, preserveSoftLineBreaks: Boolean): String =
+    if (preserveSoftLineBreaks) node.wholeText else node.text()
+
 internal fun preloadMarkdownDocument(content: String): Document {
     cachedMarkdownDocument(content)?.let { return it }
     val document = buildMarkdownDocument(content)
@@ -239,7 +242,7 @@ private fun HtmlBodyNode(node: Node, onClickCitation: (String) -> Unit) {
     when (node) {
         is Element -> HtmlBlockElement(element = node, onClickCitation = onClickCitation)
         is TextNode -> {
-            val text = node.text().trim()
+            val text = textNodeContent(node, LocalPreserveSoftLineBreaks.current).trim()
             if (text.isNotEmpty()) Text(text = text)
         }
     }
@@ -423,6 +426,7 @@ private fun HtmlParagraphContent(
     val hasInlineMath = element.select("span.math").any { it.attr("inline") == "true" }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
+    val preserveSoftLineBreaks = LocalPreserveSoftLineBreaks.current
 
     val (annotatedString, inlineContents) = remember(
         element.outerHtml(),
@@ -431,6 +435,7 @@ private fun HtmlParagraphContent(
         density,
         textStyle,
         onClickCitation,
+        preserveSoftLineBreaks,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -443,6 +448,7 @@ private fun HtmlParagraphContent(
                     style = textStyle,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
+                    preserveSoftLineBreaks = preserveSoftLineBreaks,
                 )
             }
         }
@@ -841,6 +847,7 @@ internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Uni
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
+    val preserveSoftLineBreaks = LocalPreserveSoftLineBreaks.current
 
     val key = remember(nodes) { nodes.joinToString("") { if (it is Element) it.outerHtml() else it.toString() } }
     val (annotatedString, inlineContents) = remember(
@@ -850,6 +857,7 @@ internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Uni
         density,
         textStyle,
         onClickCitation,
+        preserveSoftLineBreaks,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
@@ -862,6 +870,7 @@ internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Uni
                     style = textStyle,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
+                    preserveSoftLineBreaks = preserveSoftLineBreaks,
                 )
             }
         }
@@ -891,7 +900,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
     }
     when (node) {
         is TextNode -> {
-            val text = node.text()
+            val text = textNodeContent(node, LocalPreserveSoftLineBreaks.current)
             if (text.isNotEmpty()) Text(text = text)
         }
 
@@ -912,6 +921,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                     val textStyle = LocalTextStyle.current
                     val density = LocalDensity.current
                     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+                    val preserveSoftLineBreaks = LocalPreserveSoftLineBreaks.current
                     val (annotated, inlineContents) = remember(
                         node.outerHtml(),
                         enableLatexRendering,
@@ -919,6 +929,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         density,
                         textStyle,
                         onClickCitation,
+                        preserveSoftLineBreaks,
                     ) {
                         val contents = mutableMapOf<String, InlineTextContent>()
                         val text = buildAnnotatedString {
@@ -930,6 +941,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                                 style = textStyle,
                                 enableLatexRendering = enableLatexRendering,
                                 onClickCitation = onClickCitation,
+                                preserveSoftLineBreaks = preserveSoftLineBreaks,
                             )
                         }
                         text to contents
@@ -951,9 +963,10 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     style: TextStyle,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
+    preserveSoftLineBreaks: Boolean,
 ) {
     when (node) {
-        is TextNode -> append(node.text())
+        is TextNode -> append(textNodeContent(node, preserveSoftLineBreaks))
         is Element -> appendHtmlInlineElement(
             element = node,
             colorScheme = colorScheme,
@@ -962,6 +975,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             style = style,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
+            preserveSoftLineBreaks = preserveSoftLineBreaks,
         )
     }
 }
@@ -974,6 +988,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     style: TextStyle,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
+    preserveSoftLineBreaks: Boolean,
 ) {
     val cssStyle = element.attr("style").takeIf { it.isNotBlank() }?.let {
         parseInlineSpanStyle(
@@ -992,6 +1007,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             style = inheritedStyle,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
+            preserveSoftLineBreaks = preserveSoftLineBreaks,
         )
     }
 
