@@ -133,9 +133,7 @@ internal val RichTextParsingDispatcher = Dispatchers.Default.limitedParallelism(
 val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
 internal val LocalPreserveSoftLineBreaks = staticCompositionLocalOf { false }
-
-// 预处理markdown内容
-private fun preProcess(content: String): String = normalizeMarkdownLatex(protectRawSvg(content))
+internal val LocalMarkdownRenderMode = staticCompositionLocalOf { MarkdownRenderMode.STANDARD }
 
 @Preview(showBackground = true)
 @Composable
@@ -193,6 +191,11 @@ private data class MarkdownParseResult(
     val hasHtml: Boolean,
 )
 
+private data class MarkdownParseCacheKey(
+    val content: String,
+    val renderMode: MarkdownRenderMode,
+)
+
 private const val MARKDOWN_PARSE_CACHE_ENTRIES = 48
 private const val MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS = 256 * 1024
 private const val TABLE_CELL_PRELOAD_LIMIT = 32
@@ -200,13 +203,13 @@ private const val TABLE_CELL_PRELOAD_CHAR_BUDGET = 24 * 1024
 internal const val STREAMING_MARKDOWN_PARSE_INTERVAL_MS = 160L
 internal const val GRAPHICAL_STREAMING_MARKDOWN_PARSE_INTERVAL_MS = 320L
 private val markdownParserLock = Any()
-private val markdownParseCache = object : LinkedHashMap<String, MarkdownParseResult>(
+private val markdownParseCache = object : LinkedHashMap<MarkdownParseCacheKey, MarkdownParseResult>(
     MARKDOWN_PARSE_CACHE_ENTRIES,
     0.75f,
     true,
 ) {
     override fun removeEldestEntry(
-        eldest: MutableMap.MutableEntry<String, MarkdownParseResult>?,
+        eldest: MutableMap.MutableEntry<MarkdownParseCacheKey, MarkdownParseResult>?,
     ): Boolean = size > MARKDOWN_PARSE_CACHE_ENTRIES
 }
 
@@ -231,8 +234,12 @@ internal fun streamingMarkdownParseIntervalMs(content: String): Long =
         STREAMING_MARKDOWN_PARSE_INTERVAL_MS
     }
 
-private fun cachedMarkdownParse(content: String): MarkdownParseResult? =
-    synchronized(markdownParseCache) { markdownParseCache[content] }
+private fun cachedMarkdownParse(
+    content: String,
+    renderMode: MarkdownRenderMode,
+): MarkdownParseResult? = synchronized(markdownParseCache) {
+    markdownParseCache[MarkdownParseCacheKey(content, renderMode)]
+}
 
 private fun ASTNode.containsHtml(): Boolean {
     if (type == MarkdownElementTypes.HTML_BLOCK || type == MarkdownTokenTypes.HTML_TAG || type == MarkdownElementTypes.IMAGE) return true
@@ -263,7 +270,7 @@ private fun preloadTableCellMarkdown(result: MarkdownParseResult) {
         usedChars += cell.length
         try {
             val cellResult = parseMarkdown(cell, preloadTableCells = false)
-            if (cellResult.hasHtml) preloadMarkdownDocument(cell)
+            if (cellResult.hasHtml) preloadMarkdownDocument(cell, MarkdownRenderMode.STANDARD)
         } catch (exception: Exception) {
             exception.printStackTrace()
         }
@@ -272,14 +279,16 @@ private fun preloadTableCellMarkdown(result: MarkdownParseResult) {
 
 private fun parseMarkdown(
     content: String,
+    renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD,
     preloadTableCells: Boolean = true,
 ): MarkdownParseResult {
+    val cacheKey = MarkdownParseCacheKey(content, renderMode)
     if (content.length <= MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS) {
         synchronized(markdownParseCache) {
-            markdownParseCache[content]?.let { return it }
+            markdownParseCache[cacheKey]?.let { return it }
         }
     }
-    val preprocessed = preProcess(content)
+    val preprocessed = preprocessMarkdownContent(content, renderMode)
     val astTree = synchronized(markdownParserLock) {
         parser.buildMarkdownTreeFromString(preprocessed)
     }
@@ -288,7 +297,7 @@ private fun parseMarkdown(
     if (content.length <= MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS) {
         synchronized(markdownParseCache) {
             // Insert the parent last so a table's cells cannot immediately evict it.
-            markdownParseCache[content] = result
+            markdownParseCache[cacheKey] = result
         }
     }
     return result
@@ -309,7 +318,7 @@ internal suspend fun preloadMarkdownContents(
         remainingChars -= content.length
         try {
             val result = parseMarkdown(content)
-            if (result.hasHtml) preloadMarkdownDocument(content)
+            if (result.hasHtml) preloadMarkdownDocument(content, MarkdownRenderMode.STANDARD)
         } catch (exception: Exception) {
             exception.printStackTrace()
         }
@@ -317,8 +326,8 @@ internal suspend fun preloadMarkdownContents(
 }
 
 internal fun isMarkdownContentPreloaded(content: String): Boolean {
-    val parsed = cachedMarkdownParse(content) ?: return false
-    return !parsed.hasHtml || isMarkdownDocumentCached(content)
+    val parsed = cachedMarkdownParse(content, MarkdownRenderMode.STANDARD) ?: return false
+    return !parsed.hasHtml || isMarkdownDocumentCached(content, MarkdownRenderMode.STANDARD)
 }
 
 internal data class MarkdownDiffPart(
@@ -422,14 +431,17 @@ fun MarkdownBlock(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
-    preserveSoftLineBreaks: Boolean = false,
+    renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD,
 ) {
-    if (preserveSoftLineBreaks) {
-        CompositionLocalProvider(LocalPreserveSoftLineBreaks provides true) {
-            MarkdownBlockBody(content, modifier, style, onClickCitation)
+    if (renderMode == MarkdownRenderMode.USER_MESSAGE) {
+        CompositionLocalProvider(
+            LocalPreserveSoftLineBreaks provides true,
+            LocalMarkdownRenderMode provides renderMode,
+        ) {
+            MarkdownBlockBody(content, modifier, style, onClickCitation, renderMode)
         }
     } else {
-        MarkdownBlockBody(content, modifier, style, onClickCitation)
+        MarkdownBlockBody(content, modifier, style, onClickCitation, renderMode)
     }
 }
 
@@ -439,6 +451,7 @@ private fun MarkdownBlockBody(
     modifier: Modifier,
     style: TextStyle,
     onClickCitation: (String) -> Unit,
+    renderMode: MarkdownRenderMode,
 ) {
     val diffParts = remember(content) { splitMarkdownAroundDiff(content) }
     if (diffParts.isNotEmpty()) {
@@ -456,6 +469,7 @@ private fun MarkdownBlockBody(
                             modifier = Modifier.fillMaxWidth(),
                             style = style,
                             onClickCitation = onClickCitation,
+                            renderMode = renderMode,
                         )
                     }
                 }
@@ -463,7 +477,7 @@ private fun MarkdownBlockBody(
         }
         return
     }
-    var data by remember { mutableStateOf(cachedMarkdownParse(content)) }
+    var data by remember(renderMode) { mutableStateOf(cachedMarkdownParse(content, renderMode)) }
     val updatedContent by rememberUpdatedState(content)
     var parseFailed by remember { mutableStateOf(false) }
     var parseRetry by remember { mutableIntStateOf(0) }
@@ -471,7 +485,7 @@ private fun MarkdownBlockBody(
     // Conflate continuous token updates and parse them sequentially. The previous successful tree
     // stays composed while a new one is prepared, so completed WebViews are never replaced by a
     // loading placeholder merely because trailing text arrived.
-    LaunchedEffect(parseRetry) {
+    LaunchedEffect(parseRetry, renderMode) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
             .conflate()
@@ -481,9 +495,9 @@ private fun MarkdownBlockBody(
                 val targetContent = updatedContent
                 if (data?.source == targetContent) return@collect
                 try {
-                    data = cachedMarkdownParse(targetContent) ?: withContext(RichTextParsingDispatcher) {
-                        parseMarkdown(targetContent).also { parsed ->
-                            if (parsed.hasHtml) preloadMarkdownDocument(targetContent)
+                    data = cachedMarkdownParse(targetContent, renderMode) ?: withContext(RichTextParsingDispatcher) {
+                        parseMarkdown(targetContent, renderMode).also { parsed ->
+                            if (parsed.hasHtml) preloadMarkdownDocument(targetContent, renderMode)
                         }
                     }
                 } catch (cancellation: CancellationException) {
@@ -518,6 +532,7 @@ private fun MarkdownBlockBody(
             modifier = modifier,
             style = style,
             onClickCitation = onClickCitation,
+            renderMode = renderMode,
         )
     } else {
         ProvideTextStyle(style) {

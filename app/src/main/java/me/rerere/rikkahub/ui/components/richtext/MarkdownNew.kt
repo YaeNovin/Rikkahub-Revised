@@ -30,6 +30,7 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -84,10 +86,6 @@ import org.jsoup.nodes.Node
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.TextNode
 
-// ---- Preprocessing (mirrors Markdown.kt logic) ----
-
-private fun preProcess(content: String): String = normalizeMarkdownLatex(protectRawSvg(content))
-
 // ---- HTML generation ----
 
 private val flavour by lazy {
@@ -97,35 +95,64 @@ private val flavour by lazy {
 private val parser by lazy { MarkdownParser(flavour) }
 private val htmlParserLock = Any()
 private const val MARKDOWN_HTML_CACHE_ENTRIES = 24
-private val markdownHtmlCache = object : LinkedHashMap<String, Document>(
+private data class MarkdownHtmlCacheKey(
+    val content: String,
+    val renderMode: MarkdownRenderMode,
+)
+
+private val markdownHtmlCache = object : LinkedHashMap<MarkdownHtmlCacheKey, Document>(
     MARKDOWN_HTML_CACHE_ENTRIES,
     0.75f,
     true,
 ) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Document>?): Boolean =
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MarkdownHtmlCacheKey, Document>?): Boolean =
         size > MARKDOWN_HTML_CACHE_ENTRIES
 }
 
-private fun cachedMarkdownDocument(content: String): Document? =
-    synchronized(markdownHtmlCache) { markdownHtmlCache[content] }
+private fun cachedMarkdownDocument(
+    content: String,
+    renderMode: MarkdownRenderMode,
+): Document? = synchronized(markdownHtmlCache) {
+    markdownHtmlCache[MarkdownHtmlCacheKey(content, renderMode)]
+}
 
-internal fun isMarkdownDocumentCached(content: String): Boolean =
-    cachedMarkdownDocument(content) != null
+internal fun isMarkdownDocumentCached(
+    content: String,
+    renderMode: MarkdownRenderMode,
+): Boolean = cachedMarkdownDocument(content, renderMode) != null
 
-internal fun textNodeContent(node: TextNode, preserveSoftLineBreaks: Boolean): String =
-    if (preserveSoftLineBreaks) node.wholeText else node.text()
+internal fun textNodeContent(
+    node: TextNode,
+    preserveSoftLineBreaks: Boolean,
+    dropLeadingBreak: Boolean = false,
+): String {
+    val text = if (preserveSoftLineBreaks) node.wholeText else node.text()
+    if (!preserveSoftLineBreaks || !dropLeadingBreak) return text
+    return when {
+        text.startsWith("\r\n") -> text.drop(2)
+        text.startsWith('\n') || text.startsWith('\r') -> text.drop(1)
+        else -> text
+    }
+}
 
-internal fun preloadMarkdownDocument(content: String): Document {
-    cachedMarkdownDocument(content)?.let { return it }
-    val document = buildMarkdownDocument(content)
+internal fun preloadMarkdownDocument(
+    content: String,
+    renderMode: MarkdownRenderMode,
+): Document {
+    val cacheKey = MarkdownHtmlCacheKey(content, renderMode)
+    cachedMarkdownDocument(content, renderMode)?.let { return it }
+    val document = buildMarkdownDocument(content, renderMode)
     synchronized(markdownHtmlCache) {
-        markdownHtmlCache[content] = document
+        markdownHtmlCache[cacheKey] = document
     }
     return document
 }
 
-internal fun buildMarkdownDocument(content: String): Document = synchronized(htmlParserLock) {
-    val preprocessed = preProcess(content)
+internal fun buildMarkdownDocument(
+    content: String,
+    renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD,
+): Document = synchronized(htmlParserLock) {
+    val preprocessed = preprocessMarkdownContent(content, renderMode)
     val tree = parser.buildMarkdownTreeFromString(preprocessed)
     // The library writes <pre> as raw HTML but passes <code> through its tag
     // renderer. Mark that source node, then pass completion to the block wrapper.
@@ -157,22 +184,27 @@ fun MarkdownNew(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
+    renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD,
 ) {
-    var document by remember { mutableStateOf(cachedMarkdownDocument(content)) }
-    var parseFailed by remember(content) { mutableStateOf(false) }
-    var parseRetry by remember(content) { mutableStateOf(0) }
+    var document by remember(content, renderMode) {
+        mutableStateOf(cachedMarkdownDocument(content, renderMode))
+    }
+    var parseFailed by remember(content, renderMode) { mutableStateOf(false) }
+    var parseRetry by remember(content, renderMode) { mutableStateOf(0) }
     val repositoryCards = LocalGitHubCardsEnabled.current && !LocalRichTextStreaming.current
 
-    LaunchedEffect(content, parseRetry, repositoryCards) {
+    LaunchedEffect(content, renderMode, parseRetry, repositoryCards) {
         parseFailed = false
-        cachedMarkdownDocument(content)?.takeUnless { repositoryCards }?.let {
+        cachedMarkdownDocument(content, renderMode)?.takeUnless { repositoryCards }?.let {
             document = it
             return@LaunchedEffect
         }
         delay(STREAMING_MARKDOWN_PARSE_INTERVAL_MS)
         try {
             document = withContext(RichTextParsingDispatcher) {
-                preloadMarkdownDocument(content).let { if (repositoryCards) withGitHubRepositoryCards(it) else it }
+                preloadMarkdownDocument(content, renderMode).let {
+                    if (repositoryCards) withGitHubRepositoryCards(it) else it
+                }
             }
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -182,29 +214,34 @@ fun MarkdownNew(
         }
     }
 
-    ProvideTextStyle(style) {
-        val parsedDocument = document
-        ReportRichTextLayoutLoading(parsedDocument == null && !parseFailed)
-        me.rerere.rikkahub.ui.components.ui.AwaitExportRender(parsedDocument == null && !parseFailed)
-        if (parseFailed) {
-            Column(modifier) {
-                Text("HTML 内容解析失败，可重试或查看原始消息。")
-                androidx.compose.material3.TextButton(onClick = { parseRetry++ }) { Text("重试") }
-            }
-        } else if (parsedDocument == null) {
-            Box(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .height(markdownLoadingPlaceholderHeightDp(content).dp)
-                    .padding(start = 4.dp)
-                    .padding(vertical = 4.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
-            )
-        } else {
-            Column(modifier = modifier.padding(start = 4.dp)) {
-                parsedDocument.body().childNodes().fastForEach { node ->
-                    HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+    CompositionLocalProvider(
+        LocalPreserveSoftLineBreaks provides (renderMode == MarkdownRenderMode.USER_MESSAGE),
+        LocalMarkdownRenderMode provides renderMode,
+    ) {
+        ProvideTextStyle(style) {
+            val parsedDocument = document
+            ReportRichTextLayoutLoading(parsedDocument == null && !parseFailed)
+            me.rerere.rikkahub.ui.components.ui.AwaitExportRender(parsedDocument == null && !parseFailed)
+            if (parseFailed) {
+                Column(modifier) {
+                    Text("HTML 内容解析失败，可重试或查看原始消息。")
+                    androidx.compose.material3.TextButton(onClick = { parseRetry++ }) { Text("重试") }
+                }
+            } else if (parsedDocument == null) {
+                Box(
+                    modifier = modifier
+                        .fillMaxWidth()
+                        .height(markdownLoadingPlaceholderHeightDp(content).dp)
+                        .padding(start = 4.dp)
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
+                )
+            } else {
+                Column(modifier = modifier.padding(start = 4.dp)) {
+                    parsedDocument.body().childNodes().fastForEach { node ->
+                        HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+                    }
                 }
             }
         }
@@ -346,8 +383,17 @@ private fun HtmlBlockElement(
         "progress" -> HtmlProgress(element = element)
 
         "div" -> HtmlStyledElement(element = element) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                element.childNodes().fastForEach { HtmlBodyNode(it, onClickCitation) }
+            if (LocalMarkdownRenderMode.current == MarkdownRenderMode.USER_MESSAGE) {
+                MarkdownBlock(
+                    content = element.html(),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClickCitation = onClickCitation,
+                    renderMode = MarkdownRenderMode.USER_MESSAGE,
+                )
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    element.childNodes().fastForEach { HtmlBodyNode(it, onClickCitation) }
+                }
             }
         }
 
@@ -439,18 +485,16 @@ private fun HtmlParagraphContent(
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
-            element.childNodes().forEach { child ->
-                appendHtmlInlineNode(
-                    node = child,
-                    colorScheme = colorScheme,
-                    inlineContents = contents,
-                    density = density,
-                    style = textStyle,
-                    enableLatexRendering = enableLatexRendering,
-                    onClickCitation = onClickCitation,
-                    preserveSoftLineBreaks = preserveSoftLineBreaks,
-                )
-            }
+            appendHtmlInlineNodes(
+                nodes = element.childNodes(),
+                colorScheme = colorScheme,
+                inlineContents = contents,
+                density = density,
+                style = textStyle,
+                enableLatexRendering = enableLatexRendering,
+                onClickCitation = onClickCitation,
+                preserveSoftLineBreaks = preserveSoftLineBreaks,
+            )
         }
         text to contents
     }
@@ -497,7 +541,7 @@ private fun HtmlList(
             val bulletBase = when (level % 3) {
                 0 -> "•"; 1 -> "◦"; else -> "▪"
             }
-            var orderedIndex = 1
+            var orderedIndex = orderedListStart(element)
             element.children().fastForEach { item ->
                 if (item.tagName().lowercase() == "li") {
                     val bullet = if (ordered) "${orderedIndex++}. " else "$bulletBase "
@@ -512,6 +556,9 @@ private fun HtmlList(
         }
     }
 }
+
+internal fun orderedListStart(element: Element): Int =
+    element.attr("start").toIntOrNull()?.coerceAtLeast(1) ?: 1
 
 @Composable
 private fun HtmlListItem(
@@ -692,8 +739,9 @@ private fun HtmlMathBlock(formula: String) {
 @Composable
 private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
     val headerElements = element.select("thead tr th")
+    val firstBodyCells = element.select("tbody tr:first-child td")
     val columnCount = headerElements.size.takeIf { it > 0 }
-        ?: element.select("tbody tr:first-child td").size
+        ?: firstBodyCells.size
     if (columnCount == 0) return
 
     val headers = List(columnCount) { col ->
@@ -727,6 +775,9 @@ private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
     }
 
     val richContent = richContentColors()
+    val columnAlignments = List(columnCount) { column ->
+        htmlTableCellAlignment(headerElements.getOrNull(column) ?: firstBodyCells.getOrNull(column))
+    }
     DataTable(
         headers = headers,
         rows = rows,
@@ -740,7 +791,23 @@ private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
         shape = MaterialTheme.shapes.medium,
         columnMinWidths = List(columnCount) { 80.dp },
         columnMaxWidths = List(columnCount) { 200.dp },
+        columnAlignments = columnAlignments,
     )
+}
+
+private fun htmlTableCellAlignment(element: Element?): Alignment {
+    val attribute = element?.attr("align").orEmpty().trim().lowercase()
+    val css = element?.attr("style").orEmpty()
+    val cssAlignment = Regex("(?:^|;)\\s*text-align\\s*:\\s*([a-z-]+)", RegexOption.IGNORE_CASE)
+        .find(css)
+        ?.groupValues
+        ?.get(1)
+        ?.lowercase()
+    return when (cssAlignment ?: attribute) {
+        "center" -> Alignment.Center
+        "right", "end" -> Alignment.CenterEnd
+        else -> Alignment.CenterStart
+    }
 }
 
 @Composable
@@ -861,18 +928,16 @@ internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Uni
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
-            nodes.fastForEach { node ->
-                appendHtmlInlineNode(
-                    node = node,
-                    colorScheme = colorScheme,
-                    inlineContents = contents,
-                    density = density,
-                    style = textStyle,
-                    enableLatexRendering = enableLatexRendering,
-                    onClickCitation = onClickCitation,
-                    preserveSoftLineBreaks = preserveSoftLineBreaks,
-                )
-            }
+            appendHtmlInlineNodes(
+                nodes = nodes,
+                colorScheme = colorScheme,
+                inlineContents = contents,
+                density = density,
+                style = textStyle,
+                enableLatexRendering = enableLatexRendering,
+                onClickCitation = onClickCitation,
+                preserveSoftLineBreaks = preserveSoftLineBreaks,
+            )
         }
         text to contents
     }
@@ -912,7 +977,9 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                 }
 
                 tag == "br" -> {
-                    // handled by inline text
+                    // This branch is used for mixed image/math FlowRows, where the surrounding
+                    // inline builder is unavailable to synthesize the break.
+                    Text(text = "\n")
                 }
 
                 else -> {
@@ -964,9 +1031,10 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
     preserveSoftLineBreaks: Boolean,
+    dropLeadingBreak: Boolean = false,
 ) {
     when (node) {
-        is TextNode -> append(textNodeContent(node, preserveSoftLineBreaks))
+        is TextNode -> append(textNodeContent(node, preserveSoftLineBreaks, dropLeadingBreak))
         is Element -> appendHtmlInlineElement(
             element = node,
             colorScheme = colorScheme,
@@ -977,6 +1045,33 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             onClickCitation = onClickCitation,
             preserveSoftLineBreaks = preserveSoftLineBreaks,
         )
+    }
+}
+
+private fun AnnotatedString.Builder.appendHtmlInlineNodes(
+    nodes: List<Node>,
+    colorScheme: androidx.compose.material3.ColorScheme,
+    inlineContents: MutableMap<String, InlineTextContent>,
+    density: Density,
+    style: TextStyle,
+    enableLatexRendering: Boolean,
+    onClickCitation: (String) -> Unit,
+    preserveSoftLineBreaks: Boolean,
+) {
+    var previousWasBreak = false
+    nodes.fastForEach { node ->
+        appendHtmlInlineNode(
+            node = node,
+            colorScheme = colorScheme,
+            inlineContents = inlineContents,
+            density = density,
+            style = style,
+            enableLatexRendering = enableLatexRendering,
+            onClickCitation = onClickCitation,
+            preserveSoftLineBreaks = preserveSoftLineBreaks,
+            dropLeadingBreak = previousWasBreak,
+        )
+        previousWasBreak = node is Element && node.tagName().equals("br", ignoreCase = true)
     }
 }
 
@@ -998,9 +1093,9 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
         )
     }
 
-    fun recurseChildren(el: Element, inheritedStyle: TextStyle = style) = el.childNodes().fastForEach {
-        appendHtmlInlineNode(
-            node = it,
+    fun recurseChildren(el: Element, inheritedStyle: TextStyle = style) {
+        appendHtmlInlineNodes(
+            nodes = el.childNodes(),
             colorScheme = colorScheme,
             inlineContents = inlineContents,
             density = density,
@@ -1033,6 +1128,21 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
 
         "u" -> appendElementChildren(SpanStyle(textDecoration = TextDecoration.Underline))
 
+        "sup" -> appendElementChildren(
+            SpanStyle(fontSize = 0.75.em, baselineShift = BaselineShift.Superscript),
+        )
+
+        "sub" -> appendElementChildren(
+            SpanStyle(fontSize = 0.75.em, baselineShift = BaselineShift.Subscript),
+        )
+
+        "mark" -> appendElementChildren(
+            SpanStyle(
+                color = colorScheme.onTertiaryContainer,
+                background = colorScheme.tertiaryContainer,
+            ),
+        )
+
         "code" -> withStyle(
             SpanStyle(
                 fontFamily = JetbrainsMono,
@@ -1043,7 +1153,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             ).merge(cssStyle ?: SpanStyle())
         ) {
             append(' ')
-            append(element.text())
+            append(element.wholeText())
             append(' ')
         }
 
@@ -1122,7 +1232,9 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
         }
 
         "span" -> {
-            if (element.hasClass("math") && element.attr("inline") == "true") {
+            if (element.hasClass("user-del")) {
+                appendElementChildren(SpanStyle(textDecoration = TextDecoration.LineThrough))
+            } else if (element.hasClass("math") && element.attr("inline") == "true") {
                 val formula = element.text()
                 if (enableLatexRendering) {
                     val size = with(density) {
