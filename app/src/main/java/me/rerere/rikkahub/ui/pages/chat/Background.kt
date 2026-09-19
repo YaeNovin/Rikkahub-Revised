@@ -7,7 +7,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import me.rerere.rikkahub.data.datastore.Settings
@@ -24,9 +26,20 @@ fun AssistantBackground(
     interactionInProgress: Boolean = false,
 ) {
     val background = setting.resolveChatBackground()
+    val fallbackBackground = if (background.isActive) {
+        Modifier
+    } else {
+        Modifier.background(MaterialTheme.colorScheme.background)
+    }
     AnimatedContent(
         targetState = background,
-        modifier = modifier.fillMaxSize().glassBackdropSource(LocalGlassBackdrop.current),
+        // The fallback belongs inside the Haze source supplied by ChatPage. If the
+        // page Surface paints it instead, a composer without wallpaper samples a
+        // transparent scene and only its tint opacity remains visible.
+        modifier = modifier
+            .fillMaxSize()
+            .then(fallbackBackground)
+            .glassBackdropSource(LocalGlassBackdrop.current),
         transitionSpec = {
             if (initialState.transitionIdentity() == targetState.transitionIdentity()) {
                 EnterTransition.None togetherWith ExitTransition.None

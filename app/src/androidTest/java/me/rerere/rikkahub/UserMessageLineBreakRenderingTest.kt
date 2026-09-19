@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.richtext.MarkdownRenderMode
 import me.rerere.rikkahub.ui.context.LocalSettings
 import org.junit.Rule
 import org.junit.Test
@@ -23,7 +24,7 @@ class UserMessageLineBreakRenderingTest {
                 CompositionLocalProvider(LocalSettings provides Settings()) {
                     MarkdownBlock(
                         content = "first line\nsecond line\n\n<div>fragment</div>",
-                        preserveSoftLineBreaks = true,
+                        renderMode = MarkdownRenderMode.USER_MESSAGE,
                     )
                 }
             }

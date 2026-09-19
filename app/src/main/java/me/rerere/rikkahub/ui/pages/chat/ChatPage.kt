@@ -38,7 +38,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
-import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -264,6 +263,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val windowAdaptiveInfo = currentWindowDpSize()
     val isBigScreen =
         windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
+    val requestOpenDrawer: () -> Unit = {
+        // Keep this job in the page scope so transient toolbar replacement cannot
+        // cancel it. The existing isOpen effect owns the IME/focus handoff.
+        scope.launch { drawerState.openWhenReady() }
+    }
 
     // 进入大屏（永久抽屉）模式时重置抽屉状态为关闭，
     // 避免从横屏旋转回竖屏后，模态抽屉残留为打开状态且无法关闭（#1304）
@@ -347,6 +351,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val resolvedChatBackground = setting.resolveChatBackground()
+    val drawerCoversChat = drawerOccludesChat(
+        current = drawerState.currentValue,
+        target = drawerState.targetValue,
+    )
+    val chatSceneBusy = chatListState.isScrollInProgress || loadingJob != null || drawerCoversChat
     val glassBackdrop = me.rerere.rikkahub.ui.components.ui.rememberGlassBackdrop()
     val chatReadability = rememberBackgroundReadability(
         background = resolvedChatBackground.background,
@@ -378,7 +387,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         gradientPerformanceEffectsEnabled = setting.advancedAppearanceSetting
             .enableGradientPerformanceEffects,
         gradientRendererMode = setting.advancedAppearanceSetting.gradientRendererMode,
-        gradientInteractionInProgress = chatListState.isScrollInProgress || loadingJob != null,
+        gradientInteractionInProgress = chatSceneBusy,
         respectSystemReducedMotion = setting.advancedAppearanceSetting
             .respectSystemReducedMotion,
         foreground = appearanceForeground,
@@ -393,7 +402,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         LocalGlobalBackgroundActive provides setting.hasActiveChatBackground(),
         me.rerere.rikkahub.ui.components.ui.LocalGlassBackdrop provides glassBackdrop,
         me.rerere.rikkahub.ui.components.ui.LocalGlobalBackgroundHazeState provides navigationHazeState,
-        me.rerere.rikkahub.ui.components.ui.LocalGlassBusy provides (me.rerere.rikkahub.ui.components.ui.LocalGlassBusy.current || glassBackdrop.interacting || chatListState.isScrollInProgress || loadingJob != null),
+        me.rerere.rikkahub.ui.components.ui.LocalGlassBusy provides (me.rerere.rikkahub.ui.components.ui.LocalGlassBusy.current || glassBackdrop.interacting || chatSceneBusy),
         LocalAppearanceBackground provides assistantBackgroundSpec,
         me.rerere.rikkahub.ui.components.message.LocalAskUserDraftWriter provides { toolId, input, answers, displayed ->
             vm.saveAskUserDraft(conversation.id, toolId, input, answers, displayed)
@@ -417,7 +426,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             // A stable, full-page source includes both the sidebar and chat column.
             AssistantBackground(
                 setting = setting,
-                interactionInProgress = chatListState.isScrollInProgress || loadingJob != null,
+                interactionInProgress = chatSceneBusy,
                 modifier = Modifier.fillMaxSize().hazeSource(chatChromeHazeState).hazeSource(navigationHazeState),
             )
             when {
@@ -445,7 +454,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     promptInjectionDiagnostics = promptInjectionDiagnostics,
                     setting = setting,
                     conversation = conversation,
-                    drawerState = drawerState,
+                    onOpenDrawer = requestOpenDrawer,
                     navController = navController,
                     vm = vm,
                     chatListState = chatListState,
@@ -503,7 +512,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     promptInjectionDiagnostics = promptInjectionDiagnostics,
                     setting = setting,
                     conversation = conversation,
-                    drawerState = drawerState,
+                    onOpenDrawer = requestOpenDrawer,
                     navController = navController,
                     vm = vm,
                     chatListState = chatListState,
@@ -542,7 +551,7 @@ private fun ChatPageContent(
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
-    drawerState: DrawerState,
+    onOpenDrawer: () -> Unit,
     navController: Navigator,
     vm: ChatVM,
     chatListState: LazyListState,
@@ -764,7 +773,7 @@ private fun ChatPageContent(
                         titleEditable = conversationLoadState == ConversationLoadState.Ready,
                         hazeState = chatChromeHazeState,
                         bigScreen = bigScreen,
-                        drawerState = drawerState,
+                        onOpenDrawer = onOpenDrawer,
                         previewMode = previewMode,
                         onNewChat = {
                             navigateToChatPage(navController)
@@ -2062,14 +2071,13 @@ private fun TopBar(
     conversation: Conversation,
     titleEditable: Boolean,
     hazeState: HazeState,
-    drawerState: DrawerState,
     bigScreen: Boolean,
     previewMode: Boolean,
+    onOpenDrawer: () -> Unit,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
     onUpdateTitle: (String) -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val titleState = key(conversation.id) {
         useEditState<String> {
@@ -2128,9 +2136,7 @@ private fun TopBar(
         navigationIcon = {
             if (!bigScreen) {
                 IconButton(
-                    onClick = {
-                        scope.launch { drawerState.open() }
-                    }
+                    onClick = onOpenDrawer,
                 ) {
                     Icon(HugeIcons.Menu03, "Messages")
                 }
