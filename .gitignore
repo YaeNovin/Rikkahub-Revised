@@ -23,6 +23,7 @@ local.properties
 
 # Local QA/build caches and IDE metadata must never enter a release commit.
 /gradle-home-test/
+/.pnpm-web-recovery/
 /common/gradle/
 /common/.idea/
 
@@ -37,3 +38,36 @@ build/
 /.agents/skills/claude-api/
 /.agents/skills/gemini-api-dev/
 /.agents/skills/gemini-interactions-api/
+
+# Python QA tools generate bytecode only as a local cache.
+__pycache__/
+*.pyc
+
+# Installed dependencies and machine configuration are recreated locally.
+node_modules/
+/.gradle-user/
+.idea/
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.key
+/app/google-services.json
+
+# Device evidence, memory dumps and local databases can contain user content.
+*.log
+*.hprof
+*.pftrace
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+hs_err_pid*
+
+# One-time machine migration tools retain local disk layouts and cleanup targets.
+/scripts/build_resource_store.py
+/scripts/maintain_build_resources.py
+/scripts/relocate_android_sdk.py
+/scripts/test_build_resource_maintenance.py
+/scripts/test_android_sdk_paths.py

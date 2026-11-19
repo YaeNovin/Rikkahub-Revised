@@ -1,2 +1,28 @@
 # Baseline Profile 生成文件：标记为文本，统一使用 LF 换行，避免 CRLF 抖动
 app/src/release/generated/baselineProfiles/*.txt text eol=lf
+
+# Public documentation and portable Python tools use stable repository line endings.
+/docs/**/*.md text eol=lf
+/README*.md text eol=lf
+/scripts/*.py text eol=lf
+
+# Application-owned source is identical on Windows and Unix checkouts.
+*.kt text eol=lf
+*.kts text eol=lf
+*.xml text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+/scripts/*.cjs text eol=lf
+/scripts/*.js text eol=lf
+/web-ui/*.json text eol=lf
+/web-ui/app/**/*.json text eol=lf
+/gradlew text eol=lf
+*.bat text eol=crlf
+
+# Vendor distributions, licenses and binary inputs preserve upstream bytes.
+/app/src/main/assets/html/renderers/** -text
+/app/src/main/assets/html/licenses/** -text
+/third_party/** -text

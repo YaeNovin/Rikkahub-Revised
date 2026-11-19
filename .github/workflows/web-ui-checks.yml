@@ -1,0 +1,33 @@
+name: WebUI checks
+on:
+  pull_request:
+    paths: ['web-ui/**', 'web/**', 'app/src/main/java/me/rerere/rikkahub/web/**', '.github/workflows/web-ui-checks.yml']
+  push:
+    branches: [main]
+    paths: ['web-ui/**', 'web/**', 'app/src/main/java/me/rerere/rikkahub/web/**', '.github/workflows/web-ui-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web-ui
+      - run: pnpm run typecheck && pnpm run lint:check && pnpm run test
+        working-directory: web-ui
+      - run: pnpm run build
+        working-directory: web-ui
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web-ui
+      - run: pnpm run test:browser
+        working-directory: web-ui
