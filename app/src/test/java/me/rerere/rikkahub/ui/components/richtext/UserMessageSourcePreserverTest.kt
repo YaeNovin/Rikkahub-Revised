@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Assert.assertNotSame
 
 class UserMessageSourcePreserverTest {
     @Test
@@ -148,7 +149,10 @@ class UserMessageSourcePreserverTest {
         val user = preloadMarkdownDocument(source, MarkdownRenderMode.USER_MESSAGE)
 
         assertNotEquals(standard.body().wholeText(), user.body().wholeText())
-        assertFalse(standard.body().wholeText().contains("<iostream>"))
+        assertNotSame(standard, user)
+        // The current standard renderer also protects raw tag-shaped source.
+        // Mode isolation must not require discarding text from assistant output.
+        assertTrue(standard.body().wholeText().contains("<iostream>"))
         assertTrue(user.body().wholeText().contains("#include <iostream>"))
         assertTrue(isMarkdownDocumentCached(source, MarkdownRenderMode.STANDARD))
         assertTrue(isMarkdownDocumentCached(source, MarkdownRenderMode.USER_MESSAGE))
