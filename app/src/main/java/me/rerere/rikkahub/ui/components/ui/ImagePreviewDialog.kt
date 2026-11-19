@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.runtime.remember
@@ -48,6 +50,7 @@ fun ImagePreviewDialog(
     onDismissRequest: () -> Unit,
 ) {
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val filesManager: FilesManager = koinInject()
     val state = rememberZoomablePagerState { images.size }
     val toaster = LocalToaster.current
@@ -96,12 +99,12 @@ fun ImagePreviewDialog(
                     onClick = {
                         lifecycleOwner.lifecycleScope.launch {
                             runCatching {
-                                toaster.show(context.getString(R.string.image_preview_saving))
+                                toaster.show(appResources.getString(R.string.image_preview_saving))
                                 val imgUrl = images[state.currentPage]
                                 if (badgePreview) me.rerere.rikkahub.ui.components.richtext.saveBadgeImage(context, imgUrl)
                                 else filesManager.saveMessageImage(context, imgUrl)
                                 toaster.show(
-                                    message = context.getString(R.string.imggen_page_image_saved_success),
+                                    message = appResources.getString(R.string.imggen_page_image_saved_success),
                                     type = ToastType.Success,
                                 )
                             }.onFailure {

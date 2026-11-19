@@ -10,6 +10,16 @@ import kotlin.uuid.Uuid
 
 class BackgroundChatModelResolverTest {
     @Test
+    fun `decision scoring model is never selected for background text generation`() {
+        val decision = Model(modelId = "decision-model-preview")
+        val generator = Model(modelId = "generator")
+        val settings = Settings(providers = listOf(ProviderSetting.OpenAI(models = listOf(decision, generator))),
+            fastModelId = decision.id, chatModelId = generator.id)
+        assertEquals(generator.id, settings.resolveBackgroundChatModel(decision.id)?.id)
+        assertNull(settings.copy(providers = listOf(ProviderSetting.OpenAI(models = listOf(decision))))
+            .resolveBackgroundChatModel(decision.id))
+    }
+    @Test
     fun `preferred enabled chat model is selected`() {
         val preferred = Model(modelId = "preferred")
         val fast = Model(modelId = "fast")

@@ -419,7 +419,7 @@ private suspend fun <T> timed(block: suspend () -> T): TimedValue<T> {
 
 private fun ProviderSetting.protocolId(): String = when (this) {
     is ProviderSetting.OpenAI -> "openai"
-    is ProviderSetting.Google -> "google"
+    is ProviderSetting.Google -> if (useInteractionsApi && !vertexAI) "google_interactions" else "google"
     is ProviderSetting.Claude -> "claude"
 }
 

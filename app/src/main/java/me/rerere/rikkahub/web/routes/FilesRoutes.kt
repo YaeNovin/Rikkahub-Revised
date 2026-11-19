@@ -211,7 +211,7 @@ fun Route.assetsRoutes(context: Context) {
     }
 }
 
-private suspend fun readPartBytes(part: PartData.FileItem, maxBytes: Int): ByteArray {
+internal suspend fun readPartBytes(part: PartData.FileItem, maxBytes: Int): ByteArray {
     val input = part.provider()
     val output = ByteArrayOutputStream()
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)

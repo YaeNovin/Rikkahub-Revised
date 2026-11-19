@@ -51,9 +51,12 @@ class SkillManager(
         return parseSkillFile(skillDir.resolve("SKILL.md"), skillDir)
     }
 
-    suspend fun deleteSkill(name: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun deleteSkill(name: String, expectedContent: String? = null): Boolean = withContext(Dispatchers.IO) {
         val skillDir = resolveSkillDir(name) ?: return@withContext false
-        val deleted = skillDir.deleteRecursively()
+        val deleted = synchronized(this@SkillManager) {
+            if (expectedContent != null && readSkillContent(name) != expectedContent) false
+            else skillDir.deleteRecursively()
+        }
         if (deleted) {
             settingsStore.update { settings ->
                 settings.copy(

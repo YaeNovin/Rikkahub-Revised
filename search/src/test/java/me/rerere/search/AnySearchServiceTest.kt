@@ -146,4 +146,18 @@ class AnySearchServiceTest {
         assertTrue(encoded.contains("\"type\":\"anysearch\""))
         assertEquals(options, decoded)
     }
+
+    @Test
+    fun deepSeekSearchOptionsAreRegisteredAndSerializable() {
+        val options = SearchServiceOptions.DeepSeekOptions(apiKey = "key", needContent = true)
+
+        assertSame(DeepSeekSearchService, SearchService.getService(options))
+        assertEquals("DeepSeek", options.displayName)
+
+        val encoded = Json.encodeToString(SearchServiceOptions.serializer(), options)
+        val decoded = Json.decodeFromString(SearchServiceOptions.serializer(), encoded)
+
+        assertTrue(encoded.contains("\"type\":\"deepseek\""))
+        assertEquals(options, decoded)
+    }
 }

@@ -1,9 +1,6 @@
 package me.rerere.rikkahub.web
 
 import android.content.Context
-import com.auth0.jwt.JWT
-import com.auth0.jwt.JWTVerifier
-import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.http.auth.HttpAuthHeader
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -36,15 +33,11 @@ import me.rerere.rikkahub.web.routes.eventsRoutes
 import me.rerere.rikkahub.web.routes.filesRoutes
 import me.rerere.rikkahub.web.routes.folderRoutes
 import me.rerere.rikkahub.web.routes.settingsRoutes
+import me.rerere.rikkahub.web.routes.configurationRoutes
+import me.rerere.rikkahub.web.routes.imageRoutes
 import java.security.MessageDigest
-import java.util.Date
 import java.util.UUID
 
-private const val WEB_JWT_ISSUER = "rikkahub-web"
-private const val WEB_JWT_AUDIENCE = "rikkahub-web-client"
-private const val WEB_JWT_SUBJECT = "web-access"
-private const val WEB_JWT_TTL_MILLIS = 30L * 24 * 60 * 60 * 1000
-private const val WEB_ACCESS_TOKEN_QUERY_KEY = "access_token"
 private const val WEB_AUTH_REALM = "rikkahub-web-api"
 
 /**
@@ -66,7 +59,8 @@ fun Application.configureWebApi(
     settingsStore: SettingsStore,
     filesManager: FilesManager
 ) {
-    val jwtEnabled = settingsStore.settingsFlow.value.webServerJwtEnabled
+    val sessions = WebAuthSessions()
+    val webSettings = org.koin.core.context.GlobalContext.get().get<WebSettings>().store
 
     install(ContentNegotiation) {
         json(JsonInstant)
@@ -87,36 +81,40 @@ fun Application.configureWebApi(
         }
     }
 
-    if (jwtEnabled) {
+    run {
         install(Authentication) {
             jwt("auth-jwt") {
+                skipWhen { !settingsStore.settingsFlow.value.webServerJwtEnabled }
                 realm = WEB_AUTH_REALM
                 verifier { _ ->
-                    // Dynamically read the current password on each request so that
-                    // tokens signed after a password change are validated correctly.
-                    val currentPassword = settingsStore.settingsFlow.value.webServerAccessPassword
-                    val secret = currentPassword.ifBlank {
+                    // The signing secret is random and independent from the user password.
+                    val secret = settingsStore.settingsFlow.value.webServerJwtSecret.ifBlank {
                         // Keep protected routes closed when jwt is enabled but password is missing.
-                        "__missing_password_${UUID.randomUUID()}__"
+                        "__missing_secret_${UUID.randomUUID()}__"
                     }
-                    buildWebJwtVerifier(secret)
+                    sessions.verifier(secret)
                 }
                 authHeader { call ->
                     extractAccessToken(
                         authorizationHeader = call.request.headers[HttpHeaders.Authorization],
-                        queryToken = call.request.queryParameters[WEB_ACCESS_TOKEN_QUERY_KEY]
+                        cookieToken = call.request.cookies[WEB_ACCESS_TOKEN_COOKIE]
                     )?.let { token ->
                         HttpAuthHeader.Single("Bearer", token)
                     }
                 }
                 validate { credential ->
                     val currentPassword = settingsStore.settingsFlow.value.webServerAccessPassword
-                    if (currentPassword.isBlank()) {
+                    if (currentPassword.isBlank() || !sessions.isActive(credential.payload)) {
                         null
                     } else {
-                        credential.payload.subject?.takeIf { it == WEB_JWT_SUBJECT }?.let {
-                            io.ktor.server.auth.jwt.JWTPrincipal(credential.payload)
+                        val token = extractAccessToken(
+                            request.headers[HttpHeaders.Authorization], request.cookies[WEB_ACCESS_TOKEN_COOKIE]
+                        )
+                        attributes.put(WebSessionValidity) {
+                            val current = settingsStore.settingsFlow.value
+                            !current.webServerJwtEnabled || (current.webServerAccessPassword.isNotBlank() && sessions.accepts(token, current.webServerJwtSecret))
                         }
+                        io.ktor.server.auth.jwt.JWTPrincipal(credential.payload)
                     }
                 }
                 challenge { _, _ ->
@@ -155,7 +153,15 @@ fun Application.configureWebApi(
                     throw UnauthorizedException("Invalid password")
                 }
 
-                val (token, expiresAt) = createWebJwt(accessPassword)
+                val secret = settingsStore.ensureWebServerJwtSecret()
+                val (token, expiresAt) = sessions.issue(secret)
+                // Media elements cannot attach Authorization headers. Keep the token in a
+                // restricted, HttpOnly same-site cookie instead of putting it in a URL.
+                call.response.headers.append(
+                    HttpHeaders.SetCookie,
+                    webSessionCookie(token, secure = call.request.local.scheme == "https")
+                )
+                call.response.headers.append(HttpHeaders.CacheControl, "no-store")
                 call.respond(
                     HttpStatusCode.OK,
                     WebAuthTokenResponse(
@@ -165,48 +171,30 @@ fun Application.configureWebApi(
                 )
             }
 
+            // Idempotent even for expired tokens, so stale cookies can always be removed.
+            post("/auth/logout") {
+                val secret = settingsStore.settingsFlow.value.webServerJwtSecret
+                sessions.revoke(extractBearerToken(call.request.headers[HttpHeaders.Authorization]), secret)
+                sessions.revoke(call.request.cookies[WEB_ACCESS_TOKEN_COOKIE], secret)
+                call.response.headers.append(HttpHeaders.SetCookie, webSessionCookie(secure = call.request.local.scheme == "https"))
+                call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+                call.respond(HttpStatusCode.OK, mapOf("status" to "logged_out"))
+            }
+
             aiIconRoutes(context)
 
-            if (jwtEnabled) {
-                authenticate("auth-jwt") {
-                    conversationRoutes(chatService, conversationRepo, folderRepo, settingsStore)
-                    folderRoutes(chatService, folderRepo, settingsStore)
-                    eventsRoutes(chatService, conversationRepo, folderRepo, settingsStore)
-                    settingsRoutes(settingsStore)
-                    filesRoutes(filesManager, context)
-                    assetsRoutes(context)
-                }
-            } else {
-                conversationRoutes(chatService, conversationRepo, folderRepo, settingsStore)
-                folderRoutes(chatService, folderRepo, settingsStore)
-                eventsRoutes(chatService, conversationRepo, folderRepo, settingsStore)
-                settingsRoutes(settingsStore)
+            authenticate("auth-jwt") {
+                conversationRoutes(chatService, conversationRepo, folderRepo, webSettings, settingsStore)
+                folderRoutes(chatService, folderRepo, webSettings)
+                eventsRoutes(chatService, conversationRepo, folderRepo, webSettings, settingsStore)
+                settingsRoutes(webSettings, settingsStore)
+                configurationRoutes(webSettings, context, settingsStore)
+                imageRoutes(settingsStore, filesManager)
                 filesRoutes(filesManager, context)
                 assetsRoutes(context)
             }
         }
     }
-}
-
-private fun createWebJwt(secret: String): Pair<String, Long> {
-    val now = System.currentTimeMillis()
-    val expiresAt = now + WEB_JWT_TTL_MILLIS
-    val token = JWT.create()
-        .withIssuer(WEB_JWT_ISSUER)
-        .withAudience(WEB_JWT_AUDIENCE)
-        .withSubject(WEB_JWT_SUBJECT)
-        .withIssuedAt(Date(now))
-        .withExpiresAt(Date(expiresAt))
-        .sign(Algorithm.HMAC256(secret))
-    return token to expiresAt
-}
-
-private fun buildWebJwtVerifier(secret: String): JWTVerifier {
-    return JWT.require(Algorithm.HMAC256(secret))
-        .withIssuer(WEB_JWT_ISSUER)
-        .withAudience(WEB_JWT_AUDIENCE)
-        .withSubject(WEB_JWT_SUBJECT)
-        .build()
 }
 
 private fun extractBearerToken(authorizationHeader: String?): String? {
@@ -216,9 +204,9 @@ private fun extractBearerToken(authorizationHeader: String?): String? {
     return authorizationHeader.substring(prefix.length).trim().takeIf { it.isNotEmpty() }
 }
 
-private fun extractAccessToken(authorizationHeader: String?, queryToken: String?): String? {
+private fun extractAccessToken(authorizationHeader: String?, cookieToken: String?): String? {
     return extractBearerToken(authorizationHeader)
-        ?: queryToken?.trim()?.takeIf { it.isNotEmpty() }
+        ?: cookieToken?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 private fun secureEquals(left: String, right: String): Boolean {

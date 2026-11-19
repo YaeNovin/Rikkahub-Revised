@@ -10,6 +10,33 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LoggingTest {
+    @Test fun `model metrics retain body and HTTP status and survive later close`() {
+        Logging.clear()
+        try {
+            val entry = LogEntry.ProviderRequestLog(provider = "test", model = "model", channel = "CHAT", operation = "STREAM_TEXT",
+                parameters = mapOf("request_id" to "request-1"), responseCode = 200, durationMs = 20, durationPhase = "headers")
+            Logging.logProviderRequest(entry)
+            Logging.updateResponseBody(entry.id, "answer")
+            Logging.completeModelRequest("request-1", 12345678, 987654321)
+            Logging.updateRequestTiming(entry.id, 5, "closed")
+            val actual = Logging.getProviderRequestLogs().single()
+            assertEquals(12.345678, actual.firstTokenMs!!, 0.000001)
+            assertEquals(987L, actual.durationMs)
+            assertEquals("model_complete", actual.durationPhase)
+            assertEquals(200, actual.responseCode)
+            assertEquals("answer", actual.responseBody)
+        } finally { Logging.clear() }
+    }
+
+    @Test fun `older request without precision or timing fields remains readable`() {
+        val entry = LogEntry.ProviderRequestLog(provider = "test", model = "model", channel = "CHAT", operation = "STREAM_TEXT")
+        val encoded = Json.parseToJsonElement(json.encodeToString(entry)).jsonObject
+        val legacy = JsonObject(encoded.filterKeys { it !in setOf("preciseTimestamp", "firstTokenMs", "durationPhase", "endpointOrigin") })
+        val decoded = json.decodeFromString<LogEntry.ProviderRequestLog>(legacy.toString())
+        assertNull(decoded.firstTokenMs)
+        assertNull(decoded.preciseTimestamp)
+        assertEquals("model", decoded.model)
+    }
     private val json = Json { encodeDefaults = true }
 
     @Test

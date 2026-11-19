@@ -13,10 +13,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import me.rerere.rikkahub.ui.theme.contrastingTextColor
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,16 +73,18 @@ fun DiffView(
     }
     val lines = remember(allLines, maxLines) { allLines.take(maxLines) }
     val truncated = allLines.size - lines.size
+    // Inherit the code block/message surface; a second solid panel would hide its background.
+    val surface = rememberReadableTextSurface(Color.Transparent, MaterialTheme.colorScheme.onSurface)
 
+    CompositionLocalProvider(LocalTextSurfaceBackgrounds provides surface.backgrounds) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .horizontalScroll(rememberScrollState()),
+            .then(if (me.rerere.rikkahub.ui.components.ui.LocalExportContext.current) Modifier else Modifier.horizontalScroll(rememberScrollState())),
     ) {
         Column(
             modifier = Modifier
-                .width(IntrinsicSize.Max)
+                .then(if (me.rerere.rikkahub.ui.components.ui.LocalExportContext.current) Modifier.fillMaxWidth() else Modifier.width(IntrinsicSize.Max))
                 .padding(vertical = 4.dp),
         ) {
             lines.fastForEach { line ->
@@ -88,7 +93,7 @@ fun DiffView(
             if (truncated > 0) {
                 Text(
                     text = "... +$truncated lines",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    color = surface.foreground,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     lineHeight = 16.sp,
@@ -96,6 +101,7 @@ fun DiffView(
                 )
             }
         }
+    }
     }
 }
 
@@ -117,13 +123,17 @@ private fun DiffLine(line: String) {
         else ->
             MaterialTheme.colorScheme.onSurface to Color.Transparent
     }
+    val underlying = LocalTextSurfaceBackgrounds.current ?: listOf(MaterialTheme.colorScheme.surface.copy(alpha = 1f))
+    val readableColor = remember(textColor, background, underlying) {
+        contrastingTextColor(textColor, underlying.map { background.compositeOver(it) })
+    }
     Text(
         text = line.ifEmpty { " " },
-        color = textColor,
+        color = readableColor,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         lineHeight = 16.sp,
-        softWrap = false,
+        softWrap = me.rerere.rikkahub.ui.components.ui.LocalExportContext.current,
         modifier = Modifier
             .fillMaxWidth()
             .background(background)

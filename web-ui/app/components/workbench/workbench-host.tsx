@@ -8,6 +8,7 @@ import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
 import { getCodePreviewLanguage } from "./code-preview-language";
+import { PreviewFrame } from "./preview-frame";
 import type { WorkbenchPanel } from "./workbench-context";
 
 interface WorkbenchHostProps {
@@ -160,11 +161,9 @@ function CodePreviewPanel({ panel }: { panel: WorkbenchPanel }) {
               <Markdown content={code} allowCodePreview={false} />
             </div>
           ) : (
-            <iframe
+            <PreviewFrame
               title={panel.title}
-              sandbox="allow-scripts allow-same-origin"
-              srcDoc={iframeDoc}
-              className="h-full w-full border-0"
+              document={iframeDoc}
             />
           )
         ) : (

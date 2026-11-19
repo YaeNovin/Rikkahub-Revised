@@ -3,7 +3,10 @@ package me.rerere.ai.provider.providers.openai
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.normalizeCompactVendorModelId
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.isDecisionModel
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class OpenAIModelParameterSupport(
@@ -31,8 +34,7 @@ fun resolveOpenAIModelParameterSupport(modelId: String): OpenAIModelParameterSup
         supportsReasoningOptions = isTextModel && !retired && (isGpt5 || isGpt6),
         supportsReasoningContext = isTextModel && !retired && supportsPersistentReasoning,
         supportsReasoningMode = isTextModel && !retired && supportsPersistentReasoning,
-        supportsUltrafast = normalized == "gpt-5.6-sol" ||
-            normalized.startsWith("gpt-5.6-sol-"),
+        supportsUltrafast = ULTRAFAST_MODELS.any { normalized == it || normalized.startsWith("$it-") },
         requiresResponsesForToolCalling = isTextModel && !retired && isGpt6,
     )
 }
@@ -42,8 +44,38 @@ fun ProviderSetting.OpenAI.requestChannel(): ProviderRequestChannel {
     return when (host) {
         OPENAI_API_HOST -> ProviderRequestChannel.OPENAI_API
         XAI_API_HOST -> ProviderRequestChannel.XAI_API
-        else -> ProviderRequestChannel.COMPATIBLE_ENDPOINT
+        else -> if (isOfficialOpenAIHost(host)) ProviderRequestChannel.OPENAI_API else ProviderRequestChannel.COMPATIBLE_ENDPOINT
     }
+}
+
+// Official GPT-6 tool calling uses Responses; compatible services retain their chosen protocol.
+fun isOfficialOpenAIHost(host: String?): Boolean = host == OPENAI_API_HOST || host?.endsWith(".api.openai.com") == true
+
+internal fun isUltrafastOpenAIHost(host: String?): Boolean = host in setOf(OPENAI_API_HOST, "us.api.openai.com")
+
+fun supportsOpenAIUltrafastEndpoint(baseUrl: String): Boolean = isUltrafastOpenAIHost(baseUrl.toHttpUrlOrNull()?.host)
+
+internal fun ProviderSetting.OpenAI.shouldUseResponsesApi(params: TextGenerationParams): Boolean {
+    require(!params.model.isDecisionModel()) {
+        "decision-model-preview 不生成聊天文本，请在聊天建议设置中选择为决策评估模型"
+    }
+    return useResponseApi || (requestChannel() == ProviderRequestChannel.OPENAI_API &&
+        resolveOpenAIModelParameterSupport(params.model.parameterModelId()).requiresResponsesForToolCalling)
+}
+
+internal fun allowsOpenAISampling(params: TextGenerationParams): Boolean {
+    val modelId = params.model.parameterModelId()
+    if (!isOpenAIGpt5Model(modelId)) return true
+    return GPT_6_SERIES.containsMatchIn(modelId.normalizedOpenAIModelId()) &&
+        params.reasoningLevel == ReasoningLevel.OFF &&
+        ReasoningLevel.OFF in resolveOpenAIReasoningLevels(modelId)
+}
+
+internal fun supportsOpenAIChatTools(params: TextGenerationParams): Boolean {
+    val modelId = params.model.parameterModelId()
+    return !resolveOpenAIModelParameterSupport(modelId).requiresResponsesForToolCalling ||
+        (GPT_6_CHAT_TOOLS_WITHOUT_REASONING.containsMatchIn(modelId.normalizedOpenAIModelId()) &&
+            params.reasoningLevel == ReasoningLevel.OFF)
 }
 
 internal fun String.normalizedOpenAIModelId(): String =
@@ -67,14 +99,19 @@ internal fun resolveOpenAIMaximumReasoningEffort(modelId: String): ReasoningLeve
 internal fun resolveOpenAIReasoningLevels(modelId: String): List<ReasoningLevel> {
     val normalized = modelId.normalizedOpenAIModelId().replace('_', '-')
     return when {
-        GPT_6_SERIES.containsMatchIn(normalized) -> listOf(
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.XHIGH,
-            ReasoningLevel.MAX,
-        )
+        GPT_6_SERIES.containsMatchIn(normalized) -> buildList {
+            if (GPT_6_OPTIONAL_REASONING.containsMatchIn(normalized)) add(ReasoningLevel.OFF)
+            addAll(
+                listOf(
+                    ReasoningLevel.AUTO,
+                    ReasoningLevel.LOW,
+                    ReasoningLevel.MEDIUM,
+                    ReasoningLevel.HIGH,
+                    ReasoningLevel.XHIGH,
+                    ReasoningLevel.MAX,
+                )
+            )
+        }
 
         GPT_5_6_SERIES.containsMatchIn(normalized) -> listOf(
             ReasoningLevel.OFF,
@@ -150,6 +187,9 @@ private val GPT_5_SERIES = Regex("^gpt-5(?:[.-]|$)")
 private val GPT_5_1_SERIES = Regex("^gpt-5[.-]1(?:[.-]|$)")
 private val GPT_5_6_SERIES = Regex("^gpt-5[.-]6(?:[.-]|$)")
 private val GPT_6_SERIES = Regex("^gpt-6(?:[.-]|$)")
+private val GPT_6_OPTIONAL_REASONING = Regex("^gpt-6(?:[.-](?:sol|luna)|[.-]1[.-]terra)(?:[.-]|$)")
+private val GPT_6_CHAT_TOOLS_WITHOUT_REASONING = Regex("^gpt-6[.-](?:sol|luna)(?:[.-]|$)")
+private val ULTRAFAST_MODELS = setOf("gpt-5.6-sol", "gpt-6-astra", "gpt-6.1-sol", "gpt-6-1-sol", "gpt-6.2-astra", "gpt-6-2-astra", "gpt-6.2-sol", "gpt-6-2-sol")
 private val GPT_5_2_OR_LATER = Regex("^gpt-5[.-](?:[2-9]|\\d{2,})(?:[.-]|$)")
 private val OPENAI_REASONING_MODEL = Regex("^o(?:1|3|4)(?:[-.]|$)")
 

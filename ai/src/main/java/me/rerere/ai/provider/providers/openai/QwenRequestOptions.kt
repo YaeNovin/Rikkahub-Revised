@@ -22,6 +22,7 @@ internal fun JsonObjectBuilder.applyQwenChatOptions(
     val support = resolveQwenModelParameterSupport(params.model.parameterModelId())
     if (!support.available) return
     val options = params.qwenOptions
+    options.enableSearch.apiValue?.let { put("enable_search", it) }
 
     if (hasFunctionTools) {
         options.parallelToolCalls.apiValue?.let { put("parallel_tool_calls", it) }
@@ -33,6 +34,9 @@ internal fun JsonObjectBuilder.applyQwenChatOptions(
     options.topK?.takeIf { it in 0..100 }?.let { put("top_k", it) }
     options.repetitionPenalty?.takeIf { it > 0f }?.let { put("repetition_penalty", it) }
     options.presencePenalty?.takeIf { it in -2f..2f }?.let { put("presence_penalty", it) }
+    if (isQwen4Max(params.model.parameterModelId())) {
+        options.frequencyPenalty?.takeIf { it in -2f..2f }?.let { put("frequency_penalty", it) }
+    }
     options.seed?.takeIf { it in 0..Int.MAX_VALUE.toLong() }?.let { put("seed", it) }
     options.stopSequences.normalizedQwenStopSequences().takeIf(List<String>::isNotEmpty)?.let {
         put("stop", buildJsonArray { it.forEach(::add) })

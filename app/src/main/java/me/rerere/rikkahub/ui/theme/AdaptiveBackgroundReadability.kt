@@ -5,6 +5,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import kotlinx.coroutines.CancellationException
 import me.rerere.rikkahub.data.datastore.TextColorMode
 import me.rerere.rikkahub.data.model.GradientBackgroundCustomColors
@@ -31,18 +32,22 @@ internal fun backgroundSamplesWithOverlay(samples: List<Color>, base: Color, top
         base.copy(alpha = (topAlpha + (bottomAlpha - topAlpha) * progress).coerceIn(0f, 1f)).compositeOver(color)
     }
 
-internal data class BackgroundSampleKey(val source: String?, val opacity: Float, val base: Color)
+internal data class BackgroundSampleKey(val source: String?, val opacity: Float, val base: Color, val aspectRatio: Float? = null)
 
 /** Mode changes retry failed extraction, but successful samples are reused without network IO.
  * A source change creates a fresh holder immediately, never a frame using the prior wallpaper.
  */
 @Composable
-internal fun rememberReadabilitySamples(key: BackgroundSampleKey, retryKey: Any, extract: suspend () -> List<Color>?): List<Color>? {
-    val samples = remember(key) { mutableStateOf<List<Color>?>(null) }
+internal fun rememberReadabilitySamples(key: BackgroundSampleKey, retryKey: Any, extract: suspend () -> List<Color>?): List<Color>? =
+    rememberBackgroundExtraction(key, retryKey) { extract()?.takeIf { it.isNotEmpty() } }
+
+@Composable
+private fun <T> rememberBackgroundExtraction(key: BackgroundSampleKey, retryKey: Any, initial: T? = null, extract: suspend () -> T?): T? {
+    val samples = remember(key) { mutableStateOf(initial) }
     val currentExtract by rememberUpdatedState(extract)
     LaunchedEffect(key, retryKey) {
         if (samples.value != null || key.source.isNullOrBlank() || key.opacity <= 0f) return@LaunchedEffect
-        try { samples.value = currentExtract()?.takeIf { it.isNotEmpty() } }
+        try { samples.value = currentExtract() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { samples.value = null }
     }
@@ -76,18 +81,24 @@ fun rememberBackgroundReadability(background: String?, backgroundOpacity: Float,
                 backgroundOpacity > 0f), allSamples, seedArgb = seed)
         }
     }
-    val sampleKey = BackgroundSampleKey(background, backgroundOpacity, scheme.background.copy(alpha = 1f))
-    val rawSamples = rememberReadabilitySamples(sampleKey, mode) {
-        extractBackgroundSamples(context, requireNotNull(background), backgroundOpacity, sampleKey.base)
+    val viewport = LocalWindowInfo.current.containerSize
+    val aspect = if (viewport.height > 0) viewport.width.toFloat() / viewport.height else null
+    val sampleKey = BackgroundSampleKey(background, backgroundOpacity, scheme.background.copy(alpha = 1f), aspect)
+    val sourceAnalysis = rememberBackgroundExtraction(sampleKey, mode,
+        cachedBackgroundBitmapAnalysis(background, aspect)) {
+        extractBackgroundBitmapAnalysis(context, requireNotNull(background), aspectRatio = aspect)
+    }
+    val rawSamples = remember(sourceAnalysis, backgroundOpacity, sampleKey.base) {
+        sourceAnalysis?.rawSamples?.map { compositeChatBackgroundColor(it, backgroundOpacity, sampleKey.base, 0f) }
     }
     val result = remember(rawSamples, sampleKey.base, dark, overlayTopAlpha, overlayBottomAlpha, fallback) {
         rawSamples?.let {
             adaptiveBackgroundReadability(backgroundSamplesWithOverlay(it, sampleKey.base, overlayTopAlpha, overlayBottomAlpha), dark).copy(rawBackgrounds = it)
         } ?: fallback
     }
-    return remember(result, mode, wallpaperSeed, background, backgroundOpacity, scheme.onBackground) {
+    return remember(result, mode, wallpaperSeed, background, backgroundOpacity, scheme.onBackground, sourceAnalysis?.seedArgb) {
         val appSeed = if (mode == TextColorMode.APP_BACKGROUND && !background.isNullOrBlank() && backgroundOpacity > 0f) {
-            backgroundTextSeed(result.rawBackgrounds)
+            sourceAnalysis?.seedArgb ?: backgroundTextSeed(result.rawBackgrounds)
         } else null
         val seed = textPaletteSeed(mode, appSeed, wallpaperSeed)
         result.copy(foreground = backgroundTextForeground(mode, result.backgrounds, seed, scheme.onBackground,

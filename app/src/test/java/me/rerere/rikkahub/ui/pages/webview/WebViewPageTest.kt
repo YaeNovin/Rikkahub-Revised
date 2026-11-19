@@ -37,7 +37,7 @@ class WebViewPageTest {
         assertTrue(style?.html().orEmpty().contains("margin: auto"))
         assertTrue(style?.html().orEmpty().contains("pan-x pan-y pinch-zoom"))
         assertEquals(1, document.select("#rikkahub-fullscreen-background-style").size)
-        assertTrue(result.contains("rikkaSetPreviewBackground"))
+        assertTrue(result.contains("fullscreen-background.js"))
         assertTrue(result.contains("rikka-preview-global-background"))
     }
 

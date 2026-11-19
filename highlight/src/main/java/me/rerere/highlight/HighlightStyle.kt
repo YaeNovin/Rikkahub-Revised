@@ -97,10 +97,16 @@ private fun styleForScope(
 
     "attr", "template-variable" -> SpanStyle(color = colors.attrName)
 
-    "number", "type", "selector-class", "selector-attr", "selector-pseudo" ->
+    "type", "title.class", "title.class.inherited" -> SpanStyle(color = colors.className)
+
+    "title.function", "title.function.invoke" -> SpanStyle(color = colors.function)
+
+    "literal", "boolean" -> SpanStyle(color = colors.boolean)
+
+    "number", "selector-class", "selector-attr", "selector-pseudo" ->
         SpanStyle(color = colors.number)
 
-    "literal", "char", "operator" -> SpanStyle(color = colors.operator)
+    "char", "operator" -> SpanStyle(color = colors.operator)
 
     "built_in" -> SpanStyle(color = colors.className)
 

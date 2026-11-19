@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.google.isGeminiModel
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiSearch02
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -66,6 +67,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.isBuiltInSearchEnabled
+import me.rerere.rikkahub.data.datastore.isExternalSearchEnabled
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -91,7 +94,7 @@ fun SearchPickerButton(
 
     ToggleSurface(
         modifier = modifier,
-        checked = enableSearch || model?.tools?.contains(BuiltInTools.Search) == true,
+        checked = enableSearch || settings.isExternalSearchEnabled(model) || settings.isBuiltInSearchEnabled(model),
         onClick = {
             showSearchPicker = true
         }
@@ -106,12 +109,12 @@ fun SearchPickerButton(
                 modifier = Modifier.size(24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (model?.tools?.contains(BuiltInTools.Search) == true) {
+                if (settings.isBuiltInSearchEnabled(model)) {
                     Icon(
                         imageVector = HugeIcons.AiSearch02,
                         contentDescription = stringResource(R.string.use_web_search),
                     )
-                } else if (enableSearch && currentService != null) {
+                } else if ((enableSearch || settings.isExternalSearchEnabled(model)) && currentService != null) {
                     AutoAIIcon(
                         name = currentService.displayName,
                         color = Color.Transparent
@@ -182,13 +185,13 @@ private fun SearchPicker(
 
     val provider = model?.findProvider(settings.providers)
     // Google 和使用 Responses API 的 OpenAI Provider 支持内置搜索
-    val supportsBuiltInSearch = provider is ProviderSetting.Google ||
+    val supportsBuiltInSearch = provider is ProviderSetting.Google && model?.isGeminiModel() == true ||
         provider is ProviderSetting.OpenAI && provider.useResponseApi
     // 模型是否已开启内置搜索（可能是不支持的模型残留的孤儿状态）
-    val hasBuiltInSearchEnabled = model?.tools?.contains(BuiltInTools.Search) == true
+    val hasBuiltInSearchEnabled = settings.isBuiltInSearchEnabled(model)
     // 模型支持内置搜索，或已开启内置搜索（后者保证残留状态也能被关闭）时显示模型搜索卡片
     val showModelSearch = model != null && (supportsBuiltInSearch || hasBuiltInSearchEnabled)
-    val isLocalSearchSelected = enableSearch && !hasBuiltInSearchEnabled
+    val isLocalSearchSelected = (enableSearch || settings.isExternalSearchEnabled(model)) && !hasBuiltInSearchEnabled
 
     Column(
         modifier = Modifier
@@ -257,7 +260,7 @@ private fun SearchPicker(
             }
         }
 
-        if (enableSearch || hasBuiltInSearchEnabled) {
+        if (isLocalSearchSelected || hasBuiltInSearchEnabled) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center

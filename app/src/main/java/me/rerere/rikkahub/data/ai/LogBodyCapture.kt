@@ -5,40 +5,33 @@ import okhttp3.ResponseBody
 import okio.*
 
 internal const val LOG_BODY_LIMIT = 256L * 1024
-private val credentialField = Regex("(?i)^(authorization|proxyauthorization|.*apikey|.*accesskey|.*secret.*|.*password.*|accesstoken|refreshtoken|token|key|cookie|setcookie|signature|credential)$")
-private val credentialText = Regex("(?i)(\\b(?:bearer|basic)\\s+)[a-z0-9._~+/=-]+")
-private val namedCredential = Regex("""(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret[_-]?key|password|token|signature)\s*[=:]\s*["']?)[^\s"'&,}]+""")
 
-internal fun detailedLogBody(body: String, secrets: List<String> = emptyList()): String {
-    fun scrub(text: String): String {
-        var value = text
-        secrets.filter { it.length >= 4 }.sortedByDescending { it.length }.forEach { value = value.replace(it, "[REDACTED]") }
-        return value.replace(credentialText) { it.groupValues[1] + "[REDACTED]" }
-            .replace(namedCredential) { it.groupValues[1] + "[REDACTED]" }
+/** Measures consumption, not just response headers. Never reads ahead or buffers binary bodies. */
+internal fun ResponseBody.observeLogCompletion(onComplete: (String, String?) -> Unit): ResponseBody {
+    val original = this
+    var finished = false
+    fun finish(phase: String, error: String? = null) {
+        if (!finished) { finished = true; runCatching { onComplete(phase, error) } }
     }
-    fun redact(element: JsonElement, depth: Int = 0): JsonElement {
-        if (depth > 40) return JsonPrimitive("[nested content omitted]")
-        return when (element) {
-            is JsonObject -> JsonObject(element.mapValues { (key, value) ->
-                if (credentialField.matches(key.replace("-", "").replace("_", ""))) JsonPrimitive("[REDACTED]") else redact(value, depth + 1)
-            })
-            is JsonArray -> JsonArray(element.map { redact(it, depth + 1) })
-            is JsonPrimitive -> if (!element.isString) element else {
-                val nested = runCatching { Json.parseToJsonElement(element.content) }.getOrNull()
-                JsonPrimitive(if (nested is JsonObject || nested is JsonArray) redact(nested, depth + 1).toString() else scrub(element.content))
-            }
+    val observed = object : ForwardingSource(source()) {
+        override fun read(sink: Buffer, byteCount: Long): Long = try {
+            super.read(sink, byteCount).also { if (it == -1L) finish("body_complete") }
+        } catch (e: Exception) {
+            finish("failed", e.message ?: e.javaClass.simpleName)
+            throw e
         }
-    }
-    val json = runCatching { Json.parseToJsonElement(body) }.getOrNull()
-    if (json != null) return redact(json).toString()
-    return body.lineSequence().joinToString("\n") { line ->
-        if (line.startsWith("data:")) {
-            val data = line.removePrefix("data:").trimStart()
-            val event = runCatching { Json.parseToJsonElement(data) }.getOrNull()
-            "data: " + if (event != null) redact(event).toString() else scrub(data)
-        } else scrub(line)
+        override fun close() {
+            try { super.close() } finally { finish("closed") }
+        }
+    }.buffer()
+    return object : ResponseBody() {
+        override fun contentType() = original.contentType()
+        override fun contentLength() = original.contentLength()
+        override fun source() = observed
     }
 }
+internal fun detailedLogBody(body: String, secrets: List<String> = emptyList()): String =
+    me.rerere.common.android.DiagnosticSanitizer.body(body, secrets)
 
 internal fun decodeLogBytes(bytes: ByteArray, encoding: String?, charset: java.nio.charset.Charset = Charsets.UTF_8): String {
     val input = Buffer().write(bytes)

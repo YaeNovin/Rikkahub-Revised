@@ -20,6 +20,22 @@ class ChatComposerSurfaceTest {
         assertEquals(ChatComposerStyle(.6f, 0f), resolveChatComposerStyle(settings(true), false, 24f))
         assertEquals(ChatComposerStyle(.6f, 12f), resolveChatComposerStyle(settings(true), true, 12f))
     }
+    @Test fun `disabling and removing backgrounds preserves composer material strength and active state`() {
+        for (material in listOf(ChatComposerMaterial.FROSTED, ChatComposerMaterial.LIQUID_GLASS, ChatComposerMaterial.ACRYLIC)) {
+            val original = settings(true).withChatComposerMaterial(material).copy(
+                advancedAppearanceSetting = settings(true).withChatComposerMaterial(material).advancedAppearanceSetting.copy(
+                    enableGlobalBackground = true, globalBackground = "file:///wallpaper.png", applyGlobalBackgroundToChat = true))
+            val withoutGlobal = original.copy(advancedAppearanceSetting = original.advancedAppearanceSetting.copy(
+                enableGlobalBackground = false, globalBackground = null, applyGlobalBackgroundToChat = false))
+            val removed = withoutGlobal.copy(assistants = withoutGlobal.assistants.map { it.copy(background = null, useGradientBackground = false) })
+            assertFalse(removed.hasActiveChatBackground())
+            assertEquals(material, removed.chatComposerMaterial())
+            assertTrue(removed.isChatInputGlassActive())
+            assertEquals(ChatComposerStyle(.6f, 20f), resolveChatComposerStyle(removed, true, 24f))
+            val adjusted = removed.copy(displaySetting = removed.displaySetting.copy(inputBlurRadius = 8f))
+            assertEquals(ChatComposerStyle(.6f, 8f), resolveChatComposerStyle(adjusted, true, 24f))
+        }
+    }
     @Test fun `performance switch stops optical effects without hiding the chat behind an opaque tint`() {
         val settings = settings(true).copy(advancedAppearanceSetting = AdvancedAppearanceSetting(enableInputPerformanceEffects = false))
         assertEquals(ChatComposerStyle(.6f, 0f), resolveChatComposerStyle(settings, true, 24f))
@@ -45,14 +61,14 @@ class ChatComposerSurfaceTest {
             assertEquals(original.displaySetting.inputBlurRadius, changed.displaySetting.inputBlurRadius, 0f)
             assertFalse(changed.advancedAppearanceSetting.enableInputPerformanceEffects)
             assertEquals(material == ChatComposerMaterial.LIQUID_GLASS, changed.advancedAppearanceSetting.liquidGlass.applyToComposer)
-            assertEquals(material != ChatComposerMaterial.TRANSLUCENT, changed.displaySetting.enableBlurEffect)
+            assertEquals(material.usesBlur, changed.displaySetting.enableBlurEffect)
         }
     }
     @Test fun `zero opacity remains transparent for every material and legacy dock values do not override it`() {
         val original = settings(true).let { it.copy(displaySetting = it.displaySetting.copy(inputSurfaceOpacity = 0f, inputBlurRadius = 0f),
             advancedAppearanceSetting = it.advancedAppearanceSetting.copy(enableChatDockGlass = true, chatDockGlassOpacity = 1f)) }
         ChatComposerMaterial.entries.forEach { material ->
-            assertEquals(ChatComposerStyle(0f, 0f), resolveChatComposerStyle(original.withChatComposerMaterial(material), true, 24f))
+            assertEquals(ChatComposerStyle(if (material.opaqueMaterial) 1f else 0f, 0f), resolveChatComposerStyle(original.withChatComposerMaterial(material), true, 24f))
         }
     }
     @Test fun `legacy glass selection stays selected even with the old blur switch off`() {

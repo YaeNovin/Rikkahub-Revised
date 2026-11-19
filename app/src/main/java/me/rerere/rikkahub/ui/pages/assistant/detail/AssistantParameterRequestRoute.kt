@@ -6,10 +6,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import me.rerere.ai.provider.ProviderRequestChannel
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.officialChatVendor
+import me.rerere.ai.provider.OfficialChatVendor
 import me.rerere.ai.provider.providers.openai.isAlibabaModelStudioHost
 import me.rerere.ai.provider.providers.openai.isOfficialDeepSeekHost
 import me.rerere.ai.provider.providers.openai.resolveDeepSeekModelParameterSupport
 import me.rerere.ai.provider.providers.openai.resolveQwenModelParameterSupport
+import me.rerere.ai.provider.providers.openai.resolveOpenAIModelParameterSupport
 import me.rerere.ai.provider.providers.claude.requestChannel as claudeRequestChannel
 import me.rerere.ai.provider.providers.google.requestChannel as googleRequestChannel
 import me.rerere.ai.provider.providers.openai.requestChannel as openAIRequestChannel
@@ -20,6 +23,7 @@ internal enum class ParameterWireProtocol {
     OPENAI_CHAT_COMPLETIONS,
     OPENAI_RESPONSES,
     GOOGLE_GENERATE_CONTENT,
+    GOOGLE_INTERACTIONS,
     ANTHROPIC_MESSAGES,
 }
 
@@ -31,6 +35,10 @@ internal enum class ParameterEndpoint {
     ANTHROPIC,
     ALIBABA_MODEL_STUDIO,
     DEEPSEEK,
+    MINIMAX,
+    KIMI,
+    MIMO,
+    GLM,
     THIRD_PARTY,
 }
 
@@ -48,10 +56,23 @@ internal fun ProviderSetting.parameterRequestRoute(
         } else {
             ParameterWireProtocol.OPENAI_CHAT_COMPLETIONS
         }
-        is ProviderSetting.Google -> ParameterWireProtocol.GOOGLE_GENERATE_CONTENT
+        is ProviderSetting.Google -> if (useInteractionsApi && !vertexAI) ParameterWireProtocol.GOOGLE_INTERACTIONS else ParameterWireProtocol.GOOGLE_GENERATE_CONTENT
         is ProviderSetting.Claude -> ParameterWireProtocol.ANTHROPIC_MESSAGES
     }
-    val endpoint = endpointOverride ?: when (this) {
+    val requestBaseUrl = when (this) {
+        is ProviderSetting.OpenAI -> baseUrl
+        is ProviderSetting.Claude -> baseUrl
+        is ProviderSetting.Google -> baseUrl
+    }
+    val nativeEndpoint = when (officialChatVendor(requestBaseUrl)) {
+        OfficialChatVendor.DEEPSEEK -> ParameterEndpoint.DEEPSEEK
+        OfficialChatVendor.MINIMAX -> ParameterEndpoint.MINIMAX
+        OfficialChatVendor.KIMI -> ParameterEndpoint.KIMI
+        OfficialChatVendor.MIMO -> ParameterEndpoint.MIMO
+        OfficialChatVendor.GLM -> ParameterEndpoint.GLM
+        else -> null
+    }
+    val endpoint = endpointOverride ?: nativeEndpoint ?: when (this) {
         is ProviderSetting.OpenAI -> when (openAIRequestChannel()) {
             ProviderRequestChannel.OPENAI_API -> ParameterEndpoint.OPENAI
             ProviderRequestChannel.XAI_API -> ParameterEndpoint.XAI
@@ -80,7 +101,10 @@ internal fun ProviderSetting.parameterRequestRouteForModel(modelId: String): Par
             ParameterEndpoint.DEEPSEEK
         else -> null
     }
-    return parameterRequestRoute(endpointOverride)
+    val route = parameterRequestRoute(endpointOverride)
+    return if (route.endpoint == ParameterEndpoint.OPENAI &&
+        resolveOpenAIModelParameterSupport(modelId).requiresResponsesForToolCalling)
+        route.copy(protocol = ParameterWireProtocol.OPENAI_RESPONSES) else route
 }
 
 @Composable
@@ -104,17 +128,23 @@ internal fun ParameterWarningText(text: String) {
 }
 
 @Composable
-private fun ParameterWireProtocol.displayName(): String = stringResource(
+private fun ParameterWireProtocol.displayName(): String = if (this == ParameterWireProtocol.GOOGLE_INTERACTIONS) "Interactions API(Beta)" else stringResource(
     when (this) {
         ParameterWireProtocol.OPENAI_CHAT_COMPLETIONS -> R.string.assistant_parameter_protocol_openai_chat
         ParameterWireProtocol.OPENAI_RESPONSES -> R.string.assistant_parameter_protocol_openai_responses
         ParameterWireProtocol.GOOGLE_GENERATE_CONTENT -> R.string.assistant_parameter_protocol_google_generate_content
+        ParameterWireProtocol.GOOGLE_INTERACTIONS -> R.string.assistant_parameter_protocol_google_generate_content
         ParameterWireProtocol.ANTHROPIC_MESSAGES -> R.string.assistant_parameter_protocol_anthropic_messages
     }
 )
 
 @Composable
-private fun ParameterEndpoint.displayName(): String = stringResource(
+private fun ParameterEndpoint.displayName(): String = when (this) {
+    ParameterEndpoint.MINIMAX -> "MiniMax 官方接口"
+    ParameterEndpoint.KIMI -> "Kimi 官方接口"
+    ParameterEndpoint.MIMO -> "MiMo 官方接口"
+    ParameterEndpoint.GLM -> "GLM 官方接口"
+    else -> stringResource(
     when (this) {
         ParameterEndpoint.OPENAI -> R.string.assistant_parameter_endpoint_openai
         ParameterEndpoint.XAI -> R.string.assistant_parameter_endpoint_xai
@@ -124,5 +154,7 @@ private fun ParameterEndpoint.displayName(): String = stringResource(
         ParameterEndpoint.ALIBABA_MODEL_STUDIO -> R.string.assistant_parameter_endpoint_alibaba
         ParameterEndpoint.DEEPSEEK -> R.string.assistant_parameter_endpoint_deepseek
         ParameterEndpoint.THIRD_PARTY -> R.string.assistant_parameter_endpoint_third_party
+        else -> error("Native endpoint already handled")
     }
 )
+}

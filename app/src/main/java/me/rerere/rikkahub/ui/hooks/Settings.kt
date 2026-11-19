@@ -10,7 +10,5 @@ import org.koin.compose.koinInject
 @Composable
 fun rememberUserSettingsState(): State<Settings> {
     val store = koinInject<SettingsStore>()
-    return store.settingsFlow.collectAsStateWithLifecycle(
-        initialValue = Settings.dummy(),
-    )
+    return store.settingsFlow.collectAsStateWithLifecycle()
 }

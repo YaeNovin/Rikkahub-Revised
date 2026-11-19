@@ -60,13 +60,15 @@ fun AssistantDetailPage(id: String) {
             parametersOf(id)
         }
     )
-    val assistant by vm.assistant.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val providers by vm.providers.collectAsStateWithLifecycle()
+    val assistant = settings.assistants.find { it.id.toString() == id } ?: return
+    val providers = settings.providers
     val selectedModel = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val selectedProvider = selectedModel?.findProvider(providers)
     val inferredFamily = selectedModel?.inferParameterFamily()
     val modelParameterEntry = when (selectedModel?.resolveParameterFamily(selectedProvider)) {
+        ModelParameterFamily.MINIMAX -> Triple(Screen.AssistantMiniMax(id),
+            R.string.assistant_page_tab_model_parameters, R.string.assistant_detail_compatible_parameters_desc)
         ModelParameterFamily.CLAUDE -> Triple(
                 Screen.AssistantClaude(id),
                 R.string.assistant_page_tab_claude,
@@ -100,11 +102,9 @@ fun AssistantDetailPage(id: String) {
                     R.string.assistant_detail_compatible_parameters_desc
                 },
             )
-        ModelParameterFamily.GEMINI -> Triple(
-                Screen.AssistantGemini(id),
-                R.string.assistant_page_tab_gemini,
-                R.string.assistant_detail_gemini_desc,
-            )
+        ModelParameterFamily.GEMINI -> if (showGeminiToolsSettings(selectedModel)) Triple(
+            Screen.AssistantGemini(id), R.string.assistant_page_tab_gemini, R.string.assistant_detail_gemini_desc,
+        ) else Triple<Screen?, Int, Int>(null, R.string.assistant_page_tab_model_parameters, R.string.assistant_detail_model_parameters_unavailable)
         null -> Triple<Screen?, Int, Int>(
             null,
             R.string.assistant_page_tab_model_parameters,
@@ -172,9 +172,18 @@ fun AssistantDetailPage(id: String) {
                         modifier = Modifier.alpha(if (modelParameterEntry.first != null) 1f else 0.38f),
                         leadingContent = { Icon(HugeIcons.Sparkles, null) },
                         supportingContent = { Text(stringResource(modelParameterEntry.third)) },
-                        headlineContent = { Text(stringResource(modelParameterEntry.second)) },
+                        headlineContent = { Text(if (inferredFamily == ModelParameterFamily.MINIMAX) "MiniMax 参数" else stringResource(modelParameterEntry.second)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
+                    if (showGeminiToolsSettings(selectedModel)) {
+                        item(
+                            onClick = { navController.navigate(Screen.AssistantGeminiTools(id)) },
+                            leadingContent = { Icon(HugeIcons.Wrench01, null) },
+                            headlineContent = { Text("Gemini 内置工具") },
+                            supportingContent = { Text("Google 搜索、图片搜索增强与 URL 上下文") },
+                            trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                        )
+                    }
                     item(
                         onClick = { navController.navigate(Screen.AssistantInjections(id)) },
                         leadingContent = { Icon(HugeIcons.Puzzle, null) },

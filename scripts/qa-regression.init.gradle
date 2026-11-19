@@ -1,0 +1,11 @@
+// Run selected instrumentation regressions against the existing QA identity.
+// Installation is a separate, explicit adb install -r step; never clear app data.
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.testBuildType = 'qa'
+            }
+        }
+    }
+}

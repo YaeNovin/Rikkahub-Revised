@@ -6,6 +6,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InspirationEditorStateTest {
+    @Test fun `readiness belongs to one opening and new saved settings cannot overwrite its draft`() {
+        val state = InspirationEditorState()
+        assertFalse(state.isReady("first"))
+        state.begin("first", InspirationSettings(cardCount = 6), false)
+        assertTrue(state.isReady("first"))
+        assertFalse(state.isReady("second"))
+        state.draft = state.draft.copy(cardCount = 2)
+        state.begin("first", InspirationSettings(cardCount = 8), true)
+        assertEquals(2, state.draft.cardCount)
+        assertFalse(state.inherited)
+        state.begin("second", InspirationSettings(cardCount = 4), true)
+        assertFalse(state.isReady("first"))
+        assertTrue(state.isReady("second"))
+        assertEquals(4, state.draft.cardCount)
+    }
+
     @Test fun `rotation retains edits but a new opening reloads saved configuration`() {
         val state = InspirationEditorState()
         val initial = InspirationSettings()

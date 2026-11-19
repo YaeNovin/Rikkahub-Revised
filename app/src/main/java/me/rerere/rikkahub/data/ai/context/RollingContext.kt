@@ -12,6 +12,7 @@ data class RollingContextSummary(
     val content: String,
     val sourceMessageIds: List<Uuid>,
     val updatedAtMillis: Long,
+    val manuallyRequested: Boolean = false,
 )
 
 data class RollingContextPlan(

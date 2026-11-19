@@ -23,19 +23,21 @@ import me.rerere.rikkahub.utils.toCssHex
 private const val MAX_INTERACTIVE_RENDER_SOURCE_CHARS = 128 * 1024
 
 internal enum class InteractiveCodeRenderer(
-    val aliases: Set<String>,
+    private val catalogId: String,
 ) {
-    ECHARTS(setOf("echarts", "chart")),
-    ABC(setOf("abc", "abcjs")),
-    JIANPU(setOf("jianpu", "numbered", "numbered-notation", "numberednotation", "numbered_notation", "简谱")),
-    LEAFLET(setOf("leaflet", "map", "geojson")),
-    RAILROAD(setOf("railroad", "railroad-diagram", "grammar", "ebnf")),
-    WAVEFORM(setOf("wavedrom", "waveform", "timing", "digital-waveform")),
-    GRAPHVIZ(setOf("dot", "graphviz")),
-    VEGA(setOf("vega", "vega-lite", "vegalite")),
-    MOLECULE(setOf("smiles", "smiles-drawer", "molecule")),
-    MUSICXML(setOf("musicxml", "music-xml")),
+    ECHARTS("echarts"),
+    ABC("abc"),
+    JIANPU("jianpu"),
+    LEAFLET("leaflet"),
+    RAILROAD("railroad"),
+    WAVEFORM("wavedrom"),
+    GRAPHVIZ("graphviz"),
+    VEGA("vega"),
+    MOLECULE("smiles"),
+    MUSICXML("musicxml"),
     ;
+
+    val aliases: Set<String> get() = requireNotNull(me.rerere.rikkahub.data.render.RendererCatalog.find(catalogId)).aliases
 
     companion object {
         fun fromLanguage(language: String): InteractiveCodeRenderer? =
@@ -101,8 +103,8 @@ internal fun InteractiveCodeBlock(
         transparentBackground = true,
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .height(previewHeight),
+            .clip(RoundedCornerShape(6.dp)),
+        previewHeight = previewHeight,
     )
 }
 
@@ -268,6 +270,20 @@ private fun echartsRendererScript(): String = """
     const config = JSON.parse(source);
     if (config.rikkaRenderError) throw new Error(config.rikkaRenderError);
     const option = config.option || config;
+    // Tooltip formatters are untrusted labels, including per-series/data options.
+    // Apply the restriction at every viewport, not only in compact mobile layout.
+    const tooltipNodes = [option];
+    while (tooltipNodes.length) {
+        const node = tooltipNodes.pop();
+        if (!node || typeof node !== 'object') continue;
+        for (const key of Object.keys(node)) {
+            if (key === 'tooltip' && node[key] && typeof node[key] === 'object') {
+                const tips = Array.isArray(node[key]) ? node[key] : [node[key]];
+                tips.forEach(function(tip) { if (tip && typeof tip === 'object') { tip.renderMode = 'richText'; tip.confine = true; } });
+            }
+            if (node[key] && typeof node[key] === 'object') tooltipNodes.push(node[key]);
+        }
+    }
     const builtinMapCache = {};
     async function loadBuiltinMap(kind) {
         if (kind !== 'china' && kind !== 'world') throw new Error('没有内置的地图数据：' + kind);
@@ -316,9 +332,6 @@ private fun echartsRendererScript(): String = """
                 });
                 return Object.assign({ left: 'center' }, title, { textStyle: textStyle });
             });
-        }
-        if (option.tooltip && !Array.isArray(option.tooltip)) {
-            option.tooltip = Object.assign({}, option.tooltip, { confine: true });
         }
         if (option.legend && !Array.isArray(option.legend)) {
             option.legend = Object.assign({ type: 'scroll', left: 'center', width: '92%' }, option.legend);
@@ -577,7 +590,10 @@ private fun leafletRendererScript(): String = """
         if (!position) { warn('部分标记坐标无效，已跳过'); return; }
         try {
             const item = L.circleMarker(position, Object.assign({ radius: 7 }, pathOptions(marker.options))).addTo(map);
-            if (typeof marker.popup === 'string') item.bindPopup(marker.popup);
+            if (typeof marker.popup === 'string') {
+                const label = document.createElement('span'); label.textContent = marker.popup;
+                item.bindPopup(label);
+            }
             bounds.extend(item.getLatLng());
         } catch (error) { warn('部分标记配置无效，已跳过'); }
     });

@@ -11,6 +11,14 @@ import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 
 @Dao
 interface GenMediaDAO {
+    @Query("SELECT * FROM genmediaentity WHERE type != 'video_generation' AND (:folderId IS NULL OR folder_id = :folderId) AND prompt LIKE '%' || :query || '%' ORDER BY create_at DESC LIMIT :limit OFFSET :offset")
+    suspend fun webPage(query: String, folderId: String?, limit: Int, offset: Int): List<GenMediaEntity>
+
+    @Query("SELECT * FROM genmediaentity WHERE path = :path LIMIT 1")
+    suspend fun byPath(path: String): GenMediaEntity?
+
+    @Query("SELECT * FROM genmediaentity WHERE id = :id LIMIT 1")
+    suspend fun byId(id: Int): GenMediaEntity?
     @Query("SELECT * FROM genmediaentity ORDER BY create_at DESC")
     fun getAll(): PagingSource<Int, GenMediaEntity>
 

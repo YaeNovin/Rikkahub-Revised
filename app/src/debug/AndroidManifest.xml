@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="me.rerere.rikkahub.CitationRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.TableRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.RenderStressActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.ModelParametersPreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.GeminiToolsRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.ChatTurnRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.ChatSendLayoutRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.LingkeImage26PreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.ModelApiRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.WallpaperDiagnosticsActivity" android:exported="true" />
+        <!-- Fixed, non-sensitive visual fixture; absent from QA and release builds. -->
+        <activity android:name="me.rerere.rikkahub.MicaPreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.AcrylicPreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.FormalAppearancePreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.HighlightPalettePreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.RichTextRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.AppearanceModeRegressionActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.MaterialSettingsPreviewActivity" android:exported="true" />
+        <activity android:name="me.rerere.rikkahub.CustomSearchPreviewActivity" android:exported="true" />
+    </application>
+</manifest>

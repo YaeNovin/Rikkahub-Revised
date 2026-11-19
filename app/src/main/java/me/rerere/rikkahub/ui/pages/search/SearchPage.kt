@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.fts.MessageSearchResult
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
@@ -64,6 +65,7 @@ import kotlin.uuid.Uuid
 
 @Composable
 fun SearchPage(vm: SearchVM = koinViewModel()) {
+    val searchState by vm.state.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val focusRequester = remember { FocusRequester() }
     var showRebuildDialog by remember { mutableStateOf(false) }
@@ -103,7 +105,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                 title = { Text(stringResource(R.string.search_page_title)) },
                 actions = {
                     SortMenuButton(
-                        current = vm.sortOrder,
+                        current = searchState.sort,
                         onSortChange = { vm.onSortChange(it) },
                     )
                     IconButton(
@@ -129,7 +131,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                 .padding(contentPadding)
         ) {
             OutlinedTextField(
-                value = vm.searchQuery,
+                value = searchState.query,
                 onValueChange = { vm.onQueryChange(it) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -144,8 +146,15 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                 ),
             )
 
+            (searchState.error ?: vm.rebuildError)?.let { error ->
+                Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+                TextButton(onClick = { if (vm.rebuildError != null) vm.rebuildIndex() else if (searchState.results.isEmpty()) vm.search() else vm.loadMore() }) {
+                    Text("重试")
+                }
+            }
+
             Box(modifier = Modifier.weight(1f)) {
-                if (vm.isLoading || vm.isRebuilding) {
+                if (searchState.loading || vm.isRebuilding) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
 
@@ -167,7 +176,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                             )
                         }
                     }
-                    vm.searchQuery.isBlank() -> {
+                    searchState.query.isBlank() -> {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
@@ -180,7 +189,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                         }
                     }
 
-                    vm.results.isEmpty() && !vm.isLoading -> {
+                    searchState.results.isEmpty() && !searchState.loading && searchState.error == null -> {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
@@ -199,7 +208,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            items(vm.results) { result ->
+                            items(searchState.results, key = { it.messageId }) { result ->
                                 SearchResultItem(
                                     result = result,
                                     onClick = {
@@ -210,6 +219,15 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                         )
                                     }
                                 )
+                            }
+                            if (searchState.hasMore) {
+                                item(key = "load-more") {
+                                    TextButton(
+                                        onClick = vm::loadMore,
+                                        enabled = !searchState.loading,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) { Text(if (searchState.loading) "加载中…" else "加载更多") }
+                                }
                             }
                         }
                     }

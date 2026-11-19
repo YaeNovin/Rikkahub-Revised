@@ -85,6 +85,7 @@ val appModule = module {
             memoryExtractionService = get(),
             conversationMemoryIndexService = get(),
             generationHandler = get(),
+            imageTools = get(),
             templateTransformer = get(),
             providerManager = get(),
             localTools = get(),

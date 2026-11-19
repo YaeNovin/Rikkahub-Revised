@@ -33,6 +33,14 @@ import me.rerere.ai.core.cappedBudget
 import me.rerere.ai.core.cappedEffort
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.withModernVendorOptions
+import me.rerere.ai.provider.openAIAuthentication
+import me.rerere.ai.provider.officialChatVendor
+import me.rerere.ai.provider.OfficialChatVendor
+import me.rerere.ai.provider.wireParameters
+import me.rerere.ai.provider.modernVendorModel
+import me.rerere.ai.provider.isMiniMaxM3
+import me.rerere.ai.provider.supportsFunctionCalling
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderRequestDiagnostics
@@ -44,6 +52,9 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.inferParameterFamily
 import me.rerere.ai.provider.normalizeCompactVendorModelId
 import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.withMiniMaxOptions
+import me.rerere.ai.provider.providers.google.isGemini4Model
+import me.rerere.ai.provider.providers.google.gemini4DefaultThinking
 import me.rerere.ai.provider.resolveReasoningLevelSupport
 import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.stream.SseEvent
@@ -66,6 +77,7 @@ import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -178,23 +190,23 @@ class ChatCompletionsAPI(
             )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+            .openAIAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        // Network content is captured only by the private, opt-in diagnostic interceptor.
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            val body = response.body?.string()
-            throw providerRequestFailure(
-                response = response,
-                cause = null,
-                detail = "Failed to get response: ${response.code} $body",
-            )
+        val bodyStr = client.newCall(request).awaitAndUse { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string()
+                throw providerRequestFailure(
+                    response = response,
+                    cause = null,
+                    detail = "Failed to get response: ${response.code} $body",
+                )
+            }
+            response.body?.string() ?: ""
         }
-
-        val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         // 从 JsonObject 中提取必要的信息
@@ -243,22 +255,22 @@ class ChatCompletionsAPI(
             )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+            .openAIAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        // Network content is captured only by the private, opt-in diagnostic interceptor.
 
         // just for debugging response body
-        // println(client.newCall(request).await().body?.string())
+        // Raw network content is not written to stdout.
 
         val decoder = ChatCompletionsStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
                 }
             }
         }
@@ -270,7 +282,7 @@ class ChatCompletionsAPI(
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: $data")
+                // Network content is captured only by the private, opt-in diagnostic interceptor.
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -283,20 +295,20 @@ class ChatCompletionsAPI(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var detail = t?.message
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+                // Failure propagates to the structured application diagnostics.
+                // Raw network content is not written to stdout.
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        println(bodyElement)
+                        // Raw network content is not written to stdout.
                         detail = bodyElement.parseErrorDetail().message ?: bodyRaw
-                        Log.i(TAG, "onFailure: $detail")
+                        // Network content is captured only by the private, opt-in diagnostic interceptor.
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
+                    // Failure propagates to the structured application diagnostics.
                 } finally {
                     close(providerRequestFailure(response, t, detail ?: bodyRaw))
                 }
@@ -315,7 +327,7 @@ class ChatCompletionsAPI(
         val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource ")
+            // Raw network content is not written to stdout.
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -334,20 +346,24 @@ class ChatCompletionsAPI(
         val parameterFamily = params.model.inferParameterFamily() ?: ModelParameterFamily.OPENAI
         val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
         val useFunctionTools =
-            (params.model.abilities.contains(ModelAbility.TOOL) ||
+            (params.model.supportsFunctionCalling() ||
                 resolveDeepSeekModelParameterSupport(parameterModelId).available) &&
                 params.tools.isNotEmpty() &&
-                !(host == OPENAI_API_HOST && modelSupport.requiresResponsesForToolCalling)
+                (!isOfficialOpenAIHost(host) || supportsOpenAIChatTools(params))
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
                 "messages",
                 buildMessages(
                     messages = messages,
-                    includeHistoryReasoning = providerSetting.includeHistoryReasoning,
+                    includeHistoryReasoning = providerSetting.includeHistoryReasoning ||
+                        officialChatVendor(providerSetting.baseUrl) == OfficialChatVendor.MIMO,
                     includeOpenRouterReasoningDetails = isOpenRouter,
                     supportInputModalities = params.model.inputModalities,
                     deepSeekImageDetail = params.deepSeekImageDetail(),
+                    qwenVideoInput = (isAlibabaModelStudioHost(host) && isQwen4Max(parameterModelId)) ||
+                        officialChatVendor(providerSetting.baseUrl) in setOf(OfficialChatVendor.MIMO, OfficialChatVendor.MINIMAX),
+                    mimoAudioInput = officialChatVendor(providerSetting.baseUrl) == OfficialChatVendor.MIMO,
                 )
             )
 
@@ -364,11 +380,15 @@ class ChatCompletionsAPI(
                 }
             }
             val deepSeekMaxTokens = params.deepSeekMaxOutputTokens()
-            if ((deepSeekMaxTokens != null || params.maxTokens != null) && !params.usesQwenStructuredOutput()) {
+            if ((deepSeekMaxTokens != null || params.maxTokens != null) &&
+                (!params.usesQwenStructuredOutput() || isQwen4Max(parameterModelId))) {
                 val tokenLimitKey = if (
-                    ModelRegistry.OPENAI_O_MODELS.match(params.model.modelId) ||
-                    isOpenAIGpt5Model(params.model.modelId) ||
-                    grokSupport.available
+                    ModelRegistry.OPENAI_O_MODELS.match(params.model.parameterModelId()) ||
+                    isOpenAIGpt5Model(params.model.parameterModelId()) ||
+                    grokSupport.available ||
+                    (host in setOf("api.moonshot.cn", "api.moonshot.ai") &&
+                        params.model.modernVendorModel() in setOf(me.rerere.ai.provider.ModernVendorModel.KIMI_K3, me.rerere.ai.provider.ModernVendorModel.KIMI_K27)) ||
+                    (host in setOf("api.minimaxi.com", "api.minimax.io") && params.model.isMiniMaxM3())
                 ) {
                     "max_completion_tokens"
                 } else {
@@ -384,7 +404,7 @@ class ChatCompletionsAPI(
                 params.openAIOptions.serviceTier.apiValue
                     ?.takeIf {
                         it != "ultrafast" ||
-                            (host == OPENAI_API_HOST && modelSupport.supportsUltrafast)
+                            (isUltrafastOpenAIHost(host) && modelSupport.supportsUltrafast)
                     }
                     ?.let { put("service_tier", it) }
                 if (useFunctionTools) {
@@ -464,6 +484,16 @@ class ChatCompletionsAPI(
                                     put("reasoning_effort", level.effort)
                                 }
                             }
+                            isQwen4Max(modelId) -> {
+                                put("enable_thinking", level.isEnabled)
+                                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                                    put("reasoning_effort", when (level) {
+                                        ReasoningLevel.LOW, ReasoningLevel.MINIMAL -> "low"
+                                        ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "xhigh"
+                                        else -> "high"
+                                    })
+                                }
+                            }
                             modelId.startsWith("qwen3-8") -> {
                                 put("enable_thinking", level.isEnabled)
                                 if (level.isEnabled && level != ReasoningLevel.AUTO) {
@@ -498,7 +528,7 @@ class ChatCompletionsAPI(
                         }
                     }
 
-                    host == OPENAI_API_HOST -> {
+                    isOfficialOpenAIHost(host) -> {
                         if (level != ReasoningLevel.AUTO) {
                             put(
                                 "reasoning_effort",
@@ -569,7 +599,7 @@ class ChatCompletionsAPI(
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                             // K2.6 的 thinking.keep 默认为 null（忽略历史思考），思考开启时
                             // 需显式传 "all" 才是保留式思考；文档推荐与 enabled 搭配（#1586）
-                            if (level.isEnabled && ModelRegistry.KIMI_K2_6.match(params.model.modelId)) {
+                            if (level.isEnabled && ModelRegistry.KIMI_K2_6.match(params.model.parameterModelId())) {
                                 put("keep", "all")
                             }
                         })
@@ -671,26 +701,35 @@ class ChatCompletionsAPI(
                                 put("description", tool.description)
                                 put(
                                     "parameters",
-                                    json.encodeToJsonElement(
-                                        tool.parameters()
-                                    )
+                                    tool.wireParameters()
                                 )
                             })
                         })
                     }
                 }
             }
-        }.mergeCustomBody(params.customBody)
+        }.mergeCustomBody(params.customBody).withModernVendorOptions(params, "chat").withMiniMaxOptions(params, "chat")
+            .withNewOfficialModelOptions(params, host, responses = false)
+            .withOfficialChatContract(providerSetting, params, responses = false).let { body ->
+            if (params.model.isGemini4Model()) {
+                val level = resolveReasoningLevelSupport(params.model, providerSetting).coerce(params.reasoningLevel)
+                val effort = if (level == ReasoningLevel.AUTO) params.model.gemini4DefaultThinking() else level.effort
+                val filtered = body.filterKeys { it !in setOf("temperature", "top_p", "top_k", "n", "presence_penalty", "frequency_penalty", "cached_content", "cachedContent") }
+                if (host == "openrouter.ai") JsonObject(filtered + ("reasoning" to buildJsonObject { put("effort", effort) }))
+                else JsonObject(filtered + ("reasoning_effort" to JsonPrimitive(effort)))
+            } else body
+        }
     }
 
     private fun isModelAllowTemperature(params: TextGenerationParams): Boolean {
         val model = params.model
-        val isMoonshotRestricted = ModelRegistry.KIMI_K2_5.match(model.modelId) ||
-                ModelRegistry.KIMI_K2_6.match(model.modelId) ||
-                ModelRegistry.KIMI_K3.match(model.modelId) ||
-                ModelRegistry.KIMI_K3_ALIAS.match(model.modelId)
-        return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) &&
-               !isOpenAIGpt5Model(model.modelId) &&
+        val isMoonshotRestricted = ModelRegistry.KIMI_K2_5.match(model.parameterModelId()) ||
+                ModelRegistry.KIMI_K2_6.match(model.parameterModelId()) ||
+                ModelRegistry.KIMI_K3.match(model.parameterModelId()) ||
+                ModelRegistry.KIMI_K3_ALIAS.match(model.parameterModelId())
+        return !ModelRegistry.OPENAI_O_MODELS.match(model.parameterModelId()) &&
+               !model.isGemini4Model() &&
+               allowsOpenAISampling(params) &&
                !isMoonshotRestricted &&
                !params.usesDeepSeekThinkingMode()
     }
@@ -701,6 +740,8 @@ class ChatCompletionsAPI(
         includeOpenRouterReasoningDetails: Boolean = false,
         supportInputModalities: List<Modality> = listOf(Modality.TEXT, Modality.IMAGE),
         deepSeekImageDetail: String? = null,
+        qwenVideoInput: Boolean,
+        mimoAudioInput: Boolean = false,
     ) = buildJsonArray {
         val filteredMessages = messages.filter { it.isValidToUpload() }
 
@@ -713,10 +754,18 @@ class ChatCompletionsAPI(
                     supportInputModalities = supportInputModalities,
                 )
             } else {
-                addNonAssistantMessage(message, deepSeekImageDetail)
+                addNonAssistantMessage(message, deepSeekImageDetail, qwenVideoInput, mimoAudioInput)
             }
         }
     }
+
+    @Suppress("unused")
+    private fun buildMessages(
+        messages: List<UIMessage>, includeHistoryReasoning: Boolean,
+        includeOpenRouterReasoningDetails: Boolean, supportInputModalities: List<Modality>,
+        deepSeekImageDetail: String?,
+    ) = buildMessages(messages, includeHistoryReasoning, includeOpenRouterReasoningDetails,
+        supportInputModalities, deepSeekImageDetail, false)
 
     @Suppress("unused")
     private fun buildMessages(
@@ -854,7 +903,7 @@ class ChatCompletionsAPI(
                                             put("url", encodedImage.base64)
                                         })
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        // Failure propagates to the structured application diagnostics.
                                         put("type", "text")
                                         put("text", "")
                                     }
@@ -889,6 +938,8 @@ class ChatCompletionsAPI(
     private fun JsonArrayBuilder.addNonAssistantMessage(
         message: UIMessage,
         deepSeekImageDetail: String?,
+        qwenVideoInput: Boolean,
+        mimoAudioInput: Boolean,
     ) {
         add(buildJsonObject {
             put("role", JsonPrimitive(message.role.name.lowercase()))
@@ -915,10 +966,28 @@ class ChatCompletionsAPI(
                                             deepSeekImageDetail?.let { put("detail", it) }
                                         })
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        // Failure propagates to the structured application diagnostics.
                                         put("type", "text")
                                         put("text", "")
                                     }
+                                })
+                            }
+
+                            is UIMessagePart.Video -> if (qwenVideoInput) {
+                                val videoUrl = if (part.url.startsWith("https://") || part.url.startsWith("http://") || part.url.startsWith("data:")) part.url
+                                    else part.encodeBase64().getOrThrow().base64
+                                add(buildJsonObject {
+                                    put("type", "video_url")
+                                    put("video_url", buildJsonObject { put("url", videoUrl) })
+                                })
+                            }
+
+                            is UIMessagePart.Audio -> if (mimoAudioInput) {
+                                val audio = if (part.url.startsWith("https://") || part.url.startsWith("http://") || part.url.startsWith("data:")) part.url
+                                    else part.encodeBase64().getOrThrow().base64
+                                add(buildJsonObject {
+                                    put("type", "input_audio")
+                                    put("input_audio", buildJsonObject { put("data", audio) })
                                 })
                             }
 
@@ -963,7 +1032,7 @@ class ChatCompletionsAPI(
                                         put("url", encodedImage.base64)
                                     })
                                 }.onFailure {
-                                    Log.w(TAG, "encode tool result image failed: ${part.url}", it)
+                                    // Network content is captured only by the private, opt-in diagnostic interceptor.
                                     put("type", "text")
                                     put("text", "Error: Failed to encode image to base64")
                                 }

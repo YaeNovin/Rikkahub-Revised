@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="setting_advanced_appearance_preview_background">전체 화면 미리보기 전역 배경</string>
+  <string name="setting_advanced_appearance_preview_background_desc">전체 화면 도표에서 전역 배경의 불투명도, 흐림 및 페이지 스타일을 사용합니다. 불투명한 페이지 스타일에서는 배경이 숨겨집니다. 끄면 테마 배경을 사용합니다.</string>
+  <string name="webview_preview_background_enable">전역 미리보기 배경 사용</string>
+  <string name="webview_preview_background_disable">전역 미리보기 배경 사용 안 함</string>
+  <string name="assistant_page_background_blur">배경 흐림</string>
+  <string name="assistant_page_background_blur_desc">이 어시스턴트의 배경 이미지에 조절 가능한 가우시안 흐림을 적용합니다</string>
+  <string name="assistant_page_background_blur_off">흐림: 끔</string>
+  <string name="assistant_page_background_blur_value">흐림: %1$d dp</string>
+  <string name="assistant_page_background_global_override_title">어시스턴트 배경이 비활성화됨</string>
+  <string name="assistant_page_background_global_override_desc">전역 배경이 기본 채팅 화면을 덮어쓰고 있습니다. 어시스턴트 이미지와 그라데이션은 유지되지만 전역 재정의를 끌 때까지 편집하거나 표시할 수 없습니다.</string>
+  <string name="assistant_request_overview_title">요청 경로 및 범위</string>
+  <string name="assistant_request_current_model">현재 모델: %1$s</string>
+  <string name="assistant_request_no_model">구성되지 않음</string>
+  <string name="assistant_request_no_route">사용 가능한 요청 경로가 없습니다. 채팅 모델을 구성할 때까지 사용자 지정 값은 저장되지만 적용되지 않습니다.</string>
+  <string name="assistant_request_scope_desc">어시스턴트 수준 값은 이 어시스턴트의 채팅 요청에만 적용됩니다. 모델 수준 값은 해당 모델을 사용하는 백그라운드 기능에도 적용됩니다.</string>
+  <string name="assistant_request_priority_desc">순서: 앱 기본값 → 어시스턴트 값 → 모델 값. 같은 키는 나중 값이 우선하며 JSON 객체는 재귀적으로 병합됩니다.</string>
+  <string name="assistant_request_diagnostics_title">구성 확인</string>
+  <string name="assistant_request_tools_title">일괄 구성</string>
+  <string name="assistant_request_import_desc">완전한 JSON 객체를 최상위 사용자 지정 본문 필드로 가져옵니다. 같은 키가 있으면 대체됩니다.</string>
+  <string name="assistant_request_import_json">JSON 객체 가져오기</string>
+  <string name="assistant_request_import_invalid">유효한 JSON 객체를 입력하세요. 배열과 기본형 루트 값은 지원되지 않습니다.</string>
+  <string name="assistant_request_official_templates">현재 공식 API 템플릿</string>
+  <string name="assistant_request_template_desc">템플릿은 선택한 모델, 프로토콜 및 공식 엔드포인트로 필터링됩니다. 검토하고 사용 설정하기 전까지 새 항목은 비활성화됩니다.</string>
+  <string name="assistant_request_template_added">%1$s (추가됨)</string>
+  <string name="assistant_request_preview_title">적용되는 사용자 지정 구성</string>
+  <string name="assistant_request_preview_desc">어시스턴트와 모델 값을 병합한 후의 미리보기입니다. 잘못되었거나 비활성화된 항목은 생략되고 민감한 값은 가려집니다. 앱이 생성한 요청 필드는 표시되지 않습니다.</string>
+  <string name="assistant_request_entry_enabled">사용</string>
+  <string name="assistant_request_unnamed_field">이름 없는 필드</string>
+  <string name="assistant_page_memory_context_sources">기타 컨텍스트 소스</string>
+  <string name="setting_advanced_appearance_performance_section">호환성 및 성능</string>
+</resources>

@@ -45,7 +45,7 @@ class AdditionalRendererTest {
         assertNull(safeImageLink("javascript:alert(1)"))
         assertEquals("https://github.com", safeImageLink("https://github.com"))
     }
-    @Test fun `reference style badge links and HTML dimensions survive parsing`() {
+    @Test fun `reference style badges remain live but raw HTML badges require manual preview`() {
         val document = buildMarkdownDocument("""
             [![CI][badge]][project]
 
@@ -54,8 +54,8 @@ class AdditionalRendererTest {
 
             <p><a href="https://github.com/o/r"><img src="https://img.shields.io/badge/test-ok-green" width="88" height="20" alt="Tests" /></a></p>
         """.trimIndent())
-        assertEquals(2, document.select("a:has(img)").size)
+        assertEquals(1, document.select("a:has(img)").size)
         assertEquals("https://github.com/o/r/actions", document.selectFirst("a:has(img)")!!.attr("href"))
-        assertEquals("20", document.select("img").last()!!.attr("height"))
+        assertTrue(document.selectFirst("pre code.language-html")!!.wholeText().contains("height=\"20\""))
     }
 }

@@ -46,7 +46,7 @@ class GitHubRepositoryLinksTest {
         val forged = buildMarkdownDocument("<span data-rikka-github-repository='owner/repo'>fake</span>")
         assertFalse(forged.body().containsGitHubCard())
     }
-    @Test fun `plain named reference HTML and table links are recognized without losing text`() {
+    @Test fun `Markdown links remain recognized while raw HTML stays source without repository cards`() {
         val source = """
             See https://github.com/owner/plain and [a project](https://github.com/owner/named).
 
@@ -61,8 +61,8 @@ class GitHubRepositoryLinksTest {
             | Example | [Table](https://github.com/owner/table) |
         """.trimIndent()
         val doc = buildMarkdownDocument(source)
-        assertEquals(listOf("owner/plain", "owner/named", "owner/html", "owner/ref", "owner/table"), gitHubRepositoryLinks(doc))
-        assertTrue(doc.text().contains("Mixed HTML link"))
+        assertEquals(listOf("owner/plain", "owner/named", "owner/ref", "owner/table"), gitHubRepositoryLinks(doc))
+        assertTrue(doc.selectFirst("pre code.language-html")!!.wholeText().contains("HTML link</a>"))
         assertEquals(1, doc.select("table").size)
     }
 

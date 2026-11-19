@@ -1,4 +1,5 @@
-import { sse } from "~/services/api";
+import { sse, type SSEEvent } from "~/services/api";
+import { reconnectingStream } from "./reconnecting-stream";
 
 /**
  * Multiplexed SSE client for `/api/events`.
@@ -16,12 +17,8 @@ export const EVENT_FOLDERS = "folders";
 
 type EventListener = (data: unknown) => void;
 
-const RECONNECT_DELAY_MS = 1000;
-
 const listeners = new Map<string, Set<EventListener>>();
-let abortController: AbortController | null = null;
-let running = false;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let stopConnection: (() => void) | null = null;
 
 function hasListeners(): boolean {
   for (const set of listeners.values()) {
@@ -42,23 +39,10 @@ function dispatch(event: string, data: unknown) {
   }
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer !== null) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    startConnection();
-  }, RECONNECT_DELAY_MS);
-}
-
 function startConnection() {
-  if (running || !hasListeners()) return;
-  running = true;
-
-  const controller = new AbortController();
-  abortController = controller;
-
-  void sse<unknown>(
-    "events",
+  if (stopConnection || !hasListeners()) return;
+  stopConnection = reconnectingStream<SSEEvent<unknown>>(
+    (callbacks, signal) => sse<unknown>("events", callbacks, { signal }),
     {
       onMessage: ({ event, data }) => {
         dispatch(event, data);
@@ -66,30 +50,14 @@ function startConnection() {
       onError: (error) => {
         console.error("Events SSE error:", error);
       },
-      onClose: () => {
-        running = false;
-        if (abortController === controller) {
-          abortController = null;
-        }
-        // Reconnect on unexpected drop while listeners remain; skip intentional aborts.
-        if (!controller.signal.aborted && hasListeners()) {
-          scheduleReconnect();
-        }
-      },
     },
-    { signal: controller.signal },
   );
 }
 
 function stopIfIdle() {
   if (hasListeners()) return;
-  if (reconnectTimer !== null) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-  abortController?.abort();
-  abortController = null;
-  running = false;
+  stopConnection?.();
+  stopConnection = null;
 }
 
 /**

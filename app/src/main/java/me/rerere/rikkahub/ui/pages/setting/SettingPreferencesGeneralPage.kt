@@ -109,6 +109,26 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        headlineContent = { Text("HEX 色彩预览") },
+                        supportingContent = { Text("在用户和模型消息的 #RRGGBB 旁显示与字号一致的色块") },
+                        trailingContent = {
+                            Switch(checked = displaySetting.showHexColorSwatches, onCheckedChange = { enabled ->
+                                displaySetting = displaySetting.copy(showHexColorSwatches = enabled)
+                                vm.updateDisplaySetting { it.copy(showHexColorSwatches = enabled) }
+                            })
+                        },
+                    )
+                    item(
+                        headlineContent = { Text("双引号内容高亮") },
+                        supportingContent = { Text("跟随文字取色，以鲜明的高对比度颜色强调双引号中的内容") },
+                        trailingContent = {
+                            Switch(checked = displaySetting.highlightQuotedText, onCheckedChange = { enabled ->
+                                displaySetting = displaySetting.copy(highlightQuotedText = enabled)
+                                vm.updateDisplaySetting { it.copy(highlightQuotedText = enabled) }
+                            })
+                        },
+                    )
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_desc)) },
                         trailingContent = {

@@ -11,6 +11,7 @@ import me.rerere.ai.provider.providers.openai.miniMaxVideoSetting
  * Provider管理器，负责注册和获取Provider实例
  */
 class ProviderManager(client: OkHttpClient, context: Context) {
+    val decisionModels = DecisionModelApi(client)
     // 存储已注册的Provider实例
     private val providers = mutableMapOf<String, Provider<*>>()
 

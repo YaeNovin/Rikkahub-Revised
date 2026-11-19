@@ -23,6 +23,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import kotlinx.serialization.json.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -52,9 +56,9 @@ internal fun resolveWebViewGestureOwner(
     else -> WebViewGestureOwner.WEB_VIEW
 }
 
-private class ParentVerticalScrollTouchListener(
+private class ParentVerticalScrollCoordinator(
     private val touchSlop: Float,
-) : View.OnTouchListener {
+) {
     private var downX = 0f
     private var downY = 0f
     private var minimumPageScale = Float.POSITIVE_INFINITY
@@ -63,7 +67,7 @@ private class ParentVerticalScrollTouchListener(
     fun reset() { minimumPageScale = Float.POSITIVE_INFINITY; lockedOwner = WebViewGestureOwner.UNDECIDED }
 
     @Suppress("DEPRECATION")
-    override fun onTouch(view: View, event: MotionEvent): Boolean {
+    fun onMotion(view: View, event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
@@ -114,14 +118,20 @@ private class ParentVerticalScrollTouchListener(
                 view.parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
-        return false
     }
 }
 
 
 private class RenderingWebView(context: Context) : WebView(context) {
     val loads = WebViewLoadTracker()
-    val gesture = ParentVerticalScrollTouchListener(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    val gesture = ParentVerticalScrollCoordinator(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
+    var preferParentVerticalScroll: Boolean = false
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (preferParentVerticalScroll) gesture.onMotion(this, event)
+        // Only coordinate interception. Native WebView owns clicks, accessibility and links.
+        return super.dispatchTouchEvent(event)
+    }
     var injectedNames: Set<String> = emptySet()
     private var injectedObjects: Map<String, Any> = emptyMap()
     var released = false
@@ -138,7 +148,7 @@ private class RenderingWebView(context: Context) : WebView(context) {
     fun release() {
         if (released) return
         released = true
-        setOnTouchListener(null)
+        preferParentVerticalScroll = false
         runCatching { stopLoading() }
         injectedNames.forEach { name -> runCatching { removeJavascriptInterface(name) } }
         injectedNames = emptySet()
@@ -200,6 +210,30 @@ private class RenderingWebViewHost(context: Context) : FrameLayout(context) {
 }
 
 internal class MyWebChromeClient(private val state: WebViewState) : WebChromeClient() {
+    override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult): Boolean {
+        if (state.content !is WebContent.Data) return super.onJsAlert(view, url, message, result)
+        result.cancel(); return true
+    }
+    override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult): Boolean {
+        if (state.content !is WebContent.Data) return super.onJsConfirm(view, url, message, result)
+        result.cancel(); return true
+    }
+    override fun onJsPrompt(view: WebView?, url: String?, message: String?, defaultValue: String?, result: JsPromptResult): Boolean {
+        if (state.content !is WebContent.Data) return super.onJsPrompt(view, url, message, defaultValue, result)
+        result.cancel(); return true
+    }
+    override fun onPermissionRequest(request: PermissionRequest) {
+        // Renderers do not need camera, microphone or protected media access.
+        request.deny()
+    }
+
+    override fun onCreateWindow(
+        view: WebView?,
+        isDialog: Boolean,
+        isUserGesture: Boolean,
+        resultMsg: android.os.Message?,
+    ): Boolean = false
+
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
         if (state.webView === view) {
             state.loadingProgress = (newProgress / 100f).coerceIn(0f, 1f)
@@ -211,7 +245,10 @@ internal class MyWebChromeClient(private val state: WebViewState) : WebChromeCli
     }
     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
         state.pushConsoleMessage(message)
-        if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) Log.w(TAG, "Renderer: ${message.message()}")
+        if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR && state.content is WebContent.Data) {
+            me.rerere.rikkahub.data.render.RenderDiagnostics.report("WebView", "javascript",
+                "line=${message.lineNumber()}\n${message.message()}")
+        }
         return true
     }
 }
@@ -247,18 +284,28 @@ internal class MyWebViewClient(private val state: WebViewState) : WebViewClient(
         }
     }
     override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+        if (state.webView === view && state.content is WebContent.Data) {
+            me.rerere.rikkahub.data.render.RenderDiagnostics.report("WebView", "resource",
+                "code=${error.errorCode}; mainFrame=${request.isForMainFrame}; ${error.description}")
+        }
         if (request.isForMainFrame && state.webView === view) {
             state.isLoading = false
             state.error = "页面加载失败（${error.errorCode}），可重试或返回查看源码。"
         }
     }
     override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+        if (state.webView === view && state.content is WebContent.Data) {
+            me.rerere.rikkahub.data.render.RenderDiagnostics.report("WebView", "http",
+                "HTTP ${response.statusCode}; mainFrame=${request.isForMainFrame}")
+        }
         if (request.isForMainFrame && state.webView === view) {
             state.isLoading = false
             state.error = "页面加载失败：HTTP ${response.statusCode}"
         }
     }
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+        me.rerere.rikkahub.data.render.RenderDiagnostics.report("WebView", "process_exit",
+            "didCrash=${detail.didCrash()}; priority=${detail.rendererPriorityAtExit()}")
         if (state.webView === view) {
             state.webView = null
             state.isLoading = false
@@ -280,13 +327,47 @@ fun WebView(
     transparentBackground: Boolean = false,
     onCreated: (WebView) -> Unit = {},
     onUpdated: (WebView) -> Unit = {},
+    nativeZoomEnabled: Boolean = true,
+    previewHeight: Dp? = null,
 ) {
     val chrome = remember(state) { MyWebChromeClient(state) }
     val client = remember(state) { MyWebViewClient(state) }
     val hostView = LocalView.current
+    val linkActions by rememberUpdatedState(me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler.current)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var hostResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     val loadingView = state.webView
     val loadGeneration = state.loadGeneration
+    LaunchedEffect(loadingView, loadGeneration, state.isLoading) {
+        if (loadingView == null || state.isLoading || state.content !is WebContent.Data) return@LaunchedEffect
+        repeat(30) {
+            kotlinx.coroutines.delay(1_000)
+            if (state.webView !== loadingView || state.loadGeneration != loadGeneration) return@LaunchedEffect
+            val result = kotlinx.coroutines.withTimeoutOrNull(1_500) {
+                kotlinx.coroutines.suspendCancellableCoroutine<String> { continuation ->
+                    loadingView.evaluateJavascript("""
+                        (() => JSON.stringify({status: window.__rikkaRenderStatus || '',
+                          renderer: document.querySelector('meta[name=rikkahub-geometry-kind]')?.content || 'WebView',
+                          error: window.__rikkaRenderStatus === 'error' ?
+                            (document.querySelector('#error, #render-error')?.textContent || 'Render failed').slice(0,4096) : ''}))()
+                    """.trimIndent()) { value ->
+                        if (continuation.isActive) continuation.resumeWith(Result.success(value))
+                    }
+                }
+            }
+            val probe = runCatching {
+                Json.parseToJsonElement(Json.parseToJsonElement(result ?: "null").jsonPrimitive.content).jsonObject
+            }.getOrNull()
+            if (probe?.get("status")?.jsonPrimitive?.content == "error") {
+                me.rerere.rikkahub.data.render.RenderDiagnostics.report(
+                    probe["renderer"]?.jsonPrimitive?.content.orEmpty(), "runtime",
+                    probe["error"]?.jsonPrimitive?.content.orEmpty())
+                return@LaunchedEffect
+            }
+            // Finished/static pages need no recurring polling while the user scrolls.
+            if (probe?.get("status")?.jsonPrimitive?.content in setOf("ready", "disposed", "")) return@LaunchedEffect
+        }
+    }
     var showLoadingIndicator by remember(state) { mutableStateOf(false) }
     LaunchedEffect(loadingView, loadGeneration, state.isLoading) {
         showLoadingIndicator = false
@@ -303,9 +384,13 @@ fun WebView(
             state.isLoading = false
             state.loadingProgress = 1f
             state.loadWarning = "部分网页资源加载超时，已保留当前内容。可重试或查看源码。"
+            me.rerere.rikkahub.data.render.RenderDiagnostics.report("WebView", "load_timeout", state.loadWarning.orEmpty())
         }
     }
     val exportTracker = me.rerere.rikkahub.ui.components.ui.LocalExportRenderTracker.current
+    val exportDensity = LocalDensity.current
+    var exportHeight by remember(state) { mutableStateOf<Dp?>(null) }
+    var exportError by remember(state) { mutableStateOf<String?>(null) }
     if (exportTracker != null) {
         val exportToken = remember(state) { Any() }
         DisposableEffect(exportTracker, state) {
@@ -313,41 +398,76 @@ fun WebView(
             onDispose { exportTracker.complete(exportToken) }
         }
         LaunchedEffect(exportTracker, state) {
+            fun fallback(reason: String) {
+                me.rerere.rikkahub.data.render.RenderDiagnostics.report("WebView", "image_export", reason)
+                exportError = reason
+                exportTracker.warn(exportToken, reason)
+            }
+            val deadline = android.os.SystemClock.elapsedRealtime() + 25_000
             while (true) {
-                state.error?.let { exportTracker.fail(exportToken, it); return@LaunchedEffect }
+                state.error?.let { fallback(it); return@LaunchedEffect }
+                if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                    fallback("图形加载超时，未能包含预览；原始源码仍保留在对话中")
+                    return@LaunchedEffect
+                }
                 val view = state.webView
                 if (view != null && state.loadingProgress >= 1f && !state.isLoading) {
-                    val status = kotlinx.coroutines.suspendCancellableCoroutine<String> { continuation ->
-                        view.evaluateJavascript("""(function() {
-                            if (window.__rikkaRenderStatus === 'error') return 'error';
-                            if (document.readyState !== 'complete' || window.__rikkaRenderStatus === 'loading') return 'loading';
-                            if (document.fonts && document.fonts.status !== 'loaded') return 'loading';
-                            if (Array.from(document.images).some(function(image) { return !image.complete; })) return 'loading';
-                            document.querySelectorAll('svg').forEach(function(svg) { if (svg.pauseAnimations) svg.pauseAnimations(); });
-                            if (document.getAnimations) document.getAnimations().forEach(function(animation) { animation.pause(); });
-                            return 'ready';
-                        })()""") { result -> if (continuation.isActive) continuation.resumeWith(Result.success(result)) }
-                    }
-                    if (status == "\"error\"") {
-                        exportTracker.fail(exportToken, "图形渲染失败，请检查图形源码")
-                        return@LaunchedEffect
-                    }
-                    if (status == "\"ready\"") {
-                        kotlinx.coroutines.suspendCancellableCoroutine<Unit> { continuation ->
-                            view.postVisualStateCallback(0L, object : WebView.VisualStateCallback() {
-                                override fun onComplete(requestId: Long) { if (continuation.isActive) continuation.resumeWith(Result.success(Unit)) }
-                            })
+                    val response = kotlinx.coroutines.withTimeoutOrNull(2_000) {
+                        kotlinx.coroutines.suspendCancellableCoroutine<String> { continuation ->
+                            view.evaluateJavascript(WEBVIEW_EXPORT_PROBE) { result ->
+                                if (continuation.isActive) continuation.resumeWith(Result.success(result))
+                            }
                         }
-                        exportTracker.complete(exportToken)
+                    }
+                    val probe = runCatching {
+                        Json.parseToJsonElement(Json.parseToJsonElement(response ?: "null").jsonPrimitive.content).jsonObject
+                    }.getOrNull()
+                    val status = probe?.get("status")?.jsonPrimitive?.content
+                    if (status == "error") {
+                        fallback(probe?.get("error")?.jsonPrimitive?.content.orEmpty())
                         return@LaunchedEffect
                     }
-                }
+                    if (status == "ready") {
+                        val cssHeight = probe?.get("height")?.jsonPrimitive?.doubleOrNull ?: 0.0
+                        val viewport = probe?.get("viewport")?.jsonPrimitive?.doubleOrNull ?: 0.0
+                        val naturalPixels = if (viewport > 0) kotlin.math.ceil(cssHeight * view.height / viewport).toInt() else view.height
+                        if (previewHeight != null && naturalPixels > view.height + 2) {
+                            if (naturalPixels > 24_000) {
+                                fallback("图形内容过长，无法完整绘入本页；请单独导出原始图形")
+                                return@LaunchedEffect
+                            }
+                            exportHeight = with(exportDensity) { naturalPixels.toDp() }
+                            kotlinx.coroutines.delay(100)
+                            continue
+                        }
+                        val painted = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                            kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { continuation ->
+                                view.postVisualStateCallback(0L, object : WebView.VisualStateCallback() {
+                                    override fun onComplete(requestId: Long) { if (continuation.isActive) continuation.resumeWith(Result.success(true)) }
+                                })
+                            }
+                        }
+                        if (painted != true) { fallback("图形未能完成绘制，原始源码仍保留在对话中"); return@LaunchedEffect }
+                        exportTracker.complete(exportToken)
+                return@LaunchedEffect
+            }
+            // Finished/static pages need no recurring polling while the user scrolls.
+            if (probe?.get("status")?.jsonPrimitive?.content in setOf("ready", "disposed", "")) return@LaunchedEffect
+        }
                 kotlinx.coroutines.delay(32)
             }
         }
     }
     var nearViewport by remember(state, deferUntilVisible) { mutableStateOf(!deferUntilVisible) }
     var inViewport by remember(state) { mutableStateOf(false) }
+    // Fixed renderers may pause their own timers; no native bridge or global pauseTimers.
+    LaunchedEffect(state.webView, state.isLoading, hostResumed, inViewport, deferUntilVisible, exportTracker) {
+        if (!state.isLoading) {
+            val active = hostResumed && (!deferUntilVisible || inViewport) && exportTracker == null
+            state.webView?.notifyRenderEnvironment()
+            state.webView?.evaluateJavascript("if (typeof window.rikkaSetHostActive === 'function') window.rikkaSetHostActive($active);", null)
+        }
+    }
     var promoted by remember(state) { mutableStateOf<Long?>(null) }
     val budgetId = remember(state) { InlineWebViewBudget.allocate() }
     DisposableEffect(budgetId, deferUntilVisible, nearViewport, inViewport, promoted, state.error) {
@@ -357,15 +477,17 @@ fun WebView(
     DisposableEffect(lifecycle, state) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> state.webView?.onResume()
-                Lifecycle.Event.ON_PAUSE -> state.webView?.onPause()
+                Lifecycle.Event.ON_RESUME -> { hostResumed = true; state.webView?.onResume() }
+                Lifecycle.Event.ON_PAUSE -> { hostResumed = false; state.webView?.onPause() }
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    Box(modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
+    val sizedModifier = if (previewHeight != null && !(exportTracker != null && (exportError != null || state.error != null)))
+        modifier.height(exportHeight ?: previewHeight) else modifier
+    Box(sizedModifier.fillMaxWidth().onGloballyPositioned { coordinates ->
         if (deferUntilVisible) {
             val bounds = coordinates.boundsInWindow(clipBounds = false)
             val height = hostView.height.toFloat().coerceAtLeast(1f)
@@ -375,7 +497,7 @@ fun WebView(
             if (!nearViewport) promoted = null
         }
     }) {
-        val error = state.error
+        val error = exportError ?: state.error
         val admitted = !deferUntilVisible || InlineWebViewBudget.allows(budgetId)
         val active = nearViewport && admitted && error == null
         key(state) {
@@ -414,7 +536,7 @@ fun WebView(
                         renderer = created
                         created.settings.domStorageEnabled = true
                         created.settings.allowContentAccess = true
-                        if (exportTracker != null) created.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                        created.setLayerType(previewLayerType(exportTracker != null), null)
                         created.setBackgroundColor(if (transparentBackground) Color.TRANSPARENT else Color.WHITE)
                         state.webView = created
                         addView(created, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -425,13 +547,41 @@ fun WebView(
                         state.webView = view
                         view.webChromeClient = chrome
                         view.webViewClient = client
+                        view.setOnLongClickListener {
+                            val handler = linkActions ?: return@setOnLongClickListener false
+                            val hit = view.hitTestResult
+                            when (hit.type) {
+                                android.webkit.WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                                    hit.extra?.let { handler(me.rerere.rikkahub.ui.components.richtext.LinkTarget(it)) } != null
+                                }
+                                android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                                    val callback = Handler(Looper.getMainLooper()) { message ->
+                                        message.data.getString("url")?.let {
+                                            handler(me.rerere.rikkahub.ui.components.richtext.LinkTarget(it, message.data.getString("title").orEmpty()))
+                                        }
+                                        true
+                                    }
+                                    view.requestFocusNodeHref(callback.obtainMessage())
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
                         view.setBackgroundColor(if (transparentBackground) Color.TRANSPARENT else Color.WHITE)
-                        view.setOnTouchListener(if (preferParentVerticalScroll) view.gesture else null)
+                        view.preferParentVerticalScroll = preferParentVerticalScroll
                         view.updateInterfaces(interfaces)
                         view.settings.javaScriptEnabled = javaScriptEnabled
+                        view.settings.allowFileAccess = false
+                        view.settings.allowContentAccess = false
+                        view.settings.javaScriptCanOpenWindowsAutomatically = false
+                        view.settings.setSupportMultipleWindows(false)
+                        view.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            view.settings.safeBrowsingEnabled = true
+                        }
                         view.settings.apply(state.settings)
-                        view.settings.setSupportZoom(true)
-                        view.settings.builtInZoomControls = true
+                        view.settings.setSupportZoom(nativeZoomEnabled)
+                        view.settings.builtInZoomControls = nativeZoomEnabled
                         view.settings.displayZoomControls = false
                         view.settings.useWideViewPort = true
                         view.settings.loadWithOverviewMode = true
@@ -456,7 +606,7 @@ fun WebView(
             )
         }
         if (nearViewport && error != null) {
-            Column { Text(error); TextButton(onClick = state::reload) { Text("重试") } }
+            Column { Text(error); if (exportTracker == null) TextButton(onClick = state::reload) { Text("重试") } }
         } else if (nearViewport && !admitted) {
             TextButton(onClick = { promoted = InlineWebViewBudget.promote() }) { Text("加载图形") }
         } else if (active && state.isLoading && showLoadingIndicator) LinearProgressIndicator(progress = { state.loadingProgress }, modifier = Modifier.fillMaxWidth())

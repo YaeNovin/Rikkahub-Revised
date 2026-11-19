@@ -7,6 +7,9 @@ import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaFolderEntity
 
 class GenMediaRepository(private val dao: GenMediaDAO) {
+    suspend fun webPage(query: String, folderId: String?, limit: Int, offset: Int) = dao.webPage(query, folderId, limit, offset)
+    suspend fun byPath(path: String) = dao.byPath(path)
+    suspend fun byId(id: Int) = dao.byId(id)
     fun getAllMedia(): PagingSource<Int, GenMediaEntity> = dao.getAll()
 
     fun searchMedia(query: String, folderId: String?): PagingSource<Int, GenMediaEntity> =

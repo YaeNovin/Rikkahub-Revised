@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <string name="setting_provider_page_decision_model">Decision</string>
   <string name="setting_advanced_appearance_preview_background">Global background in fullscreen previews</string>
   <string name="setting_advanced_appearance_preview_background_desc">Uses the global background and its opacity, blur and page style in fullscreen diagrams. Opaque page style hides it. Disable to use the theme background. The preview button controls this same setting.</string>
   <string name="webview_preview_background_enable">Enable global preview background</string>
@@ -486,7 +487,10 @@
   <string name="chat_image_settings">Image generation settings</string>
   <string name="chat_send_to_chat_model">Send to chat model</string>
   <string name="chat_send_to_image_model">Send to image model</string>
-  <string name="chat_page_message_count">%d messages</string>
+  <plurals name="chat_page_message_count">
+    <item quantity="one">%d message</item>
+    <item quantity="other">%d messages</item>
+  </plurals>
   <string name="chat_page_loading_conversation">Loading conversation…</string>
   <string name="chat_page_memory_count">%1$d recent</string>
   <string name="chat_page_memory_status_ready">Memory is running normally</string>
@@ -532,7 +536,10 @@
   <string name="chat_page_yesterday">Yesterday</string>
   <string name="chat_size_dialog_content">Current message count: %1$d. This may cause the application to crash or lag, or even lose this conversation data. Please create a new conversation as soon as possible to continue chatting.</string>
   <string name="chat_size_dialog_title">This conversation data is too large</string>
-  <string name="citations_count">%1$d Citations</string>
+  <plurals name="citations_count">
+    <item quantity="one">%1$d Citation</item>
+    <item quantity="other">%1$d Citations</item>
+  </plurals>
   <string name="code_block_collapse">Collapse</string>
   <string name="code_block_copy">Copy Code</string>
   <string name="code_block_expand">Expand</string>
@@ -1788,7 +1795,7 @@
   <string name="setting_provider_page_api_base_url">API Base Url</string>
   <string name="setting_provider_page_api_key">API Key</string>
   <string name="setting_provider_page_api_path">API Path</string>
-  <string name="setting_provider_page_avaliable_models">Avaliable Models</string>
+  <string name="setting_provider_page_avaliable_models">Available Models</string>
   <string name="setting_provider_page_balance_api_path">Balance API Path</string>
   <string name="setting_provider_page_balance_info">"Get account balance "</string>
   <string name="setting_provider_page_balance_json_key">Result Json Key</string>
@@ -1818,7 +1825,7 @@
   <string name="setting_provider_page_import_service_account_json">Import Service Account JSON</string>
   <string name="setting_provider_page_import_success">Import successful</string>
   <string name="setting_provider_page_input_modality">Input Modality</string>
-  <string name="setting_provider_page_location">Location (e.g. us-central1)</string>
+  <string name="setting_provider_page_location" tools:ignore="Typos">Location (e.g. us-central1)</string>
   <string name="setting_provider_page_model_count">%d models</string>
   <string name="setting_provider_page_model_display_name">Model Display Name</string>
   <string name="setting_provider_page_model_display_name_placeholder">e.g.: GPT-3.5, for UI display</string>

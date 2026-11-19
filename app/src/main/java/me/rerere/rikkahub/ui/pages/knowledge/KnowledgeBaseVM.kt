@@ -10,19 +10,23 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
-import me.rerere.rikkahub.data.knowledge.KnowledgeDocumentImporter
+import me.rerere.rikkahub.data.knowledge.KnowledgeImportCoordinator
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 import kotlin.uuid.Uuid
 
 class KnowledgeBaseVM(
     private val repository: KnowledgeBaseRepository,
-    private val importer: KnowledgeDocumentImporter,
+    private val imports: KnowledgeImportCoordinator,
     private val settingsStore: SettingsStore,
+    private val appScope: AppScope,
 ) : ViewModel() {
+    val importProgress = imports.progress.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
     val bases: StateFlow<List<KnowledgeBaseEntity>> = repository
         .observeBases()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -46,7 +50,7 @@ class KnowledgeBaseVM(
     }
 
     fun deleteBase(id: String) {
-        viewModelScope.launch { repository.deleteBase(id) }
+        runImportAction { imports.deleteBase(id) }
     }
 
     fun setBaseEnabled(id: String, enabled: Boolean) {
@@ -64,8 +68,11 @@ class KnowledgeBaseVM(
     }
 
     fun deleteDocument(id: String) {
-        viewModelScope.launch { repository.deleteDocument(id) }
+        runImportAction { imports.deleteDocument(id) }
     }
+
+    fun retryImport(id: String) { runImportAction { imports.retry(id) } }
+    fun cancelImport(id: String) { runImportAction { imports.cancel(id) } }
 
     fun setAssistantBinding(baseId: String, assistantId: Uuid, bound: Boolean) {
         viewModelScope.launch {
@@ -122,10 +129,19 @@ class KnowledgeBaseVM(
     }
 
     fun importDocument(base: KnowledgeBaseEntity, uri: Uri) {
-        viewModelScope.launch {
+        runImportAction { imports.importDocument(base, uri) }
+    }
+
+    private fun runImportAction(action: suspend () -> Unit) {
+        appScope.launch {
             _lastError.value = null
-            runCatching { importer.importDocument(base, uri) }
-                .onFailure { _lastError.value = it.message ?: it.javaClass.simpleName }
+            try {
+                action()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _lastError.value = error.message ?: error.javaClass.simpleName
+            }
         }
     }
 }

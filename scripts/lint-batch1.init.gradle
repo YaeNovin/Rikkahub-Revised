@@ -1,0 +1,14 @@
+// Opt-in verification scope. Without this init script, full project Lint is unchanged.
+def batchChecks = ['MissingPermission', 'NewApi', 'ContextCastToActivity',
+                   'RememberReturnType', 'StringFormatInvalid', 'StringFormatCount', 'Aligned16KB']
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.plugins.withId(pluginId) {
+            def lint = project.extensions.getByName('android').lint
+            lint.checkOnly.addAll(batchChecks)
+            lint.xmlOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch1.xml')
+            lint.htmlOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch1.html')
+            lint.textOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch1.txt')
+        }
+    }
+}

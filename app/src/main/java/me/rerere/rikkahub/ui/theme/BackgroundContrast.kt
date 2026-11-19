@@ -78,6 +78,10 @@ internal fun wcagContrastRatio(foreground: Color, background: Color): Float {
     val effectiveForeground = foreground.compositeOver(opaqueBackground)
     val foregroundLuminance = wcagRelativeLuminance(effectiveForeground)
     val backgroundLuminance = wcagRelativeLuminance(opaqueBackground)
+    return contrastFromLuminances(foregroundLuminance, backgroundLuminance)
+}
+
+internal fun contrastFromLuminances(foregroundLuminance: Float, backgroundLuminance: Float): Float {
     val lighter = max(foregroundLuminance, backgroundLuminance)
     val darker = min(foregroundLuminance, backgroundLuminance)
     return ((lighter + WCAG_DARK_OFFSET) / (darker + WCAG_DARK_OFFSET)).toFloat()

@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting.components
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,10 +44,16 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.reflect.KClass
+
+private const val MAX_SERVICE_ACCOUNT_JSON_CHARS = 1024 * 1024
 
 @Composable
 fun ProviderConfigure(
@@ -353,6 +362,17 @@ private fun ProviderConfigureClaude(
         )
     }
 
+    if (provider.baseUrl.toHttpUrlOrNull()?.host == "api.anthropic.com") {
+        OutlinedTextField(
+            value = provider.apiVersion,
+            onValueChange = { onEdit(provider.copy(apiVersion = it.trim())) },
+            label = { Text("Anthropic API 版本") },
+            supportingText = { Text("旧配置沿用 2023-06-01；可按官方文档填写 2026-10-21 等日期版本。") },
+            singleLine = true,
+            isError = provider.apiVersion.isNotBlank() && !Regex("\\d{4}-\\d{2}-\\d{2}").matches(provider.apiVersion),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
     if (provider.promptCaching) {
         Text(stringResource(R.string.setting_provider_page_claude_prompt_cache_ttl))
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
@@ -384,30 +404,50 @@ private fun ProviderConfigureGoogle(
     onEdit: (provider: ProviderSetting.Google) -> Unit
 ) {
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
     val serviceAccountJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        try {
-            val content = context.contentResolver.openInputStream(uri)
-                ?.bufferedReader()
-                ?.readText()
-                ?: return@rememberLauncherForActivityResult
-            val json = Json.parseToJsonElement(content).jsonObject
-            onEdit(
-                provider.copy(
-                    projectId = json["project_id"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.projectId,
-                    serviceAccountEmail = json["client_email"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.serviceAccountEmail,
-                    privateKey = json["private_key"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.privateKey,
+        scope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    val inputStream = requireNotNull(context.contentResolver.openInputStream(uri)) {
+                        "Unable to open service account JSON"
+                    }
+                    val content = inputStream.bufferedReader().use { reader ->
+                        val result = StringBuilder()
+                        val buffer = CharArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val count = reader.read(buffer)
+                            if (count < 0) break
+                            require(result.length + count <= MAX_SERVICE_ACCOUNT_JSON_CHARS) {
+                                "Service account JSON is too large"
+                            }
+                            result.append(buffer, 0, count)
+                        }
+                        result.toString()
+                    }
+                    Json.parseToJsonElement(content).jsonObject
+                }
+                onEdit(
+                    provider.copy(
+                        projectId = json["project_id"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.projectId,
+                        serviceAccountEmail = json["client_email"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.serviceAccountEmail,
+                        privateKey = json["private_key"]?.jsonPrimitive?.contentOrNull?.ifEmpty { null } ?: provider.privateKey,
+                    )
                 )
-            )
-            toaster.show(
-                context.getString(R.string.setting_provider_page_import_success),
-                type = ToastType.Success,
-            )
-        } catch (e: Exception) {
-            toaster.show(context.formatUserFacingError(e), type = ToastType.Error)
+                toaster.show(
+                    appResources.getString(R.string.setting_provider_page_import_success),
+                    type = ToastType.Success,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                toaster.show(context.formatUserFacingError(error), type = ToastType.Error)
+            }
         }
     }
 
@@ -438,6 +478,17 @@ private fun ProviderConfigureGoogle(
     }
 
     if (!provider.vertexAI) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Interactions API(Beta)", modifier = Modifier.weight(1f))
+            Switch(checked = provider.useInteractionsApi,
+                onCheckedChange = { onEdit(provider.copy(useInteractionsApi = it)) })
+        }
+        Text("实验性聊天协议，使用本地完整历史，不在服务端存储会话。图像生成仍使用原有接口。",
+            style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
             value = provider.baseUrl,
             onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
@@ -472,7 +523,7 @@ private fun ProviderConfigureGoogle(
         Text(stringResource(R.string.setting_provider_page_vertex_ai))
         Switch(
             checked = provider.vertexAI,
-            onCheckedChange = { onEdit(provider.copy(vertexAI = it)) }
+            onCheckedChange = { onEdit(provider.copy(vertexAI = it, useInteractionsApi = if (it) false else provider.useInteractionsApi)) }
         )
     }
 

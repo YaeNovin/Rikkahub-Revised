@@ -2,12 +2,17 @@
   "name": "web-ui",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@12.4.2",
+  "engines": { "node": ">=22.12.0" },
   "scripts": {
     "build": "react-router build && tsx copy.ts",
     "dev": "react-router dev",
-    "start": "react-router-serve ./build/server/index.js",
+    "start": "vite preview --outDir build/client",
     "typecheck": "react-router typegen && tsc",
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "tsx --test tests/*.test.tsx",
     "lint": "oxlint app --fix",
+    "lint:check": "oxlint app tests",
     "fmt": "oxfmt app",
     "fmt:check": "oxfmt app --check"
   },
@@ -49,6 +54,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@react-router/dev": "7.13.0",
     "@tailwindcss/vite": "^4.1.13",
     "@types/node": "^24.10.13",

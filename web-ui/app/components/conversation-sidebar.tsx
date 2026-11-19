@@ -1,4 +1,7 @@
 import * as React from "react";
+import { Link, useLocation } from "react-router";
+import { AssistantSettingsMenu } from "~/components/assistant-settings-menu";
+import { ImagePlus, Settings as SettingsIcon } from "lucide-react";
 
 import dayjs from "dayjs";
 import type { TFunction } from "i18next";
@@ -71,7 +74,7 @@ import { ConversationSearchButton } from "~/components/conversation-search-butto
 import { CustomThemeDialog } from "~/components/custom-theme-dialog";
 import { getAssistantDisplayName } from "~/lib/display";
 import { cn } from "~/lib/utils";
-import { clearWebAuthToken } from "~/services/api";
+import { logoutWebSession } from "~/services/api";
 import type {
   AssistantAvatar,
   AssistantProfile,
@@ -865,10 +868,13 @@ export const ConversationSidebar = React.memo(
       scrollContainer.scrollTo({ top: 0, behavior: "smooth" });
     }, []);
 
-    const handleWebLogout = React.useCallback(() => {
-      clearWebAuthToken();
-      toast.success("Web session cleared");
-      window.location.reload();
+    const handleWebLogout = React.useCallback(async () => {
+      try {
+        await logoutWebSession();
+        window.location.reload();
+      } catch {
+        toast.error("退出登录失败，请检查连接后重试");
+      }
     }, []);
 
     React.useEffect(() => {
@@ -1016,7 +1022,8 @@ export const ConversationSidebar = React.memo(
             )}
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter>
+          <SidebarFooter>
+
           <Dialog
             open={pickerOpen}
             onOpenChange={(open) => {
@@ -1026,10 +1033,11 @@ export const ConversationSidebar = React.memo(
               }
             }}
           >
+            <div className="flex items-center rounded-md border">
             <DialogTrigger asChild>
               <Button
-                variant="outline"
-                className="w-full justify-start gap-2 text-foreground"
+                variant="ghost"
+                className="min-w-0 flex-1 justify-start gap-2 text-foreground"
                 type="button"
               >
                 {currentAssistant ? (
@@ -1049,6 +1057,8 @@ export const ConversationSidebar = React.memo(
                 )}
               </Button>
             </DialogTrigger>
+            <AssistantSettingsMenu />
+            </div>
             <DialogContent className="max-h-[80svh] max-w-xl overflow-hidden p-0">
               <DialogHeader className="border-b px-6 py-4">
                 <DialogTitle>{t("conversation_sidebar.select_assistant")}</DialogTitle>
@@ -1143,6 +1153,8 @@ export const ConversationSidebar = React.memo(
             )}
 
             <LanguageSwitcher />
+            <Button asChild variant="outline" size="icon-sm"><Link to="/images" aria-label="图片生成" title="图片生成"><ImagePlus className="size-4" /></Link></Button>
+            <SettingsLink />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1226,17 +1238,17 @@ export const ConversationSidebar = React.memo(
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <a
-              href="https://rikka-ai.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto text-xs font-normal text-foreground/80 hover:text-foreground transition-colors"
-            >
-              RikkaHub
-            </a>
+
           </div>
         </SidebarFooter>
       </Sidebar>
     );
   },
 );
+
+function SettingsLink() {
+  const location = useLocation();
+  return <Button asChild variant="outline" size="icon-sm">
+    <Link to="/settings" aria-label="设置" title="设置" state={{ returnTo: location.pathname }}><SettingsIcon className="size-4" /></Link>
+  </Button>;
+}

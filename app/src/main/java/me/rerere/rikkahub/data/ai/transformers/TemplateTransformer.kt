@@ -32,7 +32,8 @@ class TemplateTransformer(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val template = engine.getTemplate(ctx.assistant.id.toString())
+        // The same assistant ID may have independent native and Web templates.
+        val template = engine.getLiteralTemplate(ctx.assistant.messageTemplate)
         val workspaceRepository = runCatching { get<WorkspaceRepository>() }.getOrNull()
         val workspaceId = ctx.assistant.workspaceId?.toString()
         val workspace = if (workspaceRepository != null && workspaceId != null) {

@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -53,6 +53,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
@@ -102,6 +103,7 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownRenderMode
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
+import me.rerere.rikkahub.ui.components.message.tools.RenderingToolContent
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
@@ -425,7 +427,7 @@ private fun messageBubbleAppearance(
 
 @OptIn(FlowPreview::class)
 @Composable
-private fun MessagePartsBlock(
+internal fun MessagePartsBlock(
     assistant: Assistant?,
     role: MessageRole,
     model: Model?,
@@ -453,6 +455,20 @@ private fun MessagePartsBlock(
     val hapticFeedback = LocalHapticFeedback.current
     val partsState by rememberUpdatedState(parts)
     val loadingState by rememberUpdatedState(loading)
+    val linkActions by rememberUpdatedState(me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler.current)
+    val handleLongClickCitation: (String) -> Unit = { citationId ->
+        partsState.filterIsInstance<UIMessagePart.Tool>().filter { it.toolName == "search_web" && it.isExecuted }.forEach { part ->
+            val items = runCatching {
+                JsonInstant.parseToJsonElement(part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
+                    .jsonObject["items"]?.jsonArray
+            }.getOrNull().orEmpty()
+            items.firstOrNull { it.jsonObject["id"]?.jsonPrimitive?.content == citationId }?.jsonObject?.let { item ->
+                item["url"]?.jsonPrimitive?.content?.let { url ->
+                    linkActions?.invoke(me.rerere.rikkahub.ui.components.richtext.LinkTarget(url, item["title"]?.jsonPrimitive?.content.orEmpty()))
+                }
+            }
+        }
+    }
 
     val handleClickCitation: (String) -> Unit = remember {
         handler@{ citationId ->
@@ -530,6 +546,13 @@ private fun MessagePartsBlock(
                 }
             }
 
+            is MessagePartBlock.RenderedContentBlock -> key(block.index) {
+                // Accepted automatic renderers are answer content. The tool
+                // call remains in the persisted parts for replay/export, but
+                // its visual is no longer enclosed by ChainOfThought.
+                RenderingToolContent(block.tool)
+            }
+
             is MessagePartBlock.ContentBlock -> key(block.index) {
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
@@ -545,14 +568,16 @@ private fun MessagePartsBlock(
                         )
                         val theme = me.rerere.rikkahub.ui.theme.LocalBaseThemeColorScheme.current
                             ?: MaterialTheme.colorScheme
-                        val seed = me.rerere.rikkahub.ui.theme.currentTextPaletteSeed()
                         val themeText = if (isUserMessage) theme.onPrimaryContainer else theme.onSurface
-                        val bubbleText = if (!settings.hasActiveChatBackground() && seed == null) themeText else
-                            me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
-                                bubbleAppearance.color, bubbleAppearance.color.alpha, themeText,
-                                me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground.current?.readability?.backgrounds
-                                    ?: listOf(theme.background.copy(alpha = 1f)), seed,
-                            )
+                        val hasWallpaper = settings.hasActiveChatBackground()
+                        val backgroundSamples = me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground.current?.readability?.backgrounds
+                        val paintedContainer = if (isUserMessage || shouldRenderAssistantMessageBubble(settings))
+                            bubbleAppearance.color else Color.Transparent
+                        val textPalette = rememberMessageTextPalette(paintedContainer,
+                            backgroundSamples?.takeIf { hasWallpaper && it.isNotEmpty() }
+                                ?: listOf(theme.background.copy(alpha = 1f)), themeText)
+                        val bubbleText = textPalette.foreground
+                        val textBackgrounds = textPalette.backgrounds
                         val bubbleTextStyle = androidx.compose.material3.LocalTextStyle.current.copy(color = bubbleText)
                         val textContent = @Composable {
                             if (isUserMessage) {
@@ -612,6 +637,7 @@ private fun MessagePartsBlock(
                                     }
                                 } else {
                                     MarkdownBlock(
+                                        style = bubbleTextStyle,
                                         content = part.text.replaceRegexes(
                                             assistant = assistant,
                                             scope = AssistantAffectScope.ASSISTANT,
@@ -625,10 +651,16 @@ private fun MessagePartsBlock(
                         }
 
                         CompositionLocalProvider(
+                            androidx.compose.material3.LocalContentColor provides bubbleText,
+                            androidx.compose.material3.LocalTextStyle provides bubbleTextStyle,
+                            me.rerere.rikkahub.ui.components.richtext.LocalTextSurfaceBackgrounds provides textBackgrounds,
+                            me.rerere.rikkahub.ui.components.richtext.LocalCitationLinkAction provides handleLongClickCitation,
                             me.rerere.rikkahub.ui.components.richtext.LocalGitHubCardsEnabled provides
                                 (role == MessageRole.ASSISTANT),
                         ) {
-                            StreamingSelectionContainer(streaming = loading, content = textContent)
+                            me.rerere.rikkahub.ui.theme.SurfaceTextTheme(bubbleText) {
+                                StreamingSelectionContainer(streaming = loading, content = textContent)
+                            }
                         }
                     }
 
@@ -656,13 +688,15 @@ private fun MessagePartsBlock(
                         ) {
                             ProvideTextStyle(MaterialTheme.typography.labelSmall) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
                                         imageVector = HugeIcons.MusicNote03,
-                                        contentDescription = null,
+                                        contentDescription = stringResource(R.string.audio),
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -684,24 +718,7 @@ private fun MessagePartsBlock(
                                     .shimmer(isLoading = true)
                             )
                         } else if (isGeneratedImage) {
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.82f)
-                                    .widthIn(max = 320.dp),
-                                contentAlignment = Alignment.CenterStart,
-                            ) {
-                                ZoomableAsyncImage(
-                                    model = part.url,
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .widthIn(max = maxWidth)
-                                        .heightIn(max = 320.dp)
-                                        .clip(MaterialTheme.shapes.medium),
-                                    respectIntrinsicSize = true,
-                                    maxDisplayWidthDp = maxWidth.value,
-                                    maxDisplayHeightDp = 320f,
-                                )
-                            }
+                            GeneratedChatImage(part.url)
                         } else {
                             ZoomableAsyncImage(
                                 model = part.url,
@@ -783,7 +800,11 @@ private fun MessagePartsBlock(
     }
 
     // Annotations (always rendered at the end)
-    if (annotations.isNotEmpty()) {
+    annotations.filterIsInstance<UIMessageAnnotation.GoogleSearchSuggestions>().distinct().forEach {
+        GoogleSearchSuggestions(it)
+    }
+    val citationAnnotations = annotations.filterNot { it is UIMessageAnnotation.GoogleSearchSuggestions }
+    if (citationAnnotations.isNotEmpty()) {
         Column(
             modifier = Modifier.animateContentSize(),
         ) {
@@ -809,14 +830,23 @@ private fun MessagePartsBlock(
                             .padding(4.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        annotations.fastForEachIndexed { index, annotation ->
+                        citationAnnotations.fastForEachIndexed { index, annotation ->
                             when (annotation) {
+                                is UIMessageAnnotation.GoogleSearchSuggestions -> Unit
                                 is UIMessageAnnotation.UrlCitation -> {
+                                    annotation.groundingSegments.map { it.text }.filter(String::isNotBlank).distinct().forEach { quote ->
+                                        Text(quote, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    annotation.retrievalStatus?.let { Text(googleUrlRetrievalLabel(it)) }
+                                    annotation.imageUrl?.let { imageUrl ->
+                                        coil3.compose.AsyncImage(model = imageUrl, contentDescription = annotation.title,
+                                            modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp))
+                                    }
                                     Row(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Favicon(annotation.url, modifier = Modifier.size(20.dp))
-                                        Text(
+                                        me.rerere.rikkahub.ui.components.richtext.LinkText(
                                             text = buildAnnotatedString {
                                                 append("${index + 1}. ")
                                                 withLink(LinkAnnotation.Url(annotation.url)) {
@@ -880,7 +910,7 @@ private fun MessagePartsBlock(
                     expand = !expand
                 }
             ) {
-                Text(stringResource(R.string.citations_count, annotations.size))
+                Text(pluralStringResource(R.plurals.citations_count, citationAnnotations.size, citationAnnotations.size))
             }
         }
     }

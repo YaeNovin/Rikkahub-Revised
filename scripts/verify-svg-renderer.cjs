@@ -11,6 +11,10 @@ async function main() {
       const page = await browser.newPage({ viewport: { width: 360, height: 300 } });
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
+      await page.route('https://rikkahub.local/assets/**', route => {
+        const asset = path.resolve(__dirname, '../app/src/main', '.' + new URL(route.request().url()).pathname);
+        return route.fulfill({ path: asset, contentType: 'text/javascript' });
+      });
       try {
         await page.setContent(fs.readFileSync(path.join(directory, name + '.html'), 'utf8'));
         await page.waitForFunction(() => window.__rikkaRenderStatus === 'ready');

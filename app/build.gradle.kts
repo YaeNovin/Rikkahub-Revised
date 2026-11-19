@@ -13,6 +13,10 @@ val buildTimestamp = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
     .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
 val releaseVersionName = "2.4.8-revised.9"
 val testVersionName = "$releaseVersionName-dev-$buildTimestamp"
+// Opt-in isolated target for device rendering benchmarks; never replaces an
+// existing user's debug/QA app or changes the normal release package IDs.
+val performanceProbe = providers.gradleProperty("rikkahub.performanceProbe")
+    .map { it.equals("true", ignoreCase = true) }.getOrElse(false)
 val sourceRepositoryUrl = providers.gradleProperty("rikkahub.sourceRepositoryUrl")
     .getOrElse("https://github.com/YaeNovin/Rikkahub-Revised")
     .trimEnd('/')
@@ -44,6 +48,7 @@ plugins {
     alias(libs.plugins.google.services) apply false
     alias(libs.plugins.firebase.crashlytics) apply false
     alias(libs.plugins.baselineprofile)
+    id("rikkahub.workspace-termux")
 }
 
 if (enableFirebase) {
@@ -130,7 +135,7 @@ android {
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
         debug {
-            applicationIdSuffix = ".revised.debug"
+            applicationIdSuffix = if (performanceProbe) ".revised.renderperf" else ".revised.debug"
             versionNameSuffix = "-$buildTimestamp-debug"
             buildConfigField("String", "VERSION_NAME", "\"$testVersionName-debug\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
@@ -161,7 +166,8 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += "lib/*/libtermux.so"
+            // Upstream Termux JNI is removed by rikkahub.workspace-termux.
+            // Duplicate libtermux.so inputs must fail instead of relying on resolution order.
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
@@ -379,4 +385,5 @@ dependencies {
     androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    "qaImplementation"(libs.androidx.ui.test.manifest)
 }

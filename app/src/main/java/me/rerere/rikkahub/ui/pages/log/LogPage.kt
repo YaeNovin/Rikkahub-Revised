@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.pages.log
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+import me.rerere.rikkahub.ui.hooks.rememberAppDateFormat
+
 import android.content.ClipData
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,306 +85,15 @@ import me.rerere.rikkahub.service.classifySoftwareFailure
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.JsonInstantPretty
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@Composable
-fun LogPage(vm: LogVM = koinViewModel()) {
-    val logs by vm.logs.collectAsStateWithLifecycle()
-    val busy by vm.busy.collectAsStateWithLifecycle()
-    val message by vm.message.collectAsStateWithLifecycle()
-    var requestQuery by rememberSaveable { mutableStateOf("") }
-    var softwareQuery by rememberSaveable { mutableStateOf("") }
-    var requestFilter by rememberSaveable { mutableStateOf(LogFilter.ALL) }
-    var softwareFilter by rememberSaveable { mutableStateOf(LogFilter.ALL) }
-    val pager = rememberPagerState { 2 }
-    val scope = rememberCoroutineScope()
-    val requestLogs = remember(logs, requestQuery, requestFilter) {
-        filterLogs(logs.filter { it.section() == LogSection.REQUESTS }, requestFilter, requestQuery)
-    }
-    val softwareLogs = remember(logs, softwareQuery, softwareFilter) {
-        filterLogs(logs.filter { it.section() == LogSection.SOFTWARE }, softwareFilter, softwareQuery)
-    }
-    var confirmClear by remember { mutableStateOf(false) }
-    var exportLogs by remember { mutableStateOf<List<LogEntry>?>(null) }
-    var exportMode by remember { mutableStateOf(LogExportMode.REDACTED) }
-    val filteredLogs = if (pager.currentPage == 0) requestLogs else softwareLogs
-    val context = LocalContext.current
-    val snackbar = remember { SnackbarHostState() }
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri -> vm.export(context.contentResolver, uri) }
-    LaunchedEffect(message) {
-        message?.let {
-            snackbar.showSnackbar(context.getString(it))
-            vm.message.value = null
-        }
-    }
-    var requestLoggingEnabled by remember { mutableStateOf(Logging.isRequestLoggingEnabled()) }
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
-    Scaffold(
-        topBar = {
-            LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.log_page_title)) },
-                navigationIcon = { BackButton() },
-                actions = {
-                    TextButton(onClick = vm::openAnalysisHistory) { Text("分析历史") }
-                    Tooltip(tooltip = { Text(stringResource(R.string.log_page_export)) }) {
-                        IconButton(
-                            onClick = { exportLogs = filteredLogs.toList() },
-                            enabled = filteredLogs.isNotEmpty() && !busy,
-                        ) {
-                            Icon(HugeIcons.Download01, stringResource(R.string.log_page_export))
-                        }
-                    }
-                    IconButton(
-                        onClick = { confirmClear = true },
-                        enabled = logs.isNotEmpty() && !busy,
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Delete01,
-                            contentDescription = stringResource(R.string.log_page_clear),
-                        )
-                    }
-                },
-                scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
-            )
-        },
-        bottomBar = {
-            BottomAppBar(containerColor = CustomColors.cardColorsOnSurfaceContainer.containerColor) {
-                LogSection.entries.forEachIndexed { index, section ->
-                    NavigationBarItem(
-                        selected = pager.currentPage == index,
-                        onClick = { scope.launch { pager.animateScrollToPage(index) } },
-                        icon = { Icon(if (section == LogSection.REQUESTS) HugeIcons.Code else HugeIcons.ComputerTerminal01, null) },
-                        label = { Text(stringResource(
-                            if (section == LogSection.REQUESTS) R.string.log_page_requests_tab
-                            else R.string.log_page_software_tab
-                        )) },
-                    )
-                }
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.scaffoldContainerColor,
-    ) { contentPadding ->
-        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().padding(contentPadding)) { page ->
-            val section = LogSection.entries[page]
-            UnifiedLogList(
-                logs = if (page == 0) requestLogs else softwareLogs,
-                totalCount = logs.count { it.section() == section },
-                query = if (page == 0) requestQuery else softwareQuery,
-                onQueryChange = { if (page == 0) requestQuery = it else softwareQuery = it },
-                filter = if (page == 0) requestFilter else softwareFilter,
-                onFilterChange = { if (page == 0) requestFilter = it else softwareFilter = it },
-                section = section,
-                exporting = busy,
-                onExport = { exportLogs = listOf(it) },
-                onAnalyze = vm::prepareAnalysis,
-                requestLoggingEnabled = requestLoggingEnabled,
-                onRequestLoggingChange = {
-                    requestLoggingEnabled = it
-                    Logging.setRequestLoggingEnabled(it)
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
-    LogAnalysisDialog(vm)
-    RikkaConfirmDialog(
-        show = confirmClear,
-        title = stringResource(R.string.log_page_clear),
-        text = { Text(stringResource(R.string.log_page_clear_confirmation)) },
-        confirmText = stringResource(R.string.confirm),
-        dismissText = stringResource(R.string.cancel),
-        onDismiss = { confirmClear = false },
-        onConfirm = {
-            confirmClear = false
-            vm.clear()
-        },
-    )
-    RikkaConfirmDialog(
-        show = exportLogs != null,
-        title = stringResource(R.string.log_page_export),
-        text = {
-            Column {
-                Text(stringResource(R.string.log_page_export_confirmation, exportLogs?.size ?: 0))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.RadioButton(selected = exportMode == LogExportMode.REDACTED, onClick = { exportMode = LogExportMode.REDACTED })
-                    Text("脱敏日志")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.RadioButton(selected = exportMode == LogExportMode.FULL, onClick = { exportMode = LogExportMode.FULL })
-                    Text("完整日志（仍屏蔽密钥）")
-                }
-                if (exportMode == LogExportMode.FULL) Text("包含提示词、工具参数及模型回复，请确认分享范围。")
-            }
-        },
-        confirmText = stringResource(R.string.confirm),
-        dismissText = stringResource(R.string.cancel),
-        onDismiss = { exportLogs = null },
-        onConfirm = {
-            val snapshot = exportLogs.orEmpty()
-            exportLogs = null
-            vm.prepareExport(snapshot, exportMode)
-            try {
-                exportLauncher.launch("rikkahub-logs-${System.currentTimeMillis()}.json")
-            } catch (_: Exception) {
-                vm.cancelExport()
-                vm.message.value = R.string.log_page_export_failed
-            }
-        },
-    )
-}
-
-@Composable
-private fun UnifiedLogList(
-    logs: List<LogEntry>,
-    totalCount: Int,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    filter: LogFilter,
-    onFilterChange: (LogFilter) -> Unit,
-    section: LogSection,
-    exporting: Boolean,
-    onExport: (LogEntry) -> Unit,
-    onAnalyze: (LogEntry) -> Unit,
-    requestLoggingEnabled: Boolean,
-    onRequestLoggingChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var selectedLog by remember { mutableStateOf<LogEntry?>(null) }
-    val sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
-    val scope = rememberCoroutineScope()
-    val sortedLogs = remember(logs) { logs.sortedByDescending { it.timestamp } }
-    val groups = remember(sortedLogs) { groupRequestLogs(sortedLogs) }
-    var expandedGroups by remember { mutableStateOf(emptySet<String>()) }
-
-    LazyColumn(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(16.dp)
-    ) {
-        if (section == LogSection.REQUESTS) {
-            item {
-                RequestLoggingSwitchCard(
-                    enabled = requestLoggingEnabled,
-                    onEnabledChange = onRequestLoggingChange
-                )
-            }
-        }
-        item(key = "filters") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    placeholder = { Text(stringResource(R.string.log_page_search)) },
-                    leadingIcon = { Icon(HugeIcons.Search01, null) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    (if (section == LogSection.REQUESTS) listOf(LogFilter.ALL, LogFilter.ERRORS)
-                    else listOf(LogFilter.ALL, LogFilter.ERRORS, LogFilter.TEXT)).forEach { option ->
-                        FilterChip(
-                            selected = filter == option,
-                            onClick = { onFilterChange(option) },
-                            label = { Text(stringResource(when (option) {
-                                LogFilter.ALL -> R.string.log_page_filter_all
-                                LogFilter.ERRORS -> R.string.log_page_filter_errors
-                                LogFilter.REQUESTS -> R.string.log_page_filter_requests
-                                LogFilter.TEXT -> R.string.log_page_filter_text
-                            })) },
-                        )
-                    }
-                }
-                Text(
-                    stringResource(R.string.log_page_count, logs.size, totalCount),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Text(
-                    stringResource(R.string.log_page_retention),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (exporting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                if (logs.isEmpty()) Text(stringResource(R.string.log_page_empty))
-            }
-        }
-
-        groups.forEach { group ->
-            val expanded = group.key in expandedGroups
-            if (group.entries.size > 1) {
-                item(key = group.key, contentType = "request-group") {
-                    RequestGroupHeader(group, expanded, onClick = {
-                        expandedGroups = if (expanded) expandedGroups - group.key else expandedGroups + group.key
-                    })
-                }
-            }
-            if (group.entries.size == 1 || expanded) {
-                items(group.entries, key = { it.id }, contentType = { it.javaClass.simpleName }) { log ->
-                    val openLog: () -> Unit = {
-                        selectedLog = log
-                        scope.launch { sheetState.show() }
-                    }
-                    when (log) {
-                        is LogEntry.RequestLog -> RequestLogCard(log, openLog)
-                        is LogEntry.ProviderRequestLog -> ProviderRequestLogCard(log, openLog)
-                        is LogEntry.ErrorLog -> ErrorLogCard(log, openLog)
-                        is LogEntry.TextLog -> TextLogCard(log, openLog)
-                    }
-                }
-            }
-        }
-    }
-
-    selectedLog?.let { log ->
-        ModalBottomSheet(
-            onDismissRequest = { selectedLog = null },
-            sheetState = sheetState
-        ) {
-            TextButton(onClick = { onExport(log) }, enabled = !exporting) {
-                Icon(HugeIcons.Download01, null)
-                Text(stringResource(R.string.log_page_export_single))
-            }
-            if (log.isFailure()) {
-                TextButton(onClick = { onAnalyze(log) }) {
-                    Icon(HugeIcons.AiBrain01, null)
-                    Text(stringResource(R.string.log_page_ai_analysis))
-                }
-            }
-            when (log) {
-                is LogEntry.RequestLog -> RequestLogDetail(log)
-                is LogEntry.ProviderRequestLog -> ProviderRequestLogDetail(log)
-                is LogEntry.ErrorLog -> ErrorLogDetail(log)
-                is LogEntry.TextLog -> SelectionContainer {
-                    LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        item { DetailSection(stringResource(R.string.log_page_name), log.tag) }
-                        item { DetailSection(stringResource(R.string.log_page_time),
-                            SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date(log.timestamp))) }
-                        item { DetailSection(stringResource(R.string.log_page_technical_log), log.message) }
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun RequestGroupHeader(group: RequestLogGroup, expanded: Boolean, onClick: () -> Unit) {
     val latest = group.entries.first() as LogEntry.ProviderRequestLog
     val failures = group.entries.count { it.isFailure() }
-    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()) }
+    val timeFormat = rememberAppDateFormat("MM-dd HH:mm:ss")
     val methods = group.entries.filterIsInstance<LogEntry.ProviderRequestLog>()
         .groupingBy { it.method.orEmpty().uppercase(Locale.ROOT) }.eachCount()
         .entries.joinToString(" / ") { "${it.key}: ${it.value}" }
@@ -415,7 +127,7 @@ private fun RequestGroupHeader(group: RequestLogGroup, expanded: Boolean, onClic
 
 @Composable
 private fun ProviderRequestLogCard(log: LogEntry.ProviderRequestLog, onClick: () -> Unit) {
-    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val dateFormat = rememberAppDateFormat("HH:mm:ss")
 
     Card(
         modifier = Modifier
@@ -494,8 +206,8 @@ private fun ProviderRequestLogCard(log: LogEntry.ProviderRequestLog, onClick: ()
 }
 
 @Composable
-private fun ProviderRequestLogDetail(log: LogEntry.ProviderRequestLog) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+internal fun ProviderRequestLogDetail(log: LogEntry.ProviderRequestLog) {
+    val dateFormat = rememberAppDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
     SelectionContainer {
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
@@ -791,7 +503,7 @@ private fun localizedProviderParameterValue(value: String): String = when {
 
 @Composable
 private fun ErrorLogCard(log: LogEntry.ErrorLog, onClick: () -> Unit) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+    val dateFormat = rememberAppDateFormat("yyyy-MM-dd HH:mm:ss")
 
     Card(
         modifier = Modifier
@@ -840,7 +552,7 @@ private fun ErrorLogCard(log: LogEntry.ErrorLog, onClick: () -> Unit) {
 
 @Composable
 private fun ErrorLogDetail(log: LogEntry.ErrorLog) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+    val dateFormat = rememberAppDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
 
@@ -959,7 +671,7 @@ private val REQUEST_ERROR_STATUS_PATTERN = Regex(
 )
 
 @Composable
-private fun RequestLoggingSwitchCard(
+internal fun RequestLoggingSwitchCard(
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit
 ) {
@@ -995,7 +707,7 @@ private fun RequestLoggingSwitchCard(
 
 @Composable
 private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
-    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val dateFormat = rememberAppDateFormat("HH:mm:ss")
 
     Card(
         modifier = Modifier
@@ -1066,8 +778,8 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RequestLogDetail(log: LogEntry.RequestLog) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+internal fun RequestLogDetail(log: LogEntry.RequestLog) {
+    val dateFormat = rememberAppDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val requestBodyLabel = stringResource(R.string.log_page_request_body)
@@ -1248,7 +960,7 @@ private fun HeaderItem(key: String, value: String) {
 
 @Composable
 private fun TextLogCard(log: LogEntry.TextLog, onClick: () -> Unit) {
-    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val dateFormat = rememberAppDateFormat("HH:mm:ss")
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),

@@ -106,7 +106,8 @@ class LogExportTest {
             assertFalse(it, output.contains(it))
         }
         assertTrue(output.contains("temperature"))
-        assertTrue(output.contains("model=gemini"))
+        assertFalse(output.contains("model=gemini"))
+        assertTrue(output.contains("model="))
         assertEquals("key-secret", log.requestHeaders["x-api-key"])
     }
 }

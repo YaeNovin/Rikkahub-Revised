@@ -2,15 +2,22 @@ package me.rerere.rikkahub.service
 
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.PromptInjectionDiagnostics
 import me.rerere.rikkahub.data.memory.MemoryExtractionStatus
 import java.util.concurrent.atomic.AtomicInteger
@@ -29,6 +36,16 @@ class ConversationSession(
 ) {
     // 会话状态
     val state = MutableStateFlow(initial)
+    private val pendingInput = MutableStateFlow<List<UIMessage>>(emptyList())
+    val pendingUserMessages: StateFlow<List<UIMessage>> = pendingInput.asStateFlow()
+
+    fun acceptUserMessage(message: UIMessage) {
+        pendingInput.update { it + message }
+    }
+
+    fun finishUserMessageCommit(messageId: Uuid) {
+        pendingInput.update { list -> list.filterNot { it.id == messageId } }
+    }
 
     private val initializationMutex = Mutex()
     private val persistenceMutex = Mutex()
@@ -52,9 +69,11 @@ class ConversationSession(
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
+    @Volatile private var currentJob: Job? = null
+    @Volatile private var acceptedCommit: Deferred<Boolean>? = null
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
-    val isInUse: Boolean get() = refCount.get() > 0 || isGenerating
+    val isInUse: Boolean get() = refCount.get() > 0 || currentJob?.isCompleted == false || acceptedCommit?.isCompleted == false || pendingInput.value.isNotEmpty()
 
     // 空闲检查任务
     private var idleCheckJob: Job? = null
@@ -89,24 +108,77 @@ class ConversationSession(
         }
     }
 
-    fun setJob(job: Job?) {
-        val previousJob = _generationJob.value
+    @Synchronized fun setJob(job: Job?) {
+        val previousJob = currentJob
         previousJob?.cancel()
+        currentJob = job
         _generationJob.value = job
         job?.let(onJobStarted)
         job?.invokeOnCompletion {
             // A replaced job may finish after the new one has already started. Do not let the
             // stale completion callback clear the current generation state.
-            if (_generationJob.value === job) {
-                _generationJob.value = null
-            }
-            if (refCount.get() <= 0) {
-                scheduleIdleCheck()
+            synchronized(this) {
+                if (currentJob === job) {
+                    currentJob = null
+                    _generationJob.value = null
+                    processingStatus.value = null
+                }
+                if (refCount.get() <= 0) {
+                    scheduleIdleCheck()
+                }
             }
         }
     }
 
-    fun getJob(): Job? = _generationJob.value
+    @Synchronized fun getJob(): Job? = currentJob
+
+    /** Keep the completion barrier, but acknowledge Stop immediately in the observable UI state. */
+    @Synchronized fun cancelGeneration(): Job? {
+        val job = currentJob ?: return null
+        _generationJob.value = null
+        processingStatus.value = null
+        job.cancel()
+        return job
+    }
+
+    /** Accepted input belongs to the conversation even when its answer is cancelled before launch. */
+    @Synchronized internal fun launchAcceptedTurn(
+        commit: suspend () -> Unit,
+        generate: suspend () -> Unit,
+        onError: (Exception) -> Unit,
+    ): Job {
+        val previous = currentJob
+        val previousCommit = acceptedCommit
+        previous?.cancel()
+        val committed = scope.async(Dispatchers.IO) {
+            try {
+                previousCommit?.await()
+                previous?.join()
+                commit()
+                true
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                onError(error)
+                false
+            }
+        }
+        acceptedCommit = committed
+        committed.invokeOnCompletion {
+            synchronized(this) { if (refCount.get() <= 0) scheduleIdleCheck() }
+        }
+        val job = scope.launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+            try {
+                if (committed.await()) generate()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onError(error)
+            }
+        }
+        setJob(job)
+        job.start()
+        return job
+    }
 
     fun nextMemoryExtractionSchedule(): Long = memoryExtractionScheduleVersion.incrementAndGet()
 
@@ -147,7 +219,7 @@ class ConversationSession(
         idleCheckJob?.cancel()
         idleCheckJob = scope.launch {
             delay(IDLE_TIMEOUT_MS)
-            if (refCount.get() <= 0 && !isGenerating) {
+            if (!isInUse) {
                 onIdle(id)
             }
         }
@@ -159,7 +231,9 @@ class ConversationSession(
     }
 
     fun cleanup() {
-        _generationJob.value?.cancel()
+        currentJob?.cancel()
+        acceptedCommit?.cancel()
+        currentJob = null
         _generationJob.value = null
         idleCheckJob?.cancel()
         idleCheckJob = null
@@ -169,4 +243,12 @@ class ConversationSession(
         titleGenerationVersion.incrementAndGet()
         suggestionGeneration.invalidate()
     }
+}
+
+/** Stable IDs avoid duplicate rows while the durable snapshot catches up with accepted input. */
+internal fun Conversation.withPendingUserMessages(pending: List<UIMessage>): Conversation {
+    if (pending.isEmpty()) return this
+    val existingIds = messageNodes.flatMapTo(hashSetOf()) { node -> node.messages.map { it.id } }
+    val additions = pending.filterNot { it.id in existingIds }
+    return if (additions.isEmpty()) this else copy(messageNodes = messageNodes + additions.map { it.toMessageNode() })
 }

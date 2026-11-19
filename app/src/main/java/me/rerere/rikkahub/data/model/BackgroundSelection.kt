@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.data.model
 
 import me.rerere.rikkahub.data.datastore.AdvancedAppearanceSetting
-import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
 
 internal fun visibleBackgroundOpacity(value: Float): Float =
     value.takeIf { it.isFinite() && it > 0f }?.coerceAtMost(1f) ?: 1f
@@ -22,8 +21,7 @@ internal fun AdvancedAppearanceSetting.selectGlobalBackground(image: String?): A
     return copy(
         globalBackground = selected,
         enableGlobalBackground = if (selected != null) true else enableGlobalBackground,
-        // Explicitly selecting an image should make it visible on normal pages.
-        pageSurfaceStyle = if (selected != null && pageSurfaceStyle == BackgroundSurfaceStyle.OPAQUE) BackgroundSurfaceStyle.TRANSLUCENT else pageSurfaceStyle,
+        // Selecting/replacing a wallpaper must not silently change the chosen material.
         globalBackgroundOpacity = if (selected != null) visibleBackgroundOpacity(globalBackgroundOpacity) else globalBackgroundOpacity,
         applyGlobalBackgroundToChat = applyGlobalBackgroundToChat && selected != null,
         autoAccentColorArgb = if (selected == globalBackground) autoAccentColorArgb else null,

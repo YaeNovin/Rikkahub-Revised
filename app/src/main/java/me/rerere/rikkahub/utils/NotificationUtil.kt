@@ -1,12 +1,10 @@
 package me.rerere.rikkahub.utils
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -57,14 +55,18 @@ object NotificationUtil {
      * @param config 通知配置 lambda
      * @return 是否成功发送
      */
-    @SuppressLint("MissingPermission")
     fun notify(
         context: Context,
         channelId: String,
         notificationId: Int,
         config: NotificationConfig.() -> Unit
     ): Boolean {
-        if (!hasNotificationPermission(context)) {
+        val notifications = NotificationManagerCompat.from(context)
+        if (!notifications.areNotificationsEnabled() ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED)
+        ) {
             return false
         }
 
@@ -72,7 +74,7 @@ object NotificationUtil {
         val notification = buildNotification(context, channelId, notificationConfig)
 
         return try {
-            NotificationManagerCompat.from(context).notify(notificationId, notification.build())
+            notifications.notify(notificationId, notification.build())
             true
         } catch (_: SecurityException) { false }
     }

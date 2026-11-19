@@ -96,7 +96,8 @@ class ChatVM(
     private var lastChatImagePrompt = ""
     private var chatImageRequestVersion = 0L
     private val _conversationId: Uuid = Uuid.parse(id)
-    val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val conversation: StateFlow<Conversation> = chatService.getDisplayedConversationFlow(_conversationId)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, chatService.getConversationFlow(_conversationId).value)
     val branchSourceAvailable: StateFlow<Boolean?> = conversation
         .map { it.sourceConversationId }
         .distinctUntilChanged()
@@ -165,7 +166,6 @@ class ChatVM(
         conversationInitializationJob?.cancel()
         // 移除对话引用
         chatService.removeConversationReference(_conversationId)
-        super.onCleared()
     }
 
     fun retryConversationLoad() = initializeConversation()
@@ -368,10 +368,16 @@ class ChatVM(
         if (content.isEmptyInputMessage()) return
         analytics?.logEvent("ai_send_message", null)
 
+        chatService.rememberImageToolDefaults(_conversationId, inputState.imageGenerationSettings)
         chatService.sendMessage(_conversationId, content, answer)
     }
 
+    fun isImageToolRunning() = chatService.isImageToolRunning(_conversationId)
+
     fun generateChatImage(prompt: String, recordPrompt: Boolean = true): Job {
+        if (isImageToolRunning()) return viewModelScope.launch {
+            chatService.addError(IllegalStateException("请等待当前生图任务完成后再生成图片"), _conversationId)
+        }
         lastChatImagePrompt = prompt
         chatImageJob?.cancel()
         val requestVersion = ++chatImageRequestVersion
@@ -471,6 +477,7 @@ class ChatVM(
         regenerateAssistantMsg: Boolean = true
     ) {
         analytics?.logEvent("ai_regenerate_at_message", null)
+        chatService.rememberImageToolDefaults(_conversationId, inputState.imageGenerationSettings)
         chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg)
     }
 
@@ -503,6 +510,40 @@ class ChatVM(
         chatService.handleToolApproval(_conversationId, toolCallId, approved, reason)
     }
 
+    fun confirmImageTool(callId: String, taskId: String, modelId: Uuid, options: ImageGenerationRequestState) {
+        chatService.confirmImageTool(_conversationId, callId, taskId, modelId, options)
+    }
+
+    fun resumeImageTool(messageId: String) { chatService.resumeImageTool(_conversationId, messageId) }
+
+    fun setChatImageModel(model: me.rerere.ai.provider.Model) {
+        viewModelScope.launch { settingsStore.update { it.copy(imageGenerationModelId = model.id) } }
+    }
+
+    fun updateImageToolDefaults(options: ImageGenerationRequestState) {
+        inputState.imageGenerationSettings = options
+        chatService.rememberImageToolDefaults(_conversationId, options)
+    }
+
+    fun setImageToolAutomatic(enabled: Boolean) {
+        val assistantId = conversation.value.assistantId
+        chatService.rememberImageToolDefaults(_conversationId, inputState.imageGenerationSettings)
+        viewModelScope.launch {
+            settingsStore.update { current -> current.copy(assistants = current.assistants.map {
+                if (it.id == assistantId) it.copy(autoApproveImageGeneration = enabled) else it
+            }) }
+        }
+    }
+
+    fun setImageToolEnabled(enabled: Boolean) {
+        val assistantId = conversation.value.assistantId
+        viewModelScope.launch {
+            settingsStore.update { current -> current.copy(assistants = current.assistants.map {
+                if (it.id == assistantId) it.copy(enableImageGenerationTool = enabled) else it
+            }) }
+        }
+    }
+
     fun handleToolAnswer(
         toolCallId: String,
         answer: String,
@@ -530,14 +571,12 @@ class ChatVM(
     }
 
     fun stopGeneration() {
-        viewModelScope.launch {
-            chatService.stopGeneration(_conversationId)
-        }
+        chatService.requestStopGeneration(_conversationId)
     }
 
     fun saveConversationAsync() {
         viewModelScope.launch {
-            chatService.saveConversation(_conversationId, conversation.value)
+            chatService.saveConversation(_conversationId, chatService.getConversationFlow(_conversationId).value)
         }
     }
 

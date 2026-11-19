@@ -3,34 +3,52 @@
 package me.rerere.rikkahub.ui.components.table
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.CollectionInfo
+import androidx.compose.ui.semantics.collectionInfo
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.context.LocalSettings
 import kotlin.math.max
+
 
 /**
  * DataTable（自定义布局 + 横向滚动 + 行内等高）
@@ -43,7 +61,7 @@ fun DataTable(
     headers: List<@Composable () -> Unit>,
     rows: List<List<@Composable () -> Unit>>,
     modifier: Modifier = Modifier,
-    cellPadding: Dp = 4.dp,
+    cellPadding: Dp = 8.dp,
     cellBorder: BorderStroke? = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
     headerBackground: Color = MaterialTheme.colorScheme.surfaceVariant,
     zebraStriping: Boolean = false,
@@ -54,9 +72,15 @@ fun DataTable(
     outerBorder: BorderStroke? = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     shape: Shape = MaterialTheme.shapes.small,
     stretchToFillWidth: Boolean = true,
+    columnTextAlignments: List<TextAlign> = emptyList(),
+    alternateRowBackground: Color = MaterialTheme.colorScheme.surfaceContainer,
 ) {
     val hScroll = rememberScrollState()
-    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+    val surfaceContainer = alternateRowBackground
+    val indicatorColor = MaterialTheme.colorScheme.primary
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val columnCount = max(headers.size, rows.maxOfOrNull { it.size } ?: 0)
+    if (columnCount == 0) return
 
     BoxWithConstraints(
         modifier = modifier
@@ -68,18 +92,18 @@ fun DataTable(
         // 捕获滚动视口的可用宽度，用于在内容较窄时把列宽拉伸铺满
         val viewportMaxWidth = constraints.maxWidth
 
+        Column {
         Box(modifier = Modifier.horizontalScroll(hScroll)) {
-            SubcomposeLayout { constraints ->
-            val columnCount = max(headers.size, rows.maxOfOrNull { it.size } ?: 0)
+            SubcomposeLayout(Modifier.semantics { collectionInfo = CollectionInfo(rows.size + 1, columnCount) }) { constraints ->
             val rowCount = rows.size
             if (columnCount == 0) return@SubcomposeLayout layout(0, 0) {}
 
             // ---------- 参数 & 中间结果容器 ----------
             val infinity = Constraints.Infinity
             val unbounded = Constraints(0, infinity, 0, infinity)
-            val minWidthsPx = IntArray(columnCount) { i -> columnMinWidths.getOrNull(i)?.roundToPx() ?: 0 }
-            val maxWidthsPx = IntArray(columnCount) { i -> columnMaxWidths.getOrNull(i)?.roundToPx() ?: Int.MAX_VALUE }
-            val colWidths = IntArray(columnCount) { 0 }
+            val minWidthsPx = IntArray(columnCount) { i -> (columnMinWidths.getOrNull(i)?.roundToPx() ?: 0).coerceAtLeast(0) }
+            val maxWidthsPx = IntArray(columnCount) { i -> (columnMaxWidths.getOrNull(i)?.roundToPx() ?: Int.MAX_VALUE).coerceAtLeast(minWidthsPx[i]) }
+            val colWidths = IntArray(columnCount)
             val headerP1 = arrayOfNulls<Placeable>(columnCount)
             val bodyP1 = arrayOfNulls<Placeable>(rowCount * columnCount)
             fun alignmentForColumn(column: Int): Alignment =
@@ -92,7 +116,9 @@ fun DataTable(
                         padding = cellPadding,
                         border = cellBorder,
                         background = headerBackground,
-                        alignment = alignmentForColumn(c)
+                        alignment = alignmentForColumn(c),
+                        textAlign = columnTextAlignments.getOrNull(c),
+                        header = true,
                     ) {
                         headers.getOrNull(c)?.invoke()
                     }
@@ -110,12 +136,8 @@ fun DataTable(
             fun subcomposeBodyOnce(r: Int, c: Int): Placeable {
                 val bg = if (zebraStriping && r % 2 == 1) surfaceContainer else Color.Transparent
                 val measurables = subcompose("b1_${r}_$c") {
-                    CellBox(
-                        padding = cellPadding,
-                        border = cellBorder,
-                        background = bg,
-                        alignment = alignmentForColumn(c),
-                    ) {
+                    CellBox(padding = cellPadding, border = cellBorder, background = bg, alignment = alignmentForColumn(c),
+                        textAlign = columnTextAlignments.getOrNull(c)) {
                         rows[r].getOrNull(c)?.invoke()
                     }
                 }
@@ -149,17 +171,8 @@ fun DataTable(
                 viewportMaxWidth > naturalWidth &&
                 naturalWidth > 0
             ) {
-                val extra = viewportMaxWidth - naturalWidth
-                var distributed = 0
-                for (c in 0 until columnCount) {
-                    val add = if (c == columnCount - 1) {
-                        extra - distributed
-                    } else {
-                        (extra.toLong() * colWidths[c] / naturalWidth).toInt()
-                    }
-                    colWidths[c] += add
-                    distributed += add
-                }
+                val stretched = stretchTableColumnWidths(colWidths, maxWidthsPx, viewportMaxWidth)
+                stretched.copyInto(colWidths)
             }
 
             // ---------- 第二阶段：固定列宽 + 统一行高重新测量 ----------
@@ -180,7 +193,9 @@ fun DataTable(
                         padding = cellPadding,
                         border = cellBorder,
                         background = headerBackground,
-                        alignment = alignmentForColumn(c)
+                        alignment = alignmentForColumn(c),
+                        textAlign = columnTextAlignments.getOrNull(c),
+                        header = true,
                     ) {
                         headers.getOrNull(c)?.invoke()
                     }
@@ -194,12 +209,8 @@ fun DataTable(
                 val bg =
                     if (zebraStriping && r % 2 == 1) surfaceContainer else Color.Transparent
                 val measurables = subcompose("b2_${r}_$c") {
-                    CellBox(
-                        padding = cellPadding,
-                        border = cellBorder,
-                        background = bg,
-                        alignment = alignmentForColumn(c),
-                    ) {
+                    CellBox(padding = cellPadding, border = cellBorder, background = bg, alignment = alignmentForColumn(c),
+                        textAlign = columnTextAlignments.getOrNull(c)) {
                         rows[r].getOrNull(c)?.invoke()
                     }
                 }
@@ -230,6 +241,17 @@ fun DataTable(
             }
             }
         }
+        if (hScroll.maxValue > 0) {
+            Canvas(Modifier.fillMaxWidth().height(3.dp)) {
+                val contentWidth = size.width + hScroll.maxValue
+                val thumb = (size.width * size.width / contentWidth).coerceIn(minOf(24.dp.toPx(), size.width), size.width)
+                val fraction = hScroll.value.toFloat() / hScroll.maxValue
+                val x = (size.width - thumb) * if (rtl) 1 - fraction else fraction
+                drawRect(indicatorColor.copy(alpha = .10f))
+                drawRect(indicatorColor.copy(alpha = .65f), Offset(x, 0f), Size(thumb, size.height))
+            }
+        }
+        }
     }
 }
 
@@ -239,16 +261,27 @@ private fun CellBox(
     border: BorderStroke?,
     background: Color,
     alignment: Alignment,
+    textAlign: TextAlign? = null,
+    header: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier = Modifier
             .then(if (background != Color.Transparent) Modifier.background(background) else Modifier)
             .then(if (border != null) Modifier.border(border) else Modifier)
+            .then(if (header) Modifier.semantics { heading() } else Modifier)
             .padding(padding),
-        contentAlignment = alignment,
+        contentAlignment = when (textAlign) {
+            TextAlign.Left -> AbsoluteAlignment.TopLeft
+            TextAlign.Right -> AbsoluteAlignment.TopRight
+            TextAlign.Center -> Alignment.TopCenter
+            else -> alignment
+        },
     ) {
-        content()
+        ProvideTextStyle(LocalTextStyle.current.copy(
+            textAlign = textAlign ?: LocalTextStyle.current.textAlign,
+            fontWeight = if (header) FontWeight.SemiBold else LocalTextStyle.current.fontWeight,
+        )) { content() }
     }
 }
 

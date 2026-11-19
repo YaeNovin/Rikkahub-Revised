@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.delay
@@ -51,6 +52,7 @@ class LogVM(
     val analysisModelId = MutableStateFlow<Uuid?>(null)
     val analysis = MutableStateFlow<LogAnalysisState?>(null)
     private var analysisJob: Job? = null
+    private var prepareJob: Job? = null
     val analysisHistory = MutableStateFlow<List<SavedLogAnalysis>>(emptyList())
     val showAnalysisHistory = MutableStateFlow(false)
     fun openAnalysisHistory() {
@@ -77,10 +79,15 @@ class LogVM(
     fun prepareAnalysis(log: LogEntry) {
         if (!log.isFailure()) return
         analysisJob?.cancel()
-        analysis.value = LogAnalysisState(payload = logAnalysisPayload(log))
+        prepareJob?.cancel()
+        prepareJob = viewModelScope.launch {
+            val detail = withContext(Dispatchers.IO) { Logging.getLog(log.id) ?: log }
+            analysis.value = LogAnalysisState(payload = logAnalysisPayload(detail))
+        }
     }
 
     fun closeAnalysis() {
+        prepareJob?.cancel()
         analysisJob?.cancel()
         analysis.value = null
     }
@@ -128,10 +135,11 @@ class LogVM(
                                 UIMessage.user(current.payload),
                             ),
                             params = TextGenerationParams(
-                                model = model,
+                                model = model.copy(tools = emptySet(), customBodies = emptyList()),
                                 maxTokens = 4096,
                                 tools = emptyList(),
                                 customHeaders = model.customHeaders,
+                                requestId = "diagnostic:${record.id}",
                             ),
                         ).message.toText().take(32_000).also { check(it.isNotBlank()) }
                     }
@@ -165,11 +173,13 @@ class LogVM(
     val message = MutableStateFlow<Int?>(null)
     private var pendingExport: List<LogEntry>? = null
     private var pendingExportMode = LogExportMode.REDACTED
+    private var pendingExportKind = DiagnosticExportKind.CSV
 
-    internal fun prepareExport(logs: List<LogEntry>, mode: LogExportMode = LogExportMode.REDACTED) {
+    internal fun prepareExport(logs: List<LogEntry>, mode: LogExportMode = LogExportMode.REDACTED, kind: DiagnosticExportKind = DiagnosticExportKind.CSV) {
         if (busy.value || logs.isEmpty()) return
         pendingExport = logs.toList()
         pendingExportMode = mode
+        pendingExportKind = kind
         busy.value = true
     }
 
@@ -185,6 +195,7 @@ class LogVM(
         }
         val snapshot = pendingExport
         val exportMode = pendingExportMode
+        val exportKind = pendingExportKind
         pendingExport = null
         if (snapshot == null) {
             busy.value = false
@@ -194,10 +205,14 @@ class LogVM(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
+                    val hydrated = snapshot.map { Logging.getLog(it.id) ?: it }
                     val output = resolver.openOutputStream(uri, "wt")
                         ?: error("Export destination is unavailable")
                     output.bufferedWriter(Charsets.UTF_8).use {
-                        writeLogExport(it, snapshot, BuildConfig.VERSION_NAME, exportMode)
+                        when (exportKind) {
+                            DiagnosticExportKind.CSV -> writeDiagnosticCsv(it, hydrated, BuildConfig.VERSION_NAME, exportMode)
+                            DiagnosticExportKind.DETAIL -> writeDiagnosticDetail(it, hydrated.single(), BuildConfig.VERSION_NAME, exportMode)
+                        }
                     }
                 }
                 message.value = R.string.log_page_export_success
@@ -213,6 +228,10 @@ class LogVM(
     }
 
     fun clear() {
-        viewModelScope.launch(Dispatchers.IO) { Logging.clear() }
+        viewModelScope.launch(Dispatchers.IO) {
+            prepareJob?.cancelAndJoin(); analysisJob?.cancelAndJoin()
+            analysis.value = null
+            Logging.clear(); analysisStore.clear(); analysisHistory.value = emptyList()
+        }
     }
 }

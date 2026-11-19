@@ -7,6 +7,43 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ImageGenerationRequestStateTest {
+    @Test fun `media version survives saved settings and both image paths while native models clear it`() {
+        val provider = me.rerere.ai.provider.providers.openai.OpenAIProvider(okhttp3.OkHttpClient())
+        val model = Model(modelId = "tt-image-2.6")
+        val media = provider.imageGenerationConstraints(
+            me.rerere.ai.provider.ProviderSetting.OpenAI(baseUrl = "https://api.lk888.ai/v1"), model)
+        val state = ImageGenerationRequestState(outputFormat = "webp", outputCompression = 73,
+            moderation = "low", gptImage26Options = me.rerere.ai.provider.GptImage26Options(version = "sunburst"))
+            .constrained(media)
+        val saved = kotlinx.serialization.json.Json.encodeToString(ImageGenerationRequestState.serializer(), state)
+        val restored = kotlinx.serialization.json.Json.decodeFromString(ImageGenerationRequestState.serializer(), saved)
+        assertEquals("sunburst", restored.toParams(model).gptImage26Options.version)
+        assertEquals("sunburst", restored.toEditParams(model, listOf("fixture.png")).gptImage26Options.version)
+        assertEquals(73, restored.outputCompression)
+        assertEquals("low", restored.moderation)
+        val native = provider.imageGenerationConstraints(me.rerere.ai.provider.ProviderSetting.OpenAI(), Model(modelId = "gpt-image-2.6-flare"))
+        assertEquals(null, restored.constrained(native).gptImage26Options.version)
+        val legacy = kotlinx.serialization.json.Json.decodeFromString(ImageGenerationRequestState.serializer(), "{}")
+        assertEquals(null, legacy.gptImage26Options.version)
+    }
+    @Test
+    fun `Image 2_6 options survive both generation and edit paths with format constraints`() {
+        val model = Model(modelId = "gpt-image-2.6-flare")
+        val limits = me.rerere.ai.provider.providers.openai.OpenAIProvider(okhttp3.OkHttpClient())
+            .imageGenerationConstraints(me.rerere.ai.provider.ProviderSetting.OpenAI(), model)
+        val options = me.rerere.ai.provider.GptImage26Options(complexity = "medium", frameCount = 9,
+            frameDurationMs = 200, svgModel = "svg-author", svgReasoningEffort = "high")
+        val state = ImageGenerationRequestState(prompt = "fixture", count = 8, size = "3840x2160",
+            outputFormat = "svg", background = "transparent", gptImage26Options = options).constrained(limits)
+        assertEquals(1, state.count)
+        assertEquals("transparent", state.background)
+        assertEquals(options, state.toParams(model).gptImage26Options)
+        assertEquals(options, state.toEditParams(model, listOf("fixture.png")).gptImage26Options)
+        val gif = state.copy(outputFormat = "gif").constrained(limits)
+        assertTrue(gif.size in setOf("auto", "512x512"))
+        assertEquals(null, gif.background)
+    }
+
     @Test
     fun `request state converts to shared params and normalizes count`() {
         val params = ImageGenerationRequestState(

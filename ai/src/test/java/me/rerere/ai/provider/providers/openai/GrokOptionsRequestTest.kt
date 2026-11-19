@@ -40,6 +40,27 @@ class GrokOptionsRequestTest {
     }
 
     @Test
+    fun `opaque deployments use name-based Grok options without changing the wire model`() {
+        val params = TextGenerationParams(
+            model = Model(modelId = "grok-4.6", abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL)),
+            tools = listOf(testTool()),
+            reasoningLevel = ReasoningLevel.XHIGH,
+            grokOptions = fullOptions(),
+        )
+        val named = params.copy(model = params.model.copy(modelId = "deployment-42", displayName = "Grok 4.6"))
+        fun assertSameExceptModel(expected: JsonObject, actual: JsonObject) {
+            assertEquals("deployment-42", actual["model"]?.jsonPrimitive?.content)
+            assertEquals(expected.filterKeys { it != "model" }, actual.filterKeys { it != "model" })
+        }
+        assertSameExceptModel(buildChatRequest(params), buildChatRequest(named))
+        fun responses(value: TextGenerationParams) = responseApi.buildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://api.x.ai/v1", useResponseApi = true),
+            messages = listOf(UIMessage.user("hello")), params = value, stream = true,
+        )
+        assertSameExceptModel(responses(params), responses(named))
+    }
+
+    @Test
     fun `recognizes Grok text aliases and excludes specialized media models`() {
         listOf("grok-3", "grok-4.6", "x-ai/grok-4.20-multi-agent", "xai:grok-4.5").forEach {
             assertTrue("model=$it", resolveGrokModelParameterSupport(it).available)

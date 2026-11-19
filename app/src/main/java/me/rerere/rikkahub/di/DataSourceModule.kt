@@ -31,6 +31,7 @@ import me.rerere.rikkahub.data.api.RikkaHubAPI
 import me.rerere.rikkahub.data.api.SponsorAPI
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.LargeRowOpenHelperFactory
 import me.rerere.rikkahub.data.repository.VideoGenerationTaskRepository
 import me.rerere.rikkahub.data.video.VideoGenerationCoordinator
 import me.rerere.rikkahub.data.video.VideoGenerationWorker
@@ -56,6 +57,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
+    single { me.rerere.rikkahub.web.WebSettings(get(), get(), get()) }
     single { me.rerere.rikkahub.ui.pages.log.LogAnalysisStore(get()) }
     single { me.rerere.rikkahub.data.ai.MediaGenerationService(get(), get()) }
     single {
@@ -99,7 +101,7 @@ val dataSourceModule = module {
                     )
                 }
             })
-            .openHelperFactory(
+            .openHelperFactory(LargeRowOpenHelperFactory(
                 RequerySQLiteOpenHelperFactory(
                     listOf(
                 RequerySQLiteOpenHelperFactory.ConfigurationOptions { options ->
@@ -111,7 +113,7 @@ val dataSourceModule = module {
                     )
                     options
                 }
-            )))
+            ))))
             .build()
     }
 
@@ -161,6 +163,11 @@ val dataSourceModule = module {
             providerManager = get(),
             settingsStore = get(),
         )
+    }
+
+    single { me.rerere.rikkahub.data.knowledge.KnowledgeImportCoordinator(get(), get(), get(), get()) }
+    worker { parameters ->
+        me.rerere.rikkahub.data.knowledge.KnowledgeImportWorker(get(), parameters.get(), get(), get())
     }
 
     single {
@@ -255,6 +262,7 @@ val dataSourceModule = module {
             knowledgeBaseRepository = get(),
             knowledgeRetrievalTransformer = get(),
             requestStatisticsRecorder = get(),
+            imageTools = get(),
         )
     }
 
@@ -304,11 +312,8 @@ val dataSourceModule = module {
                     chain.proceed(request)
                 }
             }
-            .addNetworkInterceptor(RequestLoggingInterceptor(get()))
+            .addInterceptor(RequestLoggingInterceptor(get()))
             .addInterceptor(AIRequestInterceptor())
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.HEADERS
-            })
             .build().also { SearchService.init(it, get()) }
     }
 
@@ -321,6 +326,8 @@ val dataSourceModule = module {
     }
 
     single { ChatImageGenerationService(providerManager = get(), filesManager = get(), generationKeepAlive = get()) }
+    single { get<AppDatabase>().chatImageToolTaskDao() }
+    single { me.rerere.rikkahub.data.ai.ChatImageToolCoordinator(get(), get(), get(), get(), get()) }
 
     single {
         WebDavSync(

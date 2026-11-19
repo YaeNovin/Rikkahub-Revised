@@ -35,7 +35,7 @@ class AskUserWireSchemaTest {
         val method = GoogleProvider::class.java.getDeclaredMethod("buildCompletionRequestBody", List::class.java, TextGenerationParams::class.java).apply { isAccessible = true }
         for (id in listOf("gemini-2.5-flash", "gemini-3.8-flash")) {
             val body = method.invoke(provider, messages, params(id)) as JsonObject
-            checkSchema(body["tools"]!!.jsonArray.first().jsonObject["functionDeclarations"]!!.jsonArray.single().jsonObject["parameters"]!!.jsonObject)
+            checkSchema(body["tools"]!!.jsonArray.first().jsonObject["functionDeclarations"]!!.jsonArray.single().jsonObject["parametersJsonSchema"]!!.jsonObject)
         }
     }
 

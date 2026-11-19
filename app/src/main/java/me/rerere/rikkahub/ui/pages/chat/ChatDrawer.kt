@@ -79,7 +79,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
-import me.rerere.rikkahub.data.datastore.isNavigationGlassActive
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
@@ -181,8 +180,7 @@ fun ChatDrawerContent(
 
     val updateCheckDisabledUntil = settings.displaySetting.updateCheckDisabledUntilEpochMillis
     val appearance = settings.advancedAppearanceSetting
-    val navigationGlassActive = settings.isNavigationGlassActive()
-    val navigationSurfaceStyle = if (navigationGlassActive) {
+    val navigationSurfaceStyle = if (appearance.enableNavigationGlass) {
         appearance.navigationSurfaceStyle
     } else {
         BackgroundSurfaceStyle.OPAQUE
@@ -218,6 +216,7 @@ fun ChatDrawerContent(
             modifier = Modifier.fillMaxSize(),
             shape = RectangleShape,
             backgroundRendering = me.rerere.rikkahub.ui.components.ui.IsolatedBackgroundRendering.INDEPENDENT,
+            effectsEnabled = appearance.enableNavigationPerformanceEffects,
         ) {
             Column(
                 modifier = Modifier

@@ -12,6 +12,7 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeInput
@@ -31,11 +32,13 @@ internal fun shouldApplyTopBarBlur(
     performanceEffectsEnabled: Boolean,
     blurSupported: Boolean,
     hasHazeSource: Boolean,
-): Boolean = backgroundActive &&
+    material: me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle = me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle.FROSTED,
+    backgroundEnabled: Boolean = true,
+): Boolean = backgroundEnabled && backgroundActive &&
     blurEnabled &&
     performanceEffectsEnabled &&
     blurSupported &&
-    hasHazeSource
+    hasHazeSource && material.usesBlur
 
 @Composable
 private fun Modifier.appearanceTopBarBlur(): Modifier {
@@ -48,6 +51,8 @@ private fun Modifier.appearanceTopBarBlur(): Modifier {
         performanceEffectsEnabled = settings.advancedAppearanceSetting.enableTopBarPerformanceEffects,
         blurSupported = capabilities.supportsRealtimeBlur,
         hasHazeSource = hazeState != null,
+        material = settings.advancedAppearanceSetting.pageSurfaceStyle,
+        backgroundEnabled = settings.displaySetting.showTopBarBackground,
     )
     if (!enabled || hazeState == null) return this
 
@@ -61,6 +66,9 @@ private fun Modifier.appearanceTopBarBlur(): Modifier {
         style = hazeStyle,
     )
 }
+
+internal fun appearanceTopBarColors(colors: TopAppBarColors, backgroundEnabled: Boolean): TopAppBarColors =
+    if (backgroundEnabled) colors else colors.copy(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,7 +89,7 @@ fun TopAppBar(
         actions = actions,
         expandedHeight = expandedHeight,
         windowInsets = windowInsets,
-        colors = colors,
+        colors = appearanceTopBarColors(colors, LocalSettings.current.displaySetting.showTopBarBackground),
         scrollBehavior = scrollBehavior,
     )
 }
@@ -101,7 +109,7 @@ fun LargeFlexibleTopAppBar(
         modifier = modifier.appearanceTopBarBlur(),
         navigationIcon = navigationIcon,
         actions = actions,
-        colors = colors,
+        colors = appearanceTopBarColors(colors, LocalSettings.current.displaySetting.showTopBarBackground),
         scrollBehavior = scrollBehavior,
     )
 }

@@ -1,13 +1,13 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.ClipData
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -85,7 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
-import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -106,6 +105,7 @@ import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
@@ -189,6 +189,7 @@ private data class MarkdownParseResult(
     val preprocessed: String,
     val astTree: ASTNode,
     val hasHtml: Boolean,
+    val diffParts: List<MarkdownDiffPart> = emptyList(),
 )
 
 private data class MarkdownParseCacheKey(
@@ -213,8 +214,13 @@ private val markdownParseCache = object : LinkedHashMap<MarkdownParseCacheKey, M
     ): Boolean = size > MARKDOWN_PARSE_CACHE_ENTRIES
 }
 
+// Table cells should not evict full neighbouring messages from history preloading.
+private val markdownFragmentCache = object : LinkedHashMap<MarkdownParseCacheKey, MarkdownParseResult>(128, .75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MarkdownParseCacheKey, MarkdownParseResult>?) = size > 128
+}
+
 private val GRAPHICAL_CODE_FENCE_REGEX = Regex(
-    pattern = "(?m)^\\s*```\\s*(?:mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|ebnf|html|svg|wavedrom|waveform|timing|digital-waveform|dot|graphviz|vega|vega-lite|vegalite|smiles|smiles-drawer|molecule|musicxml|music-xml)\\b",
+    pattern = "(?m)^\\s*```\\s*(?:pattern|generative_art|p5_pattern|p5-pattern|math_plot|math_plan|math-plot|jsxgraph|sigil|magic_circle|magic-circle|ansi|terminal|xterm|console-output|mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|ebnf|html|svg|wavedrom|waveform|timing|digital-waveform|dot|graphviz|vega|vega-lite|vegalite|smiles|smiles-drawer|molecule|musicxml|music-xml)\\b",
     option = RegexOption.IGNORE_CASE,
 )
 
@@ -234,15 +240,15 @@ internal fun streamingMarkdownParseIntervalMs(content: String): Long =
         STREAMING_MARKDOWN_PARSE_INTERVAL_MS
     }
 
-private fun cachedMarkdownParse(
-    content: String,
-    renderMode: MarkdownRenderMode,
-): MarkdownParseResult? = synchronized(markdownParseCache) {
-    markdownParseCache[MarkdownParseCacheKey(content, renderMode)]
-}
+private fun cachedMarkdownParse(content: String, renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD): MarkdownParseResult? =
+    synchronized(markdownParseCache) {
+        val key = MarkdownParseCacheKey(content, renderMode)
+        markdownParseCache[key] ?: markdownFragmentCache[key]
+    }
 
 private fun ASTNode.containsHtml(): Boolean {
-    if (type == MarkdownElementTypes.HTML_BLOCK || type == MarkdownTokenTypes.HTML_TAG || type == MarkdownElementTypes.IMAGE) return true
+    if (type == MarkdownElementTypes.HTML_BLOCK || type == MarkdownTokenTypes.HTML_TAG || type == MarkdownElementTypes.IMAGE ||
+        type == MarkdownElementTypes.FULL_REFERENCE_LINK || type == MarkdownElementTypes.SHORT_REFERENCE_LINK) return true
     return children.any { it.containsHtml() }
 }
 
@@ -261,7 +267,7 @@ private fun collectTableCellContents(
     }
 }
 
-private fun preloadTableCellMarkdown(result: MarkdownParseResult) {
+private fun preloadTableCellMarkdown(result: MarkdownParseResult, renderMode: MarkdownRenderMode) {
     val cells = ArrayList<String>(TABLE_CELL_PRELOAD_LIMIT)
     collectTableCellContents(result.astTree, result.preprocessed, cells)
     var usedChars = 0
@@ -269,9 +275,10 @@ private fun preloadTableCellMarkdown(result: MarkdownParseResult) {
         if (usedChars + cell.length > TABLE_CELL_PRELOAD_CHAR_BUDGET) return@forEach
         usedChars += cell.length
         try {
-            val cellResult = parseMarkdown(cell, preloadTableCells = false)
-            if (cellResult.hasHtml) preloadMarkdownDocument(cell, MarkdownRenderMode.STANDARD)
+            val cellResult = parseMarkdown(cell, renderMode, preloadTableCells = false)
+            if (cellResult.hasHtml) preloadMarkdownDocument(cell, renderMode)
         } catch (exception: Exception) {
+            if (exception is kotlinx.coroutines.CancellationException) throw exception
             exception.printStackTrace()
         }
     }
@@ -285,19 +292,29 @@ private fun parseMarkdown(
     val cacheKey = MarkdownParseCacheKey(content, renderMode)
     if (content.length <= MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS) {
         synchronized(markdownParseCache) {
-            markdownParseCache[cacheKey]?.let { return it }
+            (markdownParseCache[cacheKey] ?: markdownFragmentCache[cacheKey])?.let { return it }
         }
     }
     val preprocessed = preprocessMarkdownContent(content, renderMode)
     val astTree = synchronized(markdownParserLock) {
         parser.buildMarkdownTreeFromString(preprocessed)
     }
-    val result = MarkdownParseResult(content, preprocessed, astTree, astTree.containsHtml())
-    if (preloadTableCells && !result.hasHtml) preloadTableCellMarkdown(result)
+    val diffParts = splitMarkdownAroundDiff(content)
+    val result = MarkdownParseResult(content, preprocessed, astTree, astTree.containsHtml(), diffParts)
+    diffParts.filterNot { it.isDiff }.forEach { parseMarkdown(it.content, renderMode) }
+    if (preloadTableCells && !result.hasHtml) preloadTableCellMarkdown(result, renderMode)
     if (content.length <= MARKDOWN_PARSE_CACHE_MAX_CONTENT_CHARS) {
         synchronized(markdownParseCache) {
             // Insert the parent last so a table's cells cannot immediately evict it.
-            markdownParseCache[cacheKey] = result
+            val cache = if (preloadTableCells) markdownParseCache else markdownFragmentCache
+            cache[cacheKey] = result
+            var chars = cache.keys.sumOf { it.content.length }
+            val budget = if (preloadTableCells) 2 * 1024 * 1024 else 512 * 1024
+            while (chars > budget) {
+                val oldest = cache.keys.first()
+                chars -= oldest.content.length
+                cache.remove(oldest)
+            }
         }
     }
     return result
@@ -320,6 +337,7 @@ internal suspend fun preloadMarkdownContents(
             val result = parseMarkdown(content)
             if (result.hasHtml) preloadMarkdownDocument(content, MarkdownRenderMode.STANDARD)
         } catch (exception: Exception) {
+            if (exception is CancellationException) throw exception
             exception.printStackTrace()
         }
     }
@@ -433,14 +451,16 @@ fun MarkdownBlock(
     onClickCitation: (String) -> Unit = {},
     renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD,
 ) {
-    if (renderMode == MarkdownRenderMode.USER_MESSAGE) {
-        CompositionLocalProvider(
-            LocalPreserveSoftLineBreaks provides true,
-            LocalMarkdownRenderMode provides renderMode,
-        ) {
-            MarkdownBlockBody(content, modifier, style, onClickCitation, renderMode)
-        }
-    } else {
+    val display = LocalSettings.current.displaySetting
+    val prose = LocalChatProseDecorationsEnabled.current
+    CompositionLocalProvider(
+        LocalChatInlineOptions provides ChatInlineOptions(
+            hexSwatches = prose && display.showHexColorSwatches,
+            quotedText = prose && display.highlightQuotedText,
+        ),
+        LocalPreserveSoftLineBreaks provides (renderMode == MarkdownRenderMode.USER_MESSAGE),
+        LocalMarkdownRenderMode provides renderMode,
+    ) {
         MarkdownBlockBody(content, modifier, style, onClickCitation, renderMode)
     }
 }
@@ -453,7 +473,43 @@ private fun MarkdownBlockBody(
     onClickCitation: (String) -> Unit,
     renderMode: MarkdownRenderMode,
 ) {
-    val diffParts = remember(content) { splitMarkdownAroundDiff(content) }
+    var data by remember(renderMode) { mutableStateOf(cachedMarkdownParse(content, renderMode)) }
+    val updatedContent by rememberUpdatedState(content)
+    var parseFailed by remember { mutableStateOf(false) }
+    var parseRetry by remember { mutableIntStateOf(0) }
+    val streaming = LocalRichTextStreaming.current
+
+    // Conflate continuous token updates and parse them sequentially. The previous successful tree
+    // stays composed while a new one is prepared, so completed WebViews are never replaced by a
+    // loading placeholder merely because trailing text arrived.
+    LaunchedEffect(parseRetry, renderMode, streaming) {
+        snapshotFlow { updatedContent }
+            .distinctUntilChanged()
+            .conflate()
+            .collect {
+                parseFailed = false
+                if (streaming) delay(streamingMarkdownParseIntervalMs(updatedContent))
+                val targetContent = updatedContent
+                if (data?.source == targetContent) return@collect
+                try {
+                    data = cachedMarkdownParse(targetContent, renderMode) ?: withContext(RichTextParsingDispatcher) {
+                        parseMarkdown(targetContent, renderMode).also { parsed ->
+                            if (parsed.hasHtml) preloadMarkdownDocument(targetContent, renderMode)
+                        }
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (exception: Exception) {
+                    me.rerere.rikkahub.data.render.RenderDiagnostics.report("Markdown", "parse", exception.javaClass.simpleName, exception)
+                    parseFailed = true
+                }
+            }
+    }
+
+    val parsed = data
+    ReportRichTextLayoutLoading(!parseFailed && (parsed == null || parsed.source != content))
+    me.rerere.rikkahub.ui.components.ui.AwaitExportRender(!parseFailed && (parsed == null || parsed.source != content))
+    val diffParts = parsed?.diffParts.orEmpty()
     if (diffParts.isNotEmpty()) {
         Column(modifier = modifier.fillMaxWidth()) {
             diffParts.forEachIndexed { index, part ->
@@ -477,41 +533,6 @@ private fun MarkdownBlockBody(
         }
         return
     }
-    var data by remember(renderMode) { mutableStateOf(cachedMarkdownParse(content, renderMode)) }
-    val updatedContent by rememberUpdatedState(content)
-    var parseFailed by remember { mutableStateOf(false) }
-    var parseRetry by remember { mutableIntStateOf(0) }
-
-    // Conflate continuous token updates and parse them sequentially. The previous successful tree
-    // stays composed while a new one is prepared, so completed WebViews are never replaced by a
-    // loading placeholder merely because trailing text arrived.
-    LaunchedEffect(parseRetry, renderMode) {
-        snapshotFlow { updatedContent }
-            .distinctUntilChanged()
-            .conflate()
-            .collect {
-                parseFailed = false
-                delay(streamingMarkdownParseIntervalMs(updatedContent))
-                val targetContent = updatedContent
-                if (data?.source == targetContent) return@collect
-                try {
-                    data = cachedMarkdownParse(targetContent, renderMode) ?: withContext(RichTextParsingDispatcher) {
-                        parseMarkdown(targetContent, renderMode).also { parsed ->
-                            if (parsed.hasHtml) preloadMarkdownDocument(targetContent, renderMode)
-                        }
-                    }
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (exception: Exception) {
-                    exception.printStackTrace()
-                    parseFailed = true
-                }
-            }
-    }
-
-    val parsed = data
-    ReportRichTextLayoutLoading(!parseFailed && (parsed == null || parsed.source != content))
-    me.rerere.rikkahub.ui.components.ui.AwaitExportRender(!parseFailed && (parsed == null || parsed.source != content))
     if (parseFailed) {
         Column(modifier) {
             Text("消息内容解析失败，可重试或查看原始消息。")
@@ -539,7 +560,7 @@ private fun MarkdownBlockBody(
             Column(
                 modifier = modifier.padding(horizontal = 4.dp)
             ) {
-                parsed.astTree.children.fastForEach { child ->
+                parsed.astTree.children.forEachIndexed { index, child ->
                     key(child.type, child.startOffset) {
                         MarkdownNode(
                             node = child,
@@ -751,10 +772,7 @@ private fun MarkdownNode(
                 text = linkText,
                 color = MaterialTheme.colorScheme.primary,
                 textDecoration = TextDecoration.Underline,
-                modifier = modifier.clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, linkDest.toUri())
-                    context.startActivity(intent)
-                })
+                modifier = modifier.linkActions(linkDest, linkText))
         }
 
         // 加粗和斜体
@@ -786,7 +804,7 @@ private fun MarkdownNode(
         }
 
         GFMElementTypes.TABLE -> {
-            TableNode(node = node, content = content, modifier = modifier)
+            TableNode(node = node, content = content, modifier = modifier, onClickCitation = onClickCitation)
         }
 
         MarkdownTokenTypes.HORIZONTAL_RULE -> {
@@ -910,8 +928,8 @@ private fun MarkdownNode(
 
         MarkdownTokenTypes.TEXT -> {
             val text = node.getTextInNode(content)
-            Text(
-                text = text,
+            LinkText(
+                text = AnnotatedString(text),
                 modifier = modifier,
             )
         }
@@ -1106,7 +1124,7 @@ private fun Paragraph(
                 }
             }
         }
-        Text(
+        LinkText(
             text = annotatedString,
             modifier = Modifier,
             inlineContent = inlineContents,
@@ -1120,32 +1138,19 @@ private fun Paragraph(
 }
 
 @Composable
-private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier) {
-    // 提取表格的标题行和数据行
-    val headerNode = node.children.find { it.type == GFMElementTypes.HEADER }
-    val rowNodes = node.children.filter { it.type == GFMElementTypes.ROW }
-
-    // 计算列数（从标题行获取）
-    val columnCount = headerNode?.children?.count { it.type == GFMTokenTypes.CELL } ?: 0
-
-    // 检查是否有足够的列来显示表格
+private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier, onClickCitation: (String) -> Unit = {}) {
+    val table = remember(node, content) { markdownTableData(node, content) }
+    val headerCells = table.headers
+    val rows = table.rows
+    val columnCount = headerCells.size
     if (columnCount == 0) return
-
-    // 提取表头单元格文本
-    val headerCells =
-        headerNode?.children?.filter { it.type == GFMTokenTypes.CELL }?.map { it.getTextInNode(content).trim() }
-            ?: emptyList()
-
-    // 提取所有行的数据
-    val rows = rowNodes.map { rowNode ->
-        rowNode.children.filter { it.type == GFMTokenTypes.CELL }.map { it.getTextInNode(content).trim() }
-    }
 
     // 创建表头composable列表
     val headers = List(columnCount) { columnIndex ->
         @Composable {
             MarkdownBlock(
                 content = if (columnIndex < headerCells.size) headerCells[columnIndex] else "",
+                onClickCitation = onClickCitation,
             )
         }
     }
@@ -1156,6 +1161,7 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
             @Composable {
                 MarkdownBlock(
                     content = if (columnIndex < rowData.size) rowData[columnIndex] else "",
+                    onClickCitation = onClickCitation,
                 )
             }
         }
@@ -1253,7 +1259,10 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
             headers = headers,
             rows = rowComposables,
             columnMinWidths = List(columnCount) { 80.dp },
-            columnMaxWidths = List(columnCount) { 200.dp },
+            columnMaxWidths = List(columnCount) { 240.dp },
+            columnTextAlignments = table.alignments,
+            zebraStriping = true,
+            alternateRowBackground = richContent.toolbar.copy(alpha = .22f),
             cellBorder = BorderStroke(0.5.dp, richContent.cellBorder),
             headerBackground = richContent.toolbar,
             outerBorder = null,
@@ -1279,7 +1288,7 @@ private fun buildTableCsv(headerCells: List<String>, rows: List<List<String>>): 
     }
 }
 
-private fun AnnotatedString.Builder.appendMarkdownNodeContent(
+internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
     node: ASTNode,
     content: String,
     trim: Boolean = false,
@@ -1303,13 +1312,15 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             }
         }
 
+        node.type == MarkdownTokenTypes.HARD_LINE_BREAK -> append('\n')
+
         node is LeafASTNode -> {
             val text = node.getTextInNode(content).let {
                 if (trim) {
                     it.trim()
                 } else {
                     it
-                }.replace(BREAK_LINE_REGEX, "\n")
+                }.replace(BREAK_LINE_REGEX, "\n").let(::markdownProseText)
             }
             append(
                 text = text,
@@ -1371,47 +1382,13 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node.type == MarkdownElementTypes.INLINE_LINK -> {
-            val linkDest =
-                node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
-            val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content)
+            val linkDest = markdownLinkDestination(node, content)
+            val labelNode = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
+            val linkText = labelNode?.getTextInNode(content)
                 ?.trim { it == '[' || it == ']' } ?: linkDest
-            if (linkText.startsWith("citation,")) {
-                // 如果是引用，则特殊处理
-                val domain = linkText.substringAfter("citation,")
-                val id = linkDest
-                if (id.length == 6) {
-                    inlineContents.putIfAbsent(
-                        "citation:$linkDest", InlineTextContent(
-                            placeholder = Placeholder(
-                                width = (domain.length * 7).sp,
-                                height = 1.em,
-                                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
-                            ), children = {
-                                Box(
-                                    modifier = Modifier
-                                        .clickable {
-                                            onClickCitation(id.trim())
-                                        }
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
-                                        .background(colorScheme.tertiaryContainer.copy(0.2f)),
-                                    contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = domain,
-                                        modifier = Modifier.wrapContentSize(),
-                                        style = TextStyle(
-                                            fontSize = 10.sp,
-                                            lineHeight = 10.sp,
-                                            fontFamily = JetbrainsMono,
-                                            color = colorScheme.onTertiaryContainer,
-                                            fontWeight = FontWeight.Thin
-                                        ),
-                                    )
-                                }
-                            })
-                    )
-                    appendInlineContent("citation:$linkDest")
-                }
+            val citations = markdownCitations(linkText, linkDest)
+            if (citations.isNotEmpty()) {
+                citations.forEach { appendCitationBadge(it, inlineContents, colorScheme, onClickCitation) }
             } else {
                 withLink(LinkAnnotation.Url(linkDest)) {
                     withStyle(
@@ -1421,7 +1398,17 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                             textDecoration = TextDecoration.Underline,
                         )
                     ) {
-                        append(linkText)
+                        if (labelNode == null) append(markdownProseText(linkText)) else {
+                            labelNode.children.filterNot {
+                                (it.type == MarkdownTokenTypes.LBRACKET && it.startOffset == labelNode.startOffset) ||
+                                    (it.type == MarkdownTokenTypes.RBRACKET && it.endOffset == labelNode.endOffset)
+                            }.forEach { child ->
+                                appendMarkdownNodeContent(child, content, inlineContents = inlineContents,
+                                    colorScheme = colorScheme, density = density, style = style,
+                                    enableLatexRendering = enableLatexRendering, latexColorArgb = latexColorArgb,
+                                    onClickCitation = onClickCitation)
+                            }
+                        }
                     }
                 }
             }
@@ -1439,7 +1426,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node.type == MarkdownElementTypes.CODE_SPAN -> {
-            val code = node.getTextInNode(content).trim('`')
+            val code = markdownCodeSpanText(node.getTextInNode(content))
             withStyle(
                 SpanStyle(
                     fontFamily = JetbrainsMono,
@@ -1449,9 +1436,11 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     background = colorScheme.secondaryContainer.copy(alpha = 1f),
                 )
             ) {
-                append(' ')
-                append(code)
-                append(' ')
+                withChatLiteral {
+                    append(' ')
+                    append(code)
+                    append(' ')
+                }
             }
         }
 
@@ -1489,7 +1478,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                             })
                         )
                     } else {
-                        append(latexReadableFallback(formula))
+                        withChatLiteral { append(latexReadableFallback(formula)) }
                     }
                 } else {
                     drawables.forEachIndexed { index, drawable ->
@@ -1520,7 +1509,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         fontSize = 0.95.em,
                     )
                 ) {
-                    append(formula)
+                    withChatLiteral { append(formula) }
                 }
             }
         }

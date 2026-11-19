@@ -34,6 +34,7 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     Citations:
                     - After using results, add `[citation,domain](id)` after the sentence.
                     - Multiple citations are allowed.
+                    - For several sources, emit separate citation links with their exact result ids; never wrap citation markers in code.
                     - If no results are cited, omit citations.
 
                     Images:

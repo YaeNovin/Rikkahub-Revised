@@ -34,7 +34,7 @@ class TextColorPaletteTest {
             assertNotEquals(red, blue)
             for (foreground in listOf(red, blue)) {
                 assertTrue(wcagContrastRatio(foreground, background) >= 4.5f)
-                assertTrue(hctColorFromArgb(foreground.toArgb()).chroma in 18.0..34.0)
+                assertTrue(hctColorFromArgb(foreground.toArgb()).chroma in 28.0..64.0)
                 assertEquals(1f, foreground.alpha, 0f)
             }
         }

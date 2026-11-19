@@ -41,6 +41,8 @@ data class KnowledgeDocumentEntity(
     val updatedAt: Long,
 ) {
     companion object {
+        const val STATUS_QUEUED = "queued"
+        const val STATUS_CANCELLED = "cancelled"
         const val STATUS_INDEXING = "indexing"
         const val STATUS_READY = "ready"
         const val STATUS_READY_WITHOUT_EMBEDDING = "ready_without_embedding"

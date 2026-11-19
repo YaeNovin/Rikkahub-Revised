@@ -1,3 +1,4 @@
+import { ContextStatus } from "~/components/context-status";
 import * as React from "react";
 
 import { useNavigate, useParams } from "react-router";
@@ -28,7 +29,8 @@ import { useCurrentModel } from "~/hooks/use-current-model";
 import { getAssistantDisplayName, getModelDisplayName } from "~/lib/display";
 import { convertConversationToMarkdown, downloadMarkdown } from "~/lib/export-markdown";
 import { cn } from "~/lib/utils";
-import api, { sse } from "~/services/api";
+import api, { sse, type SSEEvent } from "~/services/api";
+import { reconnectingStream } from "~/services/reconnecting-stream";
 import { useChatInputStore, useAppStore } from "~/stores";
 import { WorkbenchHost } from "~/components/workbench/workbench-host";
 import {
@@ -56,6 +58,7 @@ import { v4 as uuidv4 } from "uuid";
 import i18n from "~/i18n";
 
 type ConversationStreamEvent =
+  | { type: "processing"; conversationId: string; status: string }
   | ConversationSnapshotEventDto
   | ConversationNodeUpdateEventDto
   | ConversationErrorEventDto;
@@ -332,16 +335,18 @@ function useConversationDetail(activeId: string | null, updateSummary: Conversat
     setDetailError(null);
 
     const abortController = new AbortController();
+    let receivedSnapshot = false;
+    let lastSequence = 0;
 
     api
-      .get<ConversationDto>(`conversations/${activeId}`)
+      .get<ConversationDto>(`conversations/${activeId}`, { signal: abortController.signal })
       .then((data) => {
-        if (!mounted) return;
+        if (!mounted || receivedSnapshot) return;
         setDetail(data);
         updateSummary(toConversationSummaryUpdate(data));
       })
       .catch((err: Error) => {
-        if (!mounted) return;
+        if (!mounted || receivedSnapshot) return;
         setDetailError(err.message || t("conversations.errors.load_detail_failed"));
         setDetail(null);
       })
@@ -350,11 +355,18 @@ function useConversationDetail(activeId: string | null, updateSummary: Conversat
         setDetailLoading(false);
       });
 
-    void sse<ConversationStreamEvent>(
-      `conversations/${activeId}/stream`,
+    const stopStream = reconnectingStream<SSEEvent<ConversationStreamEvent>>(
+      (callbacks, signal) => sse<ConversationStreamEvent>(
+        `conversations/${activeId}/stream`, callbacks, { signal },
+      ),
       {
+        onOpen: () => { lastSequence = 0; },
         onMessage: ({ event, data }) => {
           if (!mounted) return;
+          if (event === "processing" && data.type === "processing") {
+            window.dispatchEvent(new CustomEvent("rikkahub:processing", { detail: data }));
+            return;
+          }
 
           if (event === "error" && data.type === "error") {
             toast.error(data.message);
@@ -362,6 +374,8 @@ function useConversationDetail(activeId: string | null, updateSummary: Conversat
           }
 
           if (event === "snapshot" && data.type === "snapshot") {
+            receivedSnapshot = true;
+            lastSequence = data.seq;
             useAppStore.getState().setClockOffset(data.serverTime);
             setDetail(data.conversation);
             updateSummary(toConversationSummaryUpdate(data.conversation));
@@ -371,6 +385,8 @@ function useConversationDetail(activeId: string | null, updateSummary: Conversat
           }
 
           if (event !== "node_update" || data.type !== "node_update") return;
+          if (lastSequence === 0 || data.seq <= lastSequence) return;
+          lastSequence = data.seq;
 
           useAppStore.getState().setClockOffset(data.serverTime);
           setDetail((prev) => {
@@ -388,14 +404,21 @@ function useConversationDetail(activeId: string | null, updateSummary: Conversat
         onError: (streamError) => {
           if (!mounted) return;
           console.error("Conversation detail SSE error:", streamError);
+          setDetailLoading(false);
+          setDetailError(streamError.message);
         },
       },
-      { signal: abortController.signal },
+      { onDisconnect: () => {
+        if (!mounted) return;
+        setDetailLoading(false);
+        setDetailError("连接已中断，正在自动重连…");
+      } },
     );
 
     return () => {
       mounted = false;
       abortController.abort();
+      stopStream();
     };
   }, [activeId, resetDetail, t, updateSummary]);
 
@@ -1101,6 +1124,7 @@ function ConversationsPageInner() {
             <p className="text-lg text-muted-foreground">{t("conversations.welcome_prompt")}</p>
           </div>
         )}
+        {activeId && <ContextStatus key={activeId} id={activeId} generating={detail?.isGenerating ?? false} />}
         <ChatInput
           value={inputText}
           attachments={inputAttachments}

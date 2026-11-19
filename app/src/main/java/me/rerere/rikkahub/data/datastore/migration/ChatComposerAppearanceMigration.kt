@@ -7,7 +7,7 @@ import me.rerere.rikkahub.data.datastore.*
 import me.rerere.rikkahub.utils.JsonInstant
 
 internal fun migrateComposerDisplay(display: DisplaySetting, appearance: AdvancedAppearanceSetting): DisplaySetting =
-    if (appearance.enableChatDockGlass && appearance.enableChatDockPerformanceEffects && !display.enableBlurEffect) {
+    if (appearance.composerSurfaceStyle == null && appearance.enableChatDockGlass && appearance.enableChatDockPerformanceEffects && !display.enableBlurEffect) {
         display.copy(enableBlurEffect = true, inputBlurRadius = appearance.chatDockGlassBlurRadius,
             inputSurfaceOpacity = appearance.chatDockGlassOpacity)
     } else display

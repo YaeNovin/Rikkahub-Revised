@@ -21,6 +21,8 @@ import kotlin.uuid.Uuid
     val previewBeforeInsert: Boolean = true,
     val imageSuggestions: Boolean = false,
     val parameterForms: Boolean = true,
+    val decisionModelId: Uuid? = null,
+    val useDefaultDecisionModel: Boolean = true,
 )
 
 @Serializable data class ChatSuggestionConfig(

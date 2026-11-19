@@ -77,8 +77,8 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                 val searchResponse = runCatching {
                     json.decodeFromString<MetasoSearchResponse>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println("Failed to decode Metaso response: $bodyRaw")
+                    // Failure propagates to the structured application diagnostics.
+                    // Raw network content is not written to stdout.
                     error("Failed to decode response: $bodyRaw")
                 }.getOrThrow()
 
@@ -95,7 +95,7 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                 )
             } else {
                 val errorBody = response.body?.string()
-                println("Metaso search failed with code ${response.code}: $errorBody")
+                // Raw network content is not written to stdout.
                 error("Search request failed with code ${response.code}: $errorBody")
             }
         }

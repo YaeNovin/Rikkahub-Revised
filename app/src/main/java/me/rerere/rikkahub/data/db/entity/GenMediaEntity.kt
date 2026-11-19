@@ -31,6 +31,10 @@ data class GenMediaEntity(
     val format: String? = null,
     @ColumnInfo("seed")
     val seed: Long? = null,
+    @ColumnInfo("generation_parameters")
+    val generationParameters: String? = null,
+    @ColumnInfo("result_text")
+    val resultText: String? = null,
     @ColumnInfo("folder_id")
     val folderId: String? = null,
 ) {

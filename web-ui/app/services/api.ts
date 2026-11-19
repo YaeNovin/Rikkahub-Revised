@@ -1,4 +1,4 @@
-import ky, { type Options, HTTPError } from "ky";
+import ky, { type Options, HTTPError, TimeoutError } from "ky";
 
 interface ErrorResponse {
   error: string;
@@ -28,7 +28,6 @@ export class ApiError extends Error {
 const WEB_AUTH_STORAGE_KEY = "rikkahub:web-auth";
 const WEB_AUTH_REQUIRED_EVENT = "rikkahub:web-auth-required";
 const WEB_AUTH_EXPIRY_SKEW_MILLIS = 10_000;
-const WEB_AUTH_QUERY_KEY = "access_token";
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -36,7 +35,9 @@ function isBrowser(): boolean {
 
 function readStoredWebAuth(): WebAuthTokenResponse | null {
   if (!isBrowser()) return null;
-  const raw = window.localStorage.getItem(WEB_AUTH_STORAGE_KEY);
+  // Keep the bearer token scoped to the current browser session. Media requests use
+  // the HttpOnly cookie issued by /auth/token and never receive a token in their URL.
+  const raw = window.sessionStorage.getItem(WEB_AUTH_STORAGE_KEY);
   if (!raw) return null;
 
   try {
@@ -84,6 +85,9 @@ const kyInstance = ky.create({
 });
 
 async function handleError(error: unknown): Promise<never> {
+  if (error instanceof TimeoutError) {
+    throw new ApiError("手机 Web 服务响应超时。若切到后台后出现，请在手机应用信息中允许后台运行，并检查电池限制；vivo / iQOO 需将后台耗电管理设为“允许后台耗电”。", 0);
+  }
   if (error instanceof HTTPError) {
     const { response } = error;
     let errorData: ErrorResponse | undefined;
@@ -106,12 +110,12 @@ async function handleError(error: unknown): Promise<never> {
 
 export function setWebAuthToken(token: string, expiresAt: number): void {
   if (!isBrowser()) return;
-  window.localStorage.setItem(WEB_AUTH_STORAGE_KEY, JSON.stringify({ token, expiresAt }));
+  window.sessionStorage.setItem(WEB_AUTH_STORAGE_KEY, JSON.stringify({ token, expiresAt }));
 }
 
 export function clearWebAuthToken(): void {
   if (!isBrowser()) return;
-  window.localStorage.removeItem(WEB_AUTH_STORAGE_KEY);
+  window.sessionStorage.removeItem(WEB_AUTH_STORAGE_KEY);
 }
 
 export function onWebAuthRequired(
@@ -131,16 +135,9 @@ export function onWebAuthRequired(
 }
 
 export function appendWebAuthQuery(url: string): string {
-  if (!isBrowser() || !url.startsWith("/api/")) return url;
-
-  const token = getValidWebAuthToken();
-  if (!token) return url;
-
-  const [pathWithQuery, hash = ""] = url.split("#", 2);
-  const separator = pathWithQuery.includes("?") ? "&" : "?";
-  const encodedToken = encodeURIComponent(token);
-  const nextPath = `${pathWithQuery}${separator}${WEB_AUTH_QUERY_KEY}=${encodedToken}`;
-  return hash ? `${nextPath}#${hash}` : nextPath;
+  // Kept as a compatibility helper for callers that resolve media URLs. Authentication
+  // is carried by the HttpOnly same-site cookie, never by query parameters.
+  return url;
 }
 
 /**
@@ -197,6 +194,12 @@ export async function requestWebAuthToken(password: string): Promise<WebAuthToke
   return response;
 }
 
+export async function logoutWebSession(): Promise<void> {
+  // Retain local state on network failure: a cookie session has not been logged out yet.
+  await api.post("auth/logout", {});
+  clearWebAuthToken();
+}
+
 export interface SSEEvent<T> {
   event: string;
   data: T;
@@ -225,7 +228,8 @@ async function sse<T>(
       ...options,
       headers: {
         ...options?.headers,
-        Accept: "text/event-stream",
+        // Ktor returns JSON for authentication/errors before opening the stream.
+        Accept: "text/event-stream, application/json",
       },
       timeout: false,
     });

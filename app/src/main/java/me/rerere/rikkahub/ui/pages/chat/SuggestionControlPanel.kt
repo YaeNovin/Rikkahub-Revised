@@ -6,7 +6,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import me.rerere.rikkahub.ui.components.ui.windowBoundedHeight
+import me.rerere.rikkahub.ui.hooks.rememberAppDateFormat
 import androidx.compose.ui.unit.dp
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.data.datastore.Settings
@@ -15,9 +16,7 @@ import me.rerere.rikkahub.data.model.*
 import me.rerere.rikkahub.service.SuggestionGenerationState
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 data class SuggestionUiActions(
     val changeSession: (SuggestionSession) -> Unit = {},
@@ -47,7 +46,7 @@ fun SuggestionControlPanel(conversation: Conversation, settings: Settings, state
         // Keep one scroll container for the entire sheet. A nested LazyColumn made the
         // gesture region small and prevented the sheet from scrolling as a whole.
         Column(Modifier.fillMaxWidth()
-            .heightIn(max = (LocalConfiguration.current.screenHeightDp * .88f).dp)
+            .windowBoundedHeight(.88f)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -100,7 +99,7 @@ fun SuggestionControlPanel(conversation: Conversation, settings: Settings, state
             }
             session.info?.let { info ->
                 Text("最近生成：${info.modelName} · ${info.elapsedMillis} ms", style = MaterialTheme.typography.bodySmall)
-                Text("${SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(info.completedAt))} · 参考：${info.contextSources.joinToString("、")}", style = MaterialTheme.typography.bodySmall)
+                Text("${rememberAppDateFormat("MM-dd HH:mm:ss").format(Date(info.completedAt))} · 参考：${info.contextSources.joinToString("、")}", style = MaterialTheme.typography.bodySmall)
                 info.usage?.let { Text("输入 ${it.promptTokens} / 输出 ${it.completionTokens} / 缓存 ${it.cachedTokens} Token", style = MaterialTheme.typography.bodySmall) }
                 TextButton(onClick = { showLog = true }) { Text("本次运行日志") }
             }
@@ -120,7 +119,11 @@ fun SuggestionControlPanel(conversation: Conversation, settings: Settings, state
         } } }, confirmButton = { TextButton(onClick = { feedbackItem = null }) { Text("取消") } }) }
     if (showLog) AppearanceAlertDialog(onDismissRequest = { showLog = false }, title = { Text("聊天建议运行记录") }, text = {
         val info = session.info
-        val entry = Logging.getRecentLogs().firstOrNull { it.id.toString() == info?.logId }
+        val entry by androidx.compose.runtime.produceState<me.rerere.common.android.LogEntry?>(null, info?.logId) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                info?.logId?.let { id -> runCatching { Logging.getLog(kotlin.uuid.Uuid.parse(id)) }.getOrNull() }
+            }
+        }
         androidx.compose.foundation.text.selection.SelectionContainer {
             Text(entry?.toString() ?: "日志已过期；保存的运行摘要：\n$info", style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()))

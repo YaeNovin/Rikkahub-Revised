@@ -4,6 +4,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ExportRenderTrackerTest {
+    @Test fun `visible error placeholder completes export with warning without losing other renders`() {
+        val tracker = ExportRenderTracker(); val bad = Any(); val good = Any()
+        tracker.begin(bad); tracker.begin(good); tracker.warn(bad, "无法绘图")
+        assertNull(tracker.failure)
+        assertEquals(setOf("无法绘图"), tracker.warnings)
+        assertFalse(tracker.settled(System.nanoTime()+60_000_000_000L))
+        tracker.complete(good)
+        assertTrue(tracker.settled(System.nanoTime()+300_000_000L))
+    }
+    @Test fun `layout growth restarts quiet period even after assets loaded`() {
+        val tracker = ExportRenderTracker()
+        tracker.layoutChanged(1080,200)
+        assertTrue(tracker.settled(System.nanoTime()+300_000_000L))
+        tracker.layoutChanged(1080,14000)
+        assertFalse(tracker.settled())
+    }
     @Test fun `pending renderer prevents premature capture regardless of elapsed delay`() {
         val tracker = ExportRenderTracker()
         val parse = Any(); val webview = Any()

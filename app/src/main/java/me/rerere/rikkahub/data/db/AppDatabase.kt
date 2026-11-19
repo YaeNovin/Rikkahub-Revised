@@ -74,8 +74,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         VideoGenerationOutputEntity::class,
         GitHubRepositoryCacheEntity::class,
         GitHubApiCacheStateEntity::class,
+        me.rerere.rikkahub.data.db.entity.ChatImageToolTaskEntity::class,
     ],
-    version = 43,
+    version = 45,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -113,10 +114,14 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 39, to = 40),
         AutoMigration(from = 40, to = 41),
         AutoMigration(from = 41, to = 42),
+        AutoMigration(from = 43, to = 44),
+        AutoMigration(from = 44, to = 45),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun chatImageToolTaskDao(): me.rerere.rikkahub.data.db.dao.ChatImageToolTaskDAO
+
     abstract fun conversationDao(): ConversationDAO
 
     abstract fun memoryDao(): MemoryDAO

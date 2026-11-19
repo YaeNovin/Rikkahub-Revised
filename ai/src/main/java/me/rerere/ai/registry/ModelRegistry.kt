@@ -4,9 +4,12 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.inferModelTypeFromId
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.matchingModelId
 
 fun interface ModelData<T> {
     fun getData(modelId: String): T
+    fun getData(model: Model): T = getData(model.matchingModelId())
 }
 
 object ModelRegistry {
@@ -197,6 +200,26 @@ object ModelRegistry {
         add(GEMINI_FLASH_LATEST, GEMINI_PRO_LATEST)
     }
 
+    val GEMINI_4_ARGON = defineModel {
+        tokens("gemini", "4", "argon")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    val GEMINI_4_HYDROGEN = defineModel {
+        tokens("gemini", "4", "hydrogen")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    val GEMINI_4_CARBON = defineModel {
+        tokens("gemini", "4", "carbon")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    val GEMINI_4_SERIES = defineGroup { add(GEMINI_4_ARGON, GEMINI_4_HYDROGEN, GEMINI_4_CARBON) }
+
     val GEMINI_3_SERIES = defineGroup {
         add(
             GEMINI_3_PRO,
@@ -212,7 +235,7 @@ object ModelRegistry {
     }
 
     val GEMINI_SERIES = defineGroup {
-        add(GEMINI_20_FLASH, GEMINI_2_5_FLASH, GEMINI_2_5_PRO, GEMINI_3_SERIES, GEMINI_LATEST)
+        add(GEMINI_20_FLASH, GEMINI_2_5_FLASH, GEMINI_2_5_PRO, GEMINI_3_SERIES, GEMINI_4_SERIES, GEMINI_LATEST)
     }
 
     private val CLAUDE_SONNET_4_6 = defineModel {
@@ -389,6 +412,18 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val QWEN_4_MAX = defineModel {
+        tokens("qwen", "4", "max")
+        input(Modality.TEXT, Modality.IMAGE, Modality.VIDEO)
+        toolReasoningAbility()
+    }
+
+    private val MIMO_2_6 = defineModel {
+        tokens("mimo", "v", "2", "6")
+        input(Modality.TEXT, Modality.IMAGE, Modality.VIDEO)
+        toolReasoningAbility()
+    }
+
     private val SEEDREAM_IMAGE = defineModel {
         tokens("seedream")
         visionInput()
@@ -503,6 +538,41 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val GLM_5_3 = defineModel {
+        tokens("glm", "5", "3")
+        toolReasoningAbility()
+    }
+
+    private val GLM_5_3_FLASH = defineModel {
+        tokens("glm", "5", "3", "flash")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val GLM_5_3_FLASHX = defineModel {
+        tokens("glm", "5", "3", "flashx")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val KIMI_K2_7_CODE = defineModel {
+        tokens("kimi", "k", "2", "7", "code")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val KIMI_K3_1_PRO = defineModel {
+        tokens("kimi", "k", "3", "1", "pro")
+        visionInput()
+        toolReasoningAbility()
+    }
+
+    private val MINIMAX_M3_1_FLASH = defineModel {
+        tokens("minimax", "m", "3", "1", "flash")
+        input(Modality.TEXT, Modality.IMAGE, Modality.VIDEO)
+        toolReasoningAbility()
+    }
+
     private val MINIMAX_M2 = defineModel {
         tokens("minimax", "m", "2")
         toolReasoningAbility()
@@ -520,7 +590,7 @@ object ModelRegistry {
 
     private val MINIMAX_M3 = defineModel {
         tokens("minimax", "m", "3")
-        visionInput()
+        input(Modality.TEXT, Modality.IMAGE, Modality.VIDEO)
         toolReasoningAbility()
     }
 
@@ -607,6 +677,9 @@ object ModelRegistry {
         GEMINI_3_PRO,
         GEMINI_3_7_FLASH,
         GEMINI_3_8_FLASH,
+        GEMINI_4_ARGON,
+        GEMINI_4_HYDROGEN,
+        GEMINI_4_CARBON,
         GEMINI_3_FLASH,
         GEMINI_3_1_PRO_PREVIEW,
         GEMINI_3_1_PRO_PREVIEW_CUSTOMTOOLS,
@@ -640,6 +713,8 @@ object ModelRegistry {
         QWEN_3_6_MAX,
         QWEN_3_7_MAX,
         QWEN_3_8_MAX,
+        QWEN_4_MAX,
+        MIMO_2_6,
         QWEN_3_8_FLASH,
         SEEDREAM_IMAGE,
         DOUBAO_1_6,
@@ -661,6 +736,12 @@ object ModelRegistry {
         GLM_5,
         GLM_5_1,
         GLM_5_2,
+        GLM_5_3,
+        GLM_5_3_FLASH,
+        GLM_5_3_FLASHX,
+        KIMI_K2_7_CODE,
+        KIMI_K3_1_PRO,
+        MINIMAX_M3_1_FLASH,
         MINIMAX_M2,
         MINIMAX_M2_5,
         MINIMAX_M2_7,
@@ -702,6 +783,8 @@ object ModelRegistry {
             if (ModelAbility.REASONING in abilities) add(ModelAbility.REASONING)
         }
     }
+
+    fun isKnownModel(identifier: String): Boolean = ALL_MODELS.any { it.match(identifier) }
 
     private fun resolveModels(modelId: String): List<ModelDefinition> {
         var bestScore: Int? = null

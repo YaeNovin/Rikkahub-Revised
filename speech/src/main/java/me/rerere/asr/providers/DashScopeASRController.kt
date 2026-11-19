@@ -227,7 +227,7 @@ class DashScopeASRController(
 
     private fun handleServerEvent(text: String) {
         val event = runCatching { JSONObject(text) }.getOrElse {
-            Log.w(TAG, "Invalid realtime event: $text", it)
+            me.rerere.common.android.Logging.logSoftwareError(TAG, "Invalid realtime event", it)
             return
         }
 

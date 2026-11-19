@@ -1,3 +1,4 @@
+import { useWebIdleLogout } from "~/services/web-security";
 import {
   isRouteErrorResponse,
   Links,
@@ -15,6 +16,7 @@ import "./i18n";
 import { Toaster } from "./components/ui/sonner";
 import { ThemeProvider } from "./components/theme-provider";
 import { WebAuthGate } from "./components/web-auth-gate";
+import { UnsavedChangesGuard } from "./components/settings/unsaved-changes";
 
 const queryClient = new QueryClient();
 
@@ -42,9 +44,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 function AppContent() {
   useSettingsSubscription();
+  useWebIdleLogout();
   return (
     <ThemeProvider defaultTheme="system">
       <Outlet />
+      <UnsavedChangesGuard />
       <WebAuthGate />
       <Toaster position="top-center"/>
     </ThemeProvider>

@@ -5,7 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
+import me.rerere.rikkahub.ui.components.ui.currentWindowWidthDp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.data.datastore.RichContentStyle
@@ -100,7 +100,7 @@ internal fun richPreviewHeight(
     maxHeightDp: Int = 380,
     widthFraction: Float = 0.72f,
 ): Dp = calculateRichPreviewHeightDp(
-    screenWidthDp = LocalConfiguration.current.screenWidthDp,
+    screenWidthDp = currentWindowWidthDp(),
     minHeightDp = minHeightDp,
     maxHeightDp = maxHeightDp,
     widthFraction = widthFraction,
@@ -108,6 +108,6 @@ internal fun richPreviewHeight(
 
 @Composable
 internal fun svgPreviewHeight(aspectRatio: Float?): Dp = calculateSvgPreviewHeightDp(
-    screenWidthDp = LocalConfiguration.current.screenWidthDp,
+    screenWidthDp = currentWindowWidthDp(),
     aspectRatio = aspectRatio,
 ).dp

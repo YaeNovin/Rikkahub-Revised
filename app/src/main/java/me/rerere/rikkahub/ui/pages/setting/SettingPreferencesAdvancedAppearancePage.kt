@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
+import me.rerere.rikkahub.ui.components.ui.AppearanceCard as Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import me.rerere.rikkahub.ui.components.ui.LargeFlexibleTopAppBar
@@ -168,9 +168,6 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
     val effectivePageSurfaceStyle = appearanceCapabilities.effectiveSurfaceStyle(
         appearance.pageSurfaceStyle
     )
-    val effectiveOverlaySurfaceStyle = appearanceCapabilities.effectiveSurfaceStyle(
-        appearance.overlaySurfaceStyle
-    )
     val effectiveNavigationSurfaceStyle = appearanceCapabilities.effectiveSurfaceStyle(
         appearance.navigationSurfaceStyle
     )
@@ -190,17 +187,19 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
             else -> false
         },
         gradientBackgroundAnimated = currentChatBackground.useGradientBackground &&
+            appearance.pageSurfaceStyle != BackgroundSurfaceStyle.MICA &&
             currentChatBackground.gradientAnimation &&
             appearance.enableGradientPerformanceEffects,
         inputBlurActive = appearance.enableInputPerformanceEffects &&
-            composerMaterial != ChatComposerMaterial.TRANSLUCENT && settings.displaySetting.inputBlurRadius > 0f,
-        topBarBlurActive = topBarBackgroundAvailable &&
+            composerMaterial.usesBlur && settings.displaySetting.inputBlurRadius > 0f,
+        topBarBlurActive = settings.displaySetting.showTopBarBackground && topBarBackgroundAvailable &&
+            appearance.pageSurfaceStyle.usesBlur &&
             appearance.enableTopBarPerformanceEffects &&
             settings.displaySetting.enableTopBarBlur && settings.displaySetting.topBarBlurRadius > 0f,
         navigationGlassActive = chatBackgroundActive &&
             appearance.enableNavigationPerformanceEffects &&
             appearance.enableNavigationGlass &&
-            effectiveNavigationSurfaceStyle != BackgroundSurfaceStyle.OPAQUE,
+            effectiveNavigationSurfaceStyle.usesBlur,
         dockGlassActive = false,
         bubbleGlassActive = bubbleStylesAvailable &&
             appearanceCapabilities.effectiveBubbleStyle(
@@ -306,6 +305,8 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                 )
             }
 
+            item { MicaAppearanceSettingsCard(appearance, vm::useMicaAcrylicAppearance, vm::updateAdvancedAppearance) }
+
             item { LiquidGlassSettingsCard(appearance) { transform -> vm.updateAdvancedAppearance(transform) } }
 
             item {
@@ -317,23 +318,10 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text("表面样式") },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    ChatComposerMaterial.entries.forEachIndexed { index, material ->
-                                        SegmentedButton(
-                                            selected = composerMaterial == material,
-                                            enabled = material == ChatComposerMaterial.TRANSLUCENT || blurSupported,
-                                            shape = SegmentedButtonDefaults.itemShape(index, ChatComposerMaterial.entries.size),
-                                            onClick = { vm.updateComposerMaterial(material) },
-                                        ) {
-                                            Text(when (material) {
-                                                ChatComposerMaterial.TRANSLUCENT -> "半透明"
-                                                ChatComposerMaterial.FROSTED -> "磨砂"
-                                                ChatComposerMaterial.LIQUID_GLASS -> "液态玻璃"
-                                            })
-                                        }
-                                    }
-                                }
-                                Text("输入框、附件和 Dock 共用一个表面，透出后方消息和背景。玻璃材质参数统一在上方“液态玻璃材质”调整。")
+                                BackgroundSurfaceStyleSelector(selected = composerMaterial,
+                                    includeAcrylic = true, isSupported = { true },
+                                    onSelected = vm::updateComposerMaterial)
+                                Text("材质不依赖壁纸。输入框、附件和 Dock 共用表面；亚克力模糊后方聊天内容，加入轻微主题染色与静态颗粒。液态玻璃参数仍单独保留。")
                                 AppearanceCompatibilityWarning(
                                     blurSupported = blurSupported,
                                     reducedEffects = reducedEffects,
@@ -348,26 +336,26 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = appearance.enableInputPerformanceEffects,
-                                enabled = blurSupported && composerMaterial != ChatComposerMaterial.TRANSLUCENT,
+                                enabled = composerMaterial.usesBlur,
                                 onCheckedChange = { enabled ->
                                     updateAppearance { copy(enableInputPerformanceEffects = enabled) }
                                 },
                             )
                         },
                     )
-                    if (composerMaterial != ChatComposerMaterial.TRANSLUCENT) {
+                    // Inactive material controls remain visible but cannot silently enable effects.
+                    run {
                         item(
                             headlineContent = {
                                 Text(stringResource(R.string.setting_display_page_input_blur_radius_title))
                             },
                             supportingContent = {
                                 AdvancedAppearanceSlider(
-                                    description = "模糊输入区后方的消息和背景，不影响输入文字与按钮。0 表示不模糊。",
+                                    description = "模糊输入区后方的消息和背景，无需壁纸。磨砂、液态玻璃或亚克力且效果开启时生效；0 表示不模糊。实色材质保留此参数但不使用。",
                                     value = finiteAppearanceValue(settings.displaySetting.inputBlurRadius, 0f, liveBlurMax, 0f),
                                     valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..liveBlurMax,
                                     steps = if (reducedEffects) 5 else 11,
-                                    enabled = blurSupported &&
-                                        appearance.enableInputPerformanceEffects,
+                                    enabled = canAdjustMaterialBlur(composerMaterial, blurSupported, appearance.enableInputPerformanceEffects),
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_display_page_blur_radius_value,
@@ -391,7 +379,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                 value = finiteAppearanceValue(settings.displaySetting.inputSurfaceOpacity, 0f, 1f, 1f),
                                 valueRange = 0f..1f,
                                 steps = 19,
-                                enabled = true,
+                                enabled = !composerMaterial.opaqueMaterial,
                                 valueLabel = { value ->
                                     stringResource(
                                         R.string.setting_display_page_tint_value,
@@ -414,6 +402,14 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                     title = { Text(stringResource(R.string.setting_advanced_appearance_top_bar_section)) },
                 ) {
                     item(
+                        headlineContent = { Text("顶栏背景遮盖") },
+                        supportingContent = { Text("默认关闭，让顶栏区域保持透明。开启后恢复材质底色；聊天页仅显示悬浮操作按钮，并使用渐隐遮盖，不恢复整条顶栏。") },
+                        trailingContent = {
+                            Switch(checked = settings.displaySetting.showTopBarBackground,
+                                onCheckedChange = { enabled -> updateDisplayAppearance { copy(showTopBarBackground = enabled) } })
+                        },
+                    )
+                    item(
                         headlineContent = {
                             Text(stringResource(R.string.setting_display_page_top_bar_blur_title))
                         },
@@ -421,11 +417,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 if (topBarBackgroundAvailable) {
                                     Text(stringResource(R.string.setting_display_page_top_bar_blur_desc))
-                                } else {
-                                    CompatibilityWarningText(
-                                        R.string.setting_advanced_appearance_top_bar_requires_background
-                                    )
-                                }
+                                } else Text("可预先设置模糊参数；顶栏当前没有背景采样，暂以主题底色显示。")
                                 AppearanceCompatibilityWarning(
                                     blurSupported = blurSupported,
                                     reducedEffects = reducedEffects,
@@ -438,9 +430,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = settings.displaySetting.enableTopBarBlur,
-                                enabled = blurSupported &&
-                                    topBarBackgroundAvailable &&
-                                    appearance.enableTopBarPerformanceEffects,
+                                enabled = settings.displaySetting.showTopBarBackground && canAdjustMaterialBlur(appearance.pageSurfaceStyle, blurSupported, appearance.enableTopBarPerformanceEffects, topBarBackgroundAvailable),
                                 onCheckedChange = { enabled ->
                                     updateDisplayAppearance { copy(enableTopBarBlur = enabled) }
                                 },
@@ -464,9 +454,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                     valueRange = MIN_GLOBAL_BACKGROUND_BLUR_RADIUS..
                                         topBarBlurMax,
                                     steps = if (reducedEffects) 3 else 17,
-                                    enabled = blurSupported &&
-                                        topBarBackgroundAvailable &&
-                                        appearance.enableTopBarPerformanceEffects,
+                                    enabled = settings.displaySetting.showTopBarBackground && canAdjustMaterialBlur(appearance.pageSurfaceStyle, blurSupported, appearance.enableTopBarPerformanceEffects, topBarBackgroundAvailable),
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_display_page_blur_radius_value,
@@ -490,8 +478,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                 value = settings.displaySetting.topBarSurfaceOpacity.coerceIn(0.35f, 1f),
                                 valueRange = 0.35f..1f,
                                 steps = 12,
-                                enabled = topBarBackgroundAvailable &&
-                                    appearance.enableTopBarPerformanceEffects,
+                                enabled = settings.displaySetting.showTopBarBackground,
                                 valueLabel = { value ->
                                     stringResource(
                                         R.string.setting_display_page_tint_value,
@@ -538,7 +525,6 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                         copy(
                                             enableGlobalBackground = enabled,
                                             applyGlobalBackgroundToChat = false,
-                                            pageSurfaceStyle = if (enabled && pageSurfaceStyle == BackgroundSurfaceStyle.OPAQUE) BackgroundSurfaceStyle.TRANSLUCENT else pageSurfaceStyle,
                                         )
                                     }
                                 },
@@ -609,6 +595,10 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                 }
                             },
                         )
+                        if (appearance.pageSurfaceStyle == BackgroundSurfaceStyle.OPAQUE) {
+                            Text("当前页面使用实色材质，图片仍会保存。需要显示图片时，请在“卡片与列表表面”中选择其他材质。",
+                                modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
 
@@ -617,27 +607,6 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                         CardGroup(
                             modifier = Modifier.padding(horizontal = 8.dp),
                         ) {
-                            item(
-                                headlineContent = {
-                                    Text(stringResource(R.string.setting_advanced_appearance_page_surface_style))
-                                },
-                                supportingContent = {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text(stringResource(R.string.setting_advanced_appearance_page_surface_style_desc))
-                                        BackgroundSurfaceStyleSelector(
-                                            selected = effectivePageSurfaceStyle,
-                                            isSupported = appearanceCapabilities::supportsSurfaceStyle,
-                                            onSelected = { style ->
-                                                updateAppearance { copy(pageSurfaceStyle = style) }
-                                            },
-                                        )
-                                        SurfaceStyleCompatibilityWarning(
-                                            blurSupported = blurSupported,
-                                            reducedEffects = reducedEffects,
-                                        )
-                                    }
-                                },
-                            )
                             item(
                                 headlineContent = {
                                     Text(stringResource(R.string.setting_advanced_appearance_background_opacity))
@@ -661,7 +630,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                     )
                                 },
                             )
-                            if (effectivePageSurfaceStyle == BackgroundSurfaceStyle.FROSTED) {
+                            if (appearance.pageSurfaceStyle != BackgroundSurfaceStyle.LIQUID_GLASS) {
                                 item(
                                     headlineContent = {
                                         Text(stringResource(R.string.setting_advanced_appearance_background_blur))
@@ -675,7 +644,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                             ),
                                             valueRange = MIN_GLOBAL_BACKGROUND_BLUR_RADIUS..backgroundBlurMax,
                                             steps = if (reducedEffects) 7 else 17,
-                                            enabled = blurSupported,
+                                            enabled = canAdjustMaterialBlur(appearance.pageSurfaceStyle, blurSupported, sourceAvailable = globalPageBackgroundVisible),
                                             valueLabel = { value ->
                                                 stringResource(
                                                     R.string.setting_advanced_appearance_background_blur_value,
@@ -689,7 +658,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                     },
                                 )
                             }
-                            if (effectivePageSurfaceStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
+                            if (appearance.pageSurfaceStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
                                 item(
                                     headlineContent = {
                                         Text(stringResource(R.string.setting_advanced_appearance_liquid_blur))
@@ -703,7 +672,7 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                                             ),
                                             valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..liveBlurMax,
                                             steps = if (reducedEffects) 5 else 11,
-                                            enabled = blurSupported,
+                                            enabled = canAdjustMaterialBlur(appearance.pageSurfaceStyle, blurSupported, sourceAvailable = globalPageBackgroundVisible),
                                             valueLabel = { value ->
                                                 stringResource(
                                                     R.string.setting_advanced_appearance_background_blur_value,
@@ -727,18 +696,25 @@ fun SettingPreferencesAdvancedAppearancePage(vm: SettingVM = koinViewModel()) {
                     modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text("卡片与列表表面") },
                 ) {
+                    item(headlineContent = { Text("页面材质") }, supportingContent = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("云母保留自定义背景，以取色和半透明卡片形成层次；没有背景时使用柔和底层。只有玻璃类材质启用实时模糊。")
+                            BackgroundSurfaceStyleSelector(selected = appearance.pageSurfaceStyle,
+                                isSupported = { true }, onSelected = { style -> updateAppearance { copy(pageSurfaceStyle = style) } })
+                        }
+                    })
                     item(
                         headlineContent = { Text("卡片与列表不透明度") },
                         supportingContent = {
                             Column {
                                 AdvancedAppearanceSlider(
-                                    description = "同时用于助手背景、渐变背景和可见的全局背景。输入区和顶栏使用各自的不透明度。",
+                                    description = "实色固定不透明；云母及其他材质使用此值。云母没有背景时保留完整底层，输入区和顶栏独立设置。",
                                     value = appearance.pageSurfaceOpacity, valueRange = .35f..1f, steps = 12,
                                     enabled = canAdjustCardOpacity(settings, appearanceCapabilities),
                                     valueLabel = { "${(it * 100).roundToInt()}%" },
                                     onValueChange = { value -> updateAppearance { copy(pageSurfaceOpacity = value) } },
                                 )
-                                if (!canAdjustCardOpacity(settings, appearanceCapabilities)) CompatibilityWarningText(R.string.setting_advanced_appearance_requires_background)
+                                if (!canAdjustCardOpacity(settings, appearanceCapabilities)) Text("当前材质固定不透明，已保留原参数。")
                             }
                         },
                     )
@@ -755,15 +731,11 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                         },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(stringResource(R.string.setting_advanced_appearance_overlay_surface_style_desc))
-                                if (!overlayBackgroundAvailable) {
-                                    CompatibilityWarningText(
-                                        R.string.setting_advanced_appearance_overlay_requires_background
-                                    )
-                                }
+                                Text("弹窗、菜单与底部面板共用材质，无需壁纸。亚克力使用打开时的应用页面快照，不持续追踪后方动画；采样不可用时使用主题底色。")
                                 BackgroundSurfaceStyleSelector(
-                                    selected = effectiveOverlaySurfaceStyle,
-                                    isSupported = appearanceCapabilities::supportsSurfaceStyle,
+                                    selected = appearance.overlaySurfaceStyle,
+                                    includeAcrylic = true,
+                                    isSupported = { true },
                                     onSelected = { style ->
                                         updateAppearance { copy(overlaySurfaceStyle = style) }
                                     },
@@ -775,7 +747,14 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                             }
                         },
                     )
-                    if (effectiveOverlaySurfaceStyle != BackgroundSurfaceStyle.OPAQUE) {
+                    item(headlineContent = { Text("浮层材质效果") }, supportingContent = {
+                        Text("控制模糊、颗粒与玻璃光学层。关闭不重置材质或参数；亚克力回退主题染色底层。")
+                    }, trailingContent = {
+                        Switch(appearance.enableOverlayPerformanceEffects,
+                            { enabled -> updateAppearance { copy(enableOverlayPerformanceEffects = enabled) } },
+                            enabled = appearance.overlaySurfaceStyle.usesBlur)
+                    })
+                    if (appearance.overlaySurfaceStyle != BackgroundSurfaceStyle.OPAQUE) {
                         item(
                             headlineContent = {
                                 Text(stringResource(R.string.setting_advanced_appearance_overlay_surface_opacity))
@@ -802,7 +781,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                             },
                         )
                     }
-                    if (effectiveOverlaySurfaceStyle == BackgroundSurfaceStyle.FROSTED) {
+                    if (appearance.overlaySurfaceStyle != BackgroundSurfaceStyle.LIQUID_GLASS) {
                         item(
                             headlineContent = {
                                 Text(stringResource(R.string.setting_advanced_appearance_overlay_surface_blur))
@@ -818,7 +797,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                                     ),
                                     valueRange = MIN_NAVIGATION_GLASS_BLUR_RADIUS..navigationBlurMax,
                                     steps = if (reducedEffects) 3 else 13,
-                                    enabled = blurSupported && overlayBackgroundAvailable,
+                                    enabled = canAdjustMaterialBlur(appearance.overlaySurfaceStyle, blurSupported, appearance.enableOverlayPerformanceEffects),
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_advanced_appearance_background_blur_value,
@@ -832,7 +811,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                             },
                         )
                     }
-                    if (effectiveOverlaySurfaceStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
+                    if (appearance.overlaySurfaceStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
                         item(
                             headlineContent = {
                                 Text(stringResource(R.string.setting_advanced_appearance_liquid_blur))
@@ -848,7 +827,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                                     ),
                                     valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..liveBlurMax,
                                     steps = if (reducedEffects) 5 else 11,
-                                    enabled = blurSupported && overlayBackgroundAvailable,
+                                    enabled = canAdjustMaterialBlur(appearance.overlaySurfaceStyle, blurSupported, appearance.enableOverlayPerformanceEffects),
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_advanced_appearance_background_blur_value,
@@ -876,26 +855,15 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                         },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (chatBackgroundActive) {
-                                    Text(
-                                        stringResource(
-                                            R.string.setting_advanced_appearance_navigation_glass_enabled_desc
-                                        )
-                                    )
-                                } else {
-                                    CompatibilityWarningText(
-                                        R.string.setting_advanced_appearance_requires_background
-                                    )
-                                }
+                                Text("侧栏材质与背景独立设置。无背景时保留主题底色；模糊需要可用背景。暂停效果不改变材质选择。")
                                 BackgroundSurfaceStyleSelector(
                                     selected = if (appearance.enableNavigationGlass) {
-                                        effectiveNavigationSurfaceStyle
+                                        appearance.navigationSurfaceStyle
                                     } else {
                                         BackgroundSurfaceStyle.OPAQUE
                                     },
-                                    enabled = chatBackgroundActive &&
-                                        appearance.enableNavigationPerformanceEffects,
-                                    isSupported = appearanceCapabilities::supportsSurfaceStyle,
+                                    enabled = true,
+                                    isSupported = { true },
                                     onSelected = { style ->
                                         updateAppearance {
                                             copy(
@@ -930,8 +898,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                                     value = appearance.navigationGlassOpacity.coerceIn(0.35f, 0.95f),
                                     valueRange = 0.35f..0.95f,
                                     steps = 11,
-                                    enabled = chatBackgroundActive &&
-                                        appearance.enableNavigationPerformanceEffects,
+                                    enabled = !appearance.navigationSurfaceStyle.opaqueMaterial,
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_advanced_appearance_background_opacity_value,
@@ -944,7 +911,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                                 )
                             },
                         )
-                        if (effectiveNavigationSurfaceStyle == BackgroundSurfaceStyle.FROSTED) item(
+                        if (appearance.navigationSurfaceStyle != BackgroundSurfaceStyle.LIQUID_GLASS) item(
                             headlineContent = {
                                 Text(stringResource(R.string.setting_advanced_appearance_navigation_glass_blur))
                             },
@@ -957,9 +924,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                                     ),
                                     valueRange = MIN_NAVIGATION_GLASS_BLUR_RADIUS..navigationBlurMax,
                                     steps = if (reducedEffects) 3 else 13,
-                                    enabled = blurSupported &&
-                                        chatBackgroundActive &&
-                                        appearance.enableNavigationPerformanceEffects,
+                                    enabled = canAdjustMaterialBlur(appearance.navigationSurfaceStyle, blurSupported, appearance.enableNavigationPerformanceEffects, chatBackgroundActive),
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_advanced_appearance_background_blur_value,
@@ -985,9 +950,7 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                                     ),
                                     valueRange = MIN_LIQUID_GLASS_BLUR_RADIUS..liveBlurMax,
                                     steps = if (reducedEffects) 5 else 11,
-                                    enabled = blurSupported &&
-                                        chatBackgroundActive &&
-                                        appearance.enableNavigationPerformanceEffects,
+                                    enabled = canAdjustMaterialBlur(appearance.navigationSurfaceStyle, blurSupported, appearance.enableNavigationPerformanceEffects, chatBackgroundActive),
                                     valueLabel = { value ->
                                         stringResource(
                                             R.string.setting_advanced_appearance_background_blur_value,
@@ -1379,6 +1342,10 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
                     selected = appearance.textColorMode,
                     onSelected = { mode -> updateAppearance { copy(textColorMode = mode) } },
                     modifier = Modifier.padding(horizontal = 8.dp),
+                    providedSeed = appearance.wallpaperTextSeedArgb,
+                    onProvidedSeed = { seed, wallpaperId -> updateAppearance {
+                        copy(wallpaperTextSeedArgb = seed, wallpaperTextSeedWallpaperId = wallpaperId)
+                    } },
                 )
             }
 
@@ -1449,10 +1416,12 @@ title = { Text(stringResource(R.string.setting_advanced_appearance_overlay_surfa
 private fun BackgroundSurfaceStyleSelector(
     selected: BackgroundSurfaceStyle,
     enabled: Boolean = true,
+    includeAcrylic: Boolean = false,
     isSupported: (BackgroundSurfaceStyle) -> Boolean,
     onSelected: (BackgroundSurfaceStyle) -> Unit,
 ) {
     val options = listOf(
+        BackgroundSurfaceStyle.MICA to "云母",
         BackgroundSurfaceStyle.OPAQUE to stringResource(
             R.string.setting_advanced_appearance_surface_style_opaque
         ),
@@ -1465,7 +1434,7 @@ private fun BackgroundSurfaceStyleSelector(
         BackgroundSurfaceStyle.LIQUID_GLASS to stringResource(
             R.string.setting_advanced_appearance_surface_style_liquid
         ),
-    )
+    ) + if (includeAcrylic) listOf(BackgroundSurfaceStyle.ACRYLIC to "亚克力") else emptyList()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         options.chunked(2).forEach { rowOptions ->
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {

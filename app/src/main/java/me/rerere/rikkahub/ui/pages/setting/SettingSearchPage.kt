@@ -188,6 +188,9 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 scope.launch {
                     lazyListState.animateScrollToItem(0)
                 }
+                if (options is SearchServiceOptions.CustomOptions) {
+                    nav.navigate(Screen.SettingSearchDetail(options.id.toString()))
+                }
             }
         )
     }

@@ -15,14 +15,17 @@ fun resolveQwenModelParameterSupport(modelId: String): QwenModelParameterSupport
     val available = normalized.isQwenFamily() && !normalized.isQwenSpecializedMediaModel()
     return QwenModelParameterSupport(
         available = available,
-        supportsJsonSchema = available && QWEN_JSON_SCHEMA_MODELS.containsMatchIn(normalized),
-        supportsToolStream = available && QWEN_TOOL_STREAM_MODELS.any { it.containsMatchIn(normalized) },
-        supportsPreserveThinking = available && QWEN_PRESERVE_THINKING_MODELS.any {
+        supportsJsonSchema = available && (isQwen4Max(normalized) || QWEN_JSON_SCHEMA_MODELS.containsMatchIn(normalized)),
+        supportsToolStream = available && (isQwen4Max(normalized) || QWEN_TOOL_STREAM_MODELS.any { it.containsMatchIn(normalized) }),
+        supportsPreserveThinking = available && (isQwen4Max(normalized) || QWEN_PRESERVE_THINKING_MODELS.any {
             it.containsMatchIn(normalized)
-        },
+        }),
         supportsHighResolutionVision = available && normalized.isQwenVisionFamily(),
     )
 }
+
+fun isQwen4Max(modelId: String): Boolean =
+    modelId.normalizedQwenModelId().let { !it.contains("preview") && Regex("^qwen-?4[.-]max(?:[-.]|$)").containsMatchIn(it) }
 
 fun isAlibabaModelStudioHost(host: String): Boolean {
     val normalized = host.trim().lowercase()
@@ -49,7 +52,7 @@ private fun String.isQwenSpecializedMediaModel(): Boolean =
         QWEN_NON_CHAT_MARKERS.any(::contains)
 
 private fun String.isQwenVisionFamily(): Boolean =
-    startsWith("qvq") ||
+    isQwen4Max(this) || startsWith("qvq") ||
         contains("-vl") ||
         contains("omni") ||
         QWEN_NATIVE_MULTIMODAL_MODELS.containsMatchIn(this)

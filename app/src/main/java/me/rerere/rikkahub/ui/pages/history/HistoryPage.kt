@@ -26,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxDefaults
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Conversation
@@ -64,6 +66,18 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var deletionError by remember { mutableStateOf<String?>(null) }
+
+    deletionError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { deletionError = null },
+            title = { Text("未能删除对话") },
+            text = { Text(error) },
+            confirmButton = {
+                TextButton(onClick = { deletionError = null }) { Text(stringResource(R.string.confirm)) }
+            },
+        )
+    }
 
     val conversations by vm.conversations.collectAsStateWithLifecycle()
 
@@ -115,16 +129,19 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                     },
                     onDelete = {
                         scope.launch {
-                            // 先获取完整的对话数据（包含 messageNodes），用于撤销恢复
-                            val fullConversation = vm.getFullConversation(conversation.id) ?: conversation
-                            vm.deleteConversation(conversation)
-                            val result = snackbarHostState.showSnackbar(
-                                message = snackMessageDeleted,
-                                actionLabel = snackMessageUndo,
-                                withDismissAction = true,
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                vm.restoreConversation(fullConversation)
+                            try {
+                                vm.deleteConversation(conversation) {
+                                    snackbarHostState.showSnackbar(
+                                        message = snackMessageDeleted,
+                                        actionLabel = snackMessageUndo,
+                                        withDismissAction = true,
+                                        duration = SnackbarDuration.Long,
+                                    ) != SnackbarResult.ActionPerformed
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                deletionError = error.message ?: "请重试"
                             }
                         }
                     },

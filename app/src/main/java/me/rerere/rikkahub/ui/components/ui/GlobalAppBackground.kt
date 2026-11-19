@@ -16,11 +16,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import androidx.compose.ui.platform.LocalContext
 import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
 import me.rerere.rikkahub.data.datastore.MAX_GLOBAL_BACKGROUND_BLUR_RADIUS
 import me.rerere.rikkahub.data.datastore.MIN_GLOBAL_BACKGROUND_BLUR_RADIUS
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.isGlobalBackgroundActive
+import me.rerere.rikkahub.ui.theme.withTextPalette
 
 @Composable
 fun GlobalAppBackground(
@@ -28,6 +32,11 @@ fun GlobalAppBackground(
     modifier: Modifier = Modifier,
     captureOnly: Boolean = false,
 ) {
+    if (settings.advancedAppearanceSetting.pageSurfaceStyle == BackgroundSurfaceStyle.MICA &&
+        (!settings.isGlobalBackgroundActive() || !(settings.advancedAppearanceSetting.globalBackgroundOpacity > 0f))) {
+        MicaBackdrop(modifier)
+        return
+    }
     if (!settings.isGlobalBackgroundActive()) return
     val appearance = settings.advancedAppearanceSetting
     val capabilities = LocalAdvancedAppearanceCapabilities.current
@@ -36,8 +45,10 @@ fun GlobalAppBackground(
     if (pageSurfaceStyle == BackgroundSurfaceStyle.OPAQUE && !captureOnly) return
     val pageBlurRadius = when (pageSurfaceStyle) {
         BackgroundSurfaceStyle.OPAQUE,
+        BackgroundSurfaceStyle.MICA,
         BackgroundSurfaceStyle.TRANSLUCENT -> 0f
-        BackgroundSurfaceStyle.FROSTED -> capabilities.limitBackgroundBlur(
+        BackgroundSurfaceStyle.FROSTED,
+        BackgroundSurfaceStyle.ACRYLIC -> capabilities.limitBackgroundBlur(
             appearance.globalBackgroundBlurRadius.coerceIn(
                 MIN_GLOBAL_BACKGROUND_BLUR_RADIUS,
                 MAX_GLOBAL_BACKGROUND_BLUR_RADIUS,
@@ -70,20 +81,22 @@ fun GlobalGlassTheme(
     style: BackgroundSurfaceStyle = BackgroundSurfaceStyle.TRANSLUCENT,
     content: @Composable () -> Unit,
 ) {
-    if (!active || style == BackgroundSurfaceStyle.OPAQUE) {
-        content()
-        return
-    }
-
-    val baseScheme = MaterialTheme.colorScheme
+    // Keep NavDisplay at one composition location across wallpaper and mode changes.
+    me.rerere.rikkahub.ui.theme.MicaPageTheme(active = active && style == BackgroundSurfaceStyle.MICA) {
+    // MaterialTheme updates its ColorScheme in place; color role values are stable keys.
+    val micaEnabled = active && style == BackgroundSurfaceStyle.MICA
+    val baseScheme = if (micaEnabled) MaterialTheme.colorScheme else
+        MaterialTheme.colorScheme.withTextPalette(me.rerere.rikkahub.ui.theme.currentTextPaletteSeed())
+    val glassEnabled = active && style != BackgroundSurfaceStyle.MICA && style != BackgroundSurfaceStyle.OPAQUE
+    val paletteKey = baseScheme.toString()
     val safeSurfaceOpacity = normalizedPageSurfaceOpacity(surfaceOpacity)
-    val glassScheme = remember(baseScheme, safeSurfaceOpacity, style) {
+    val glassScheme = remember(paletteKey, safeSurfaceOpacity, style, glassEnabled) {
         val pageContainerLowAlpha = if (style == BackgroundSurfaceStyle.LIQUID_GLASS) {
             (safeSurfaceOpacity + 0.08f).coerceAtMost(0.92f)
         } else {
             1f
         }
-        baseScheme.copy(
+        if (!glassEnabled) baseScheme else baseScheme.copy(
             background = baseScheme.background.copy(alpha = 0.06f),
             surface = baseScheme.surface.copy(alpha = safeSurfaceOpacity),
             surfaceDim = baseScheme.surfaceDim.copy(alpha = (safeSurfaceOpacity + 0.06f).coerceAtMost(1f)),
@@ -116,11 +129,15 @@ fun GlobalGlassTheme(
         val foreground = LocalAppearanceBackground.current?.foreground
             ?.takeIf { it != Color.Unspecified }
             ?: glassScheme.onSurface
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides
+            if (micaEnabled) androidx.compose.material3.LocalContentColor.current else glassScheme.onBackground) {
         me.rerere.rikkahub.ui.theme.BackgroundReadabilityTheme(
-            active = true,
+            active = glassEnabled,
             foreground = foreground,
             content = content,
         )
+        }
+    }
     }
 }
 
@@ -149,9 +166,13 @@ fun BlurredBackgroundImage(
     val safeBlurRadius = LocalAdvancedAppearanceCapabilities.current.limitBackgroundBlur(
         blurRadius.coerceIn(0f, MAX_GLOBAL_BACKGROUND_BLUR_RADIUS)
     )
+    val context = LocalContext.current
+    val imageRequest = remember(context, background) {
+        ImageRequest.Builder(context).data(background).crossfade(false).build()
+    }
     Box(modifier = modifier.clipToBounds()) {
         AsyncImage(
-            model = background,
+            model = imageRequest,
             onLoading = { onImageLoaded?.invoke(false) },
             onError = { onImageLoaded?.invoke(false) },
             onSuccess = { onImageLoaded?.invoke(true) },

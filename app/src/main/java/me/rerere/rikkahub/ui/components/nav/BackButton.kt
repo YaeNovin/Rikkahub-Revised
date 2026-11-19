@@ -18,11 +18,15 @@ fun BackButton(
     onClick: (() -> Unit)? = null,
 ) {
     val navController = LocalNavController.current
+    val surfaceColors = CustomColors.listItemColors
     FilledTonalIconButton(
         onClick = onClick ?: { navController.popBackStack() },
         modifier = modifier,
         shapes = IconButtonDefaults.shapes(),
-        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = CustomColors.listItemColors.containerColor),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = surfaceColors.containerColor,
+            contentColor = surfaceColors.contentColor,
+        ),
     ) {
         Icon(
             imageVector = HugeIcons.ArrowLeft01,

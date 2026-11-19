@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +52,11 @@ import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.resolveParameterFamily
 import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.providers.google.isGemini4Model
+import me.rerere.ai.provider.providers.google.isGeminiHydrogen
+import me.rerere.ai.provider.providers.google.gemini4DefaultThinking
+import me.rerere.ai.provider.providers.google.isGeminiModel
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -78,11 +84,17 @@ fun AssistantGeminiPage(id: String) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val providers by vm.providers.collectAsStateWithLifecycle()
     val model = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
+    val nav = LocalNavController.current
+    LaunchedEffect(settings.init, model) {
+        if (!settings.init && model != null && !model.isGeminiModel()) nav.popBackStack()
+    }
+    if (model?.isGeminiModel() != true) return
     val provider = model?.findProvider(providers)
     val parameterModelId = model?.parameterModelId().orEmpty()
     val isGemini3 = model != null && ModelRegistry.GEMINI_3_SERIES.match(parameterModelId)
     val isGemini37Flash = model != null && ModelRegistry.GEMINI_3_7_FLASH.match(parameterModelId)
     val isGemini38Flash = model != null && ModelRegistry.GEMINI_3_8_FLASH.match(parameterModelId)
+    val isArgon = model.isGemini4Model()
     val googleProvider = provider as? ProviderSetting.Google
     val openAIProvider = provider as? ProviderSetting.OpenAI
     val openAIChatCompatible = openAIProvider != null && !openAIProvider.useResponseApi
@@ -116,12 +128,16 @@ fun AssistantGeminiPage(id: String) {
             assistant = assistant,
             enabled = enabled,
             nativeProtocol = nativeProtocol,
-            supportsMediaResolution = nativeProtocol && isGemini3,
+            supportsMediaResolution = nativeProtocol && (isGemini3 || isArgon || googleProvider?.useInteractionsApi == true),
             isGemini37Flash = isGemini37Flash,
             isGemini38Flash = isGemini38Flash,
             route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
+            isArgon = isArgon,
+            hydrogen = model.isGeminiHydrogen(),
+            defaultThinking = model.gemini4DefaultThinking(),
+            supportsTopK = !isGemini3 && !isArgon,
         )
     }
 }
@@ -138,8 +154,13 @@ internal fun AssistantGeminiContent(
     route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
+    isArgon: Boolean = false,
+    hydrogen: Boolean = false,
+    defaultThinking: String = "medium",
+    supportsTopK: Boolean = false,
 ) {
     val options = assistant.geminiOptions
+    val interactions = route?.protocol == ParameterWireProtocol.GOOGLE_INTERACTIONS
     var activeDialog by remember { mutableStateOf<GeminiDialogType?>(null) }
 
     fun update(transform: (GeminiGenerationOptions) -> GeminiGenerationOptions) {
@@ -150,7 +171,7 @@ internal fun AssistantGeminiContent(
         GeminiOptionsDialog(
             type = type,
             initial = options,
-            nativeProtocol = nativeProtocol,
+            nativeProtocol = nativeProtocol && !interactions,
             onDismiss = { activeDialog = null },
             onConfirm = { value ->
                 onUpdate(assistant.copy(geminiOptions = value))
@@ -175,6 +196,7 @@ internal fun AssistantGeminiContent(
                 description = {
                     Text(unavailableMessage ?: stringResource(R.string.assistant_gemini_available_desc))
                     route?.DisplayText()
+                    if (interactions) Text("Interactions API(Beta)：本地管理历史，保留思考与工具签名。暂不支持搜索时间范围、text/x.enum、惩罚参数与 topK；思考关闭会使用最低可用档位。")
                     Text(stringResource(R.string.assistant_gemini_apply_and_log_desc))
                     ParameterWarningText(stringResource(R.string.assistant_gemini_experimental_desc))
                     if (enabled && !nativeProtocol) {
@@ -186,6 +208,9 @@ internal fun AssistantGeminiContent(
                     if (isGemini38Flash) {
                         Text(stringResource(R.string.assistant_gemini_38_thinking_desc))
                     }
+                    if (isArgon) {
+                        Text("Gemini 4 ${if (hydrogen) "Hydrogen 支持 low / medium / high / xhigh" else "支持 low / medium / high"}，默认 $defaultThinking。采样参数与显式缓存不发送；原生接口可自动续写长输出，总预算由输出 Token 上限控制。输入、思考和输出共享 1,048,576 Token。")
+                    }
                 },
             )
         }
@@ -194,6 +219,20 @@ internal fun AssistantGeminiContent(
             modifier = Modifier.alpha(if (enabled) 1f else 0.45f),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (isArgon && enabled) {
+                Card(colors = CustomColors.cardColorsOnSurfaceContainer) {
+                    FormItem(modifier = Modifier.padding(12.dp), label = { Text("思考深度") }) {
+                        val levels = listOf(me.rerere.ai.core.ReasoningLevel.AUTO, me.rerere.ai.core.ReasoningLevel.LOW,
+                            me.rerere.ai.core.ReasoningLevel.MEDIUM, me.rerere.ai.core.ReasoningLevel.HIGH) +
+                            if (hydrogen) listOf(me.rerere.ai.core.ReasoningLevel.XHIGH) else emptyList()
+                        me.rerere.rikkahub.ui.components.ai.ReasoningButton(
+                            reasoningLevel = assistant.reasoningLevel.takeIf { it in levels } ?: me.rerere.ai.core.ReasoningLevel.AUTO,
+                            availableLevels = levels,
+                            onUpdateReasoningLevel = { onUpdate(assistant.copy(reasoningLevel = it)) },
+                        )
+                    }
+                }
+            }
             Card(colors = CustomColors.cardColorsOnSurfaceContainer) {
                 GeminiSwitchItem(
                     title = stringResource(R.string.assistant_gemini_include_thoughts),
@@ -204,6 +243,21 @@ internal fun AssistantGeminiContent(
                     onCheckedChange = { value -> update { it.copy(includeThoughts = value) } },
                 )
                 HorizontalDivider()
+                if (nativeProtocol) {
+                    GeminiSwitchItem(title = "代码执行", description = "允许 Google 在服务端执行代码，并返回执行结果。",
+                        warning = "内置工具调用可能产生供应商费用。", checked = options.codeExecution, enabled = enabled,
+                        onCheckedChange = { value -> update { it.copy(codeExecution = value) } })
+                    FormItem(modifier = Modifier.padding(12.dp), label = { Text("函数调用方式") }) {
+                        Select(options = me.rerere.ai.provider.GeminiToolChoice.entries, selectedOption = options.toolChoice,
+                            onOptionSelected = { value -> update { it.copy(toolChoice = value) } },
+                            optionToString = { it.name }, enabled = enabled, modifier = Modifier.fillMaxWidth())
+                    }
+                    if (supportsTopK && !interactions) OptionalIntItem(
+                        title = "Top K", description = "限制采样候选数量，留空使用供应商默认值。", warning = "仅向支持的原生模型发送。",
+                        value = options.topK, enabled = enabled,
+                        onValueChange = { value -> update { it.copy(topK = value?.takeIf { k -> k > 0 }) } })
+                    HorizontalDivider()
+                }
                 OptionalIntItem(
                     title = stringResource(R.string.assistant_gemini_seed),
                     description = stringResource(R.string.assistant_gemini_seed_desc),
@@ -251,7 +305,9 @@ internal fun AssistantGeminiContent(
                 GeminiDialogItem(
                     title = stringResource(R.string.assistant_gemini_penalties_title),
                     description = stringResource(R.string.assistant_gemini_penalties_desc),
-                    warning = if (isGemini38Flash) {
+                    warning = if (isArgon) {
+                        "当前不向 Gemini 4 发送旧版惩罚参数。"
+                    } else if (isGemini38Flash) {
                         stringResource(R.string.assistant_gemini_38_penalties_unsupported)
                     } else {
                         null
@@ -261,7 +317,7 @@ internal fun AssistantGeminiContent(
                         options.presencePenalty?.toString() ?: automatic,
                         options.frequencyPenalty?.toString() ?: automatic,
                     ),
-                    enabled = enabled && !isGemini38Flash,
+                    enabled = enabled && !isGemini38Flash && !isArgon && !interactions,
                     onClick = { activeDialog = GeminiDialogType.REPETITION_PENALTIES },
                 )
             }

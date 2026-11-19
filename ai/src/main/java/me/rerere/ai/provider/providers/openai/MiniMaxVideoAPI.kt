@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.provider.parameterModelId
 import kotlinx.serialization.json.*
 import me.rerere.ai.provider.*
 import me.rerere.ai.util.KeyRoulette
@@ -15,7 +16,7 @@ val MINIMAX_VIDEO_MODELS = setOf("MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast"
     "T2V-01", "T2V-01-Director", "I2V-01", "I2V-01-Director", "I2V-01-live")
 
 fun ProviderSetting.miniMaxVideoSetting(model: Model): ProviderSetting.OpenAI? {
-    if (model.type != ModelType.VIDEO || model.modelId.trim() !in MINIMAX_VIDEO_MODELS) return null
+    if (model.type != ModelType.VIDEO || MINIMAX_VIDEO_MODELS.none { it.equals(model.parameterModelId(), true) }) return null
     val base = when (this) { is ProviderSetting.OpenAI -> baseUrl; is ProviderSetting.Claude -> baseUrl; else -> return null }
     val url = runCatching { base.trim().toHttpUrl() }.getOrNull() ?: return null
     if (!url.isHttps || url.host !in setOf("api.minimaxi.com", "api.minimax.io", "api.minimax.chat")) return null
@@ -25,7 +26,7 @@ fun ProviderSetting.miniMaxVideoSetting(model: Model): ProviderSetting.OpenAI? {
 }
 
 fun miniMaxVideoConstraints(model: Model): VideoGenerationConstraints {
-    val id = model.modelId.trim()
+    val id = MINIMAX_VIDEO_MODELS.firstOrNull { it.equals(model.parameterModelId(), true) } ?: model.parameterModelId()
     val modern = id.startsWith("MiniMax-Hailuo")
     val imageOnly = id.startsWith("I2V") || id.endsWith("Fast")
     return VideoGenerationConstraints(supportsGeneration = id in MINIMAX_VIDEO_MODELS,
@@ -48,7 +49,7 @@ internal fun miniMaxVideoBody(params: VideoGenerationParams): JsonObject {
     return buildJsonObject {
         put("model", p.model.modelId.trim()); put("prompt", p.prompt)
         put("duration", p.durationSeconds ?: 6)
-        put("resolution", p.resolution ?: if (p.model.modelId.startsWith("MiniMax")) "768P" else "720P")
+        put("resolution", p.resolution ?: if (p.model.parameterModelId().startsWith("minimax", ignoreCase = true)) "768P" else "720P")
         p.promptEnhancement?.let { put("prompt_optimizer", it) }
         p.fastPretreatment?.let { put("fast_pretreatment", it) }
         p.referenceImages.firstOrNull()?.let { put("first_frame_image", it.url) }

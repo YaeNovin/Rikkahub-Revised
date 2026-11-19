@@ -1,3 +1,5 @@
+import { useParams } from "react-router";
+import api from "~/services/api";
 import * as React from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -31,10 +33,7 @@ import {
 } from "~/components/ui/drawer";
 import { useIsMobile } from "~/hooks/use-mobile";
 import { resolveFileUrl } from "~/lib/files";
-import type {
-  TextPart as UITextPart,
-  ToolPart as UIToolPart,
-} from "~/types";
+import type { TextPart as UITextPart, ToolPart as UIToolPart } from "~/types";
 
 import { ControlledChainOfThoughtStep } from "../chain-of-thought";
 import { AudioPart as AudioPartRenderer } from "./audio-part";
@@ -246,7 +245,15 @@ function ScrapeWebPreview({ content }: { content: unknown }) {
   );
 }
 
-type AskUserSelectionType = "text" | "single" | "multi" | "slider" | "rating" | "confirm" | "date" | "time";
+type AskUserSelectionType =
+  | "text"
+  | "single"
+  | "multi"
+  | "slider"
+  | "rating"
+  | "confirm"
+  | "date"
+  | "time";
 
 interface AskUserOption {
   value: string;
@@ -318,11 +325,12 @@ function parseFiniteNumber(value: unknown): number | undefined | null {
 
 function parseInteger(value: unknown, max: number): number | undefined | null {
   if (value === undefined) return undefined;
-  const parsed = typeof value === "number"
-    ? value
-    : typeof value === "string" && /^\s*\d+\s*$/.test(value)
-      ? Number(value.trim())
-      : Number.NaN;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\s*\d+\s*$/.test(value)
+        ? Number(value.trim())
+        : Number.NaN;
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > max) return null;
   return parsed;
 }
@@ -353,6 +361,59 @@ function isStepAligned(value: number, minimum: number, step: number): boolean {
 function parseAskUserCondition(value: unknown, depth = 0): AskUserCondition | null {
   if (!value || typeof value !== "object" || Array.isArray(value) || depth > 8) return null;
   const record = value as Record<string, unknown>;
+  if (record.nodes !== undefined || record.root !== undefined) {
+    if (
+      !Array.isArray(record.nodes) ||
+      record.nodes.length < 1 ||
+      record.nodes.length > 32 ||
+      typeof record.root !== "string"
+    )
+      return null;
+    const nodes = new Map<string, Record<string, unknown>>();
+    for (const node of record.nodes) {
+      if (!node || typeof node !== "object" || typeof node.id !== "string" || nodes.has(node.id))
+        return null;
+      nodes.set(node.id, node);
+    }
+    const visiting = new Set<string>(),
+      reached = new Set<string>();
+    let visits = 0;
+    const expand = (id: string, level: number): AskUserCondition | null => {
+      const node = nodes.get(id);
+      if (!node || level + depth > 8 || visiting.has(id) || ++visits > 512) return null;
+      visiting.add(id);
+      reached.add(id);
+      try {
+        if (node.kind === "predicate")
+          return parseAskUserCondition(
+            {
+              question_id: node.question_id,
+              operator: node.operator,
+              value: node.value ?? node.values,
+            },
+            depth + level,
+          );
+        if (
+          !["all", "any", "not"].includes(String(node.kind)) ||
+          !Array.isArray(node.children) ||
+          !node.children.length ||
+          node.children.length > 32
+        )
+          return null;
+        const expressions = node.children.map((child) =>
+          typeof child === "string" ? expand(child, level + 1) : null,
+        );
+        if (expressions.some((item) => item == null)) return null;
+        if (node.kind === "not")
+          return expressions.length === 1 ? { kind: "not", expression: expressions[0]! } : null;
+        return { kind: node.kind as "all" | "any", expressions: expressions as AskUserCondition[] };
+      } finally {
+        visiting.delete(id);
+      }
+    };
+    const result = expand(record.root, 0);
+    return reached.size === nodes.size ? result : null;
+  }
   for (const kind of ["all", "any"] as const) {
     if (record[kind] !== undefined) {
       if (!Array.isArray(record[kind]) || record[kind].length === 0) return null;
@@ -385,30 +446,39 @@ function parseAskUserCondition(value: unknown, depth = 0): AskUserCondition | nu
     lte: "lte",
     less_or_equal: "lte",
   };
-  const rawOperator = record.operator === undefined
-    ? "equals"
-    : typeof record.operator === "string"
-      ? record.operator.toLowerCase()
-      : "";
+  const rawOperator =
+    record.operator === undefined
+      ? "equals"
+      : typeof record.operator === "string"
+        ? record.operator.toLowerCase()
+        : "";
   const operator = operatorAliases[rawOperator];
   if (!operator) return null;
-  if (operator !== "exists" && record.value === undefined) return null;
+  if (operator !== "exists" && record.value === undefined && record.values === undefined)
+    return null;
   return {
     kind: "predicate",
     questionId: record.question_id.trim(),
     operator: operator as AskUserCondition["operator"],
-    value: record.value,
+    value: record.value ?? record.values,
   };
 }
 
 function conditionReferences(condition: AskUserCondition): string[] {
   if (condition.kind === "predicate") return condition.questionId ? [condition.questionId] : [];
-  if (condition.kind === "not") return condition.expression ? conditionReferences(condition.expression) : [];
+  if (condition.kind === "not")
+    return condition.expression ? conditionReferences(condition.expression) : [];
   return condition.expressions?.flatMap(conditionReferences) ?? [];
 }
 
 function askUserValueEquals(actual: AskUserValue | undefined, expected: unknown): boolean {
-  if (actual === undefined || Array.isArray(actual) || typeof expected === "object" || expected === null) return false;
+  if (
+    actual === undefined ||
+    Array.isArray(actual) ||
+    typeof expected === "object" ||
+    expected === null
+  )
+    return false;
   const actualNumber = Number(actual);
   const expectedNumber = typeof expected === "number" ? expected : Number(expected);
   if (Number.isFinite(actualNumber) && Number.isFinite(expectedNumber) && actual.trim() !== "") {
@@ -425,15 +495,27 @@ function askUserValueIn(actual: AskUserValue | undefined, expected: unknown): bo
   return expected.some((candidate) => askUserValueEquals(actual, candidate));
 }
 
-function evaluateAskUserCondition(condition: AskUserCondition, answers: Record<string, AskUserValue>): boolean {
-  if (condition.kind === "all") return (condition.expressions ?? []).every((item) => evaluateAskUserCondition(item, answers));
-  if (condition.kind === "any") return (condition.expressions ?? []).some((item) => evaluateAskUserCondition(item, answers));
-  if (condition.kind === "not") return condition.expression ? !evaluateAskUserCondition(condition.expression, answers) : true;
+function evaluateAskUserCondition(
+  condition: AskUserCondition,
+  answers: Record<string, AskUserValue>,
+): boolean {
+  if (condition.kind === "all")
+    return (condition.expressions ?? []).every((item) => evaluateAskUserCondition(item, answers));
+  if (condition.kind === "any")
+    return (condition.expressions ?? []).some((item) => evaluateAskUserCondition(item, answers));
+  if (condition.kind === "not")
+    return condition.expression ? !evaluateAskUserCondition(condition.expression, answers) : true;
   const actual = condition.questionId ? answers[condition.questionId] : undefined;
   switch (condition.operator) {
-    case "exists": return actual !== undefined && (Array.isArray(actual) ? actual.length > 0 : actual.trim().length > 0);
-    case "equals": return askUserValueEquals(actual, condition.value);
-    case "not_equals": return !askUserValueEquals(actual, condition.value);
+    case "exists":
+      return (
+        actual !== undefined &&
+        (Array.isArray(actual) ? actual.length > 0 : actual.trim().length > 0)
+      );
+    case "equals":
+      return askUserValueEquals(actual, condition.value);
+    case "not_equals":
+      return !askUserValueEquals(actual, condition.value);
     case "contains":
       return Array.isArray(actual)
         ? actual.some((item) => askUserValueEquals(item, condition.value))
@@ -452,7 +534,8 @@ function evaluateAskUserCondition(condition: AskUserCondition, answers: Record<s
       if (condition.operator === "lt") return actualNumber < expectedNumber;
       return actualNumber <= expectedNumber;
     }
-    default: return false;
+    default:
+      return false;
   }
 }
 
@@ -468,7 +551,12 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
         const record = q as Record<string, unknown>;
         const id = typeof record.id === "string" ? record.id.trim() : "";
         const question = typeof record.question === "string" ? record.question.trim() : "";
-        if (!id || !question || id.length > ASK_USER_MAX_ID_LENGTH || question.length > ASK_USER_MAX_QUESTION_LENGTH) {
+        if (
+          !id ||
+          !question ||
+          id.length > ASK_USER_MAX_ID_LENGTH ||
+          question.length > ASK_USER_MAX_QUESTION_LENGTH
+        ) {
           return null;
         }
         if (record.options !== undefined && !Array.isArray(record.options)) return null;
@@ -477,23 +565,36 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
         const hadBaseOptions = rawOptions.length > 0;
         const options: AskUserOption[] = [];
         for (const option of rawOptions) {
-          const parsedOption = typeof option === "string"
-            ? { value: option.trim(), label: option.trim(), badge: "", icon: "", image: "" }
-            : option && typeof option === "object" && !Array.isArray(option)
-              ? (() => {
-                  const item = option as Record<string, unknown>;
-                  return {
-                    value: typeof item.value === "string" ? item.value.trim() : "",
-                    label: typeof item.label === "string" && item.label.trim() ? item.label : (typeof item.value === "string" ? item.value : ""),
-                    badge: typeof item.badge === "string" ? item.badge : "",
-                    icon: typeof item.icon === "string" ? item.icon : "",
-                    image: typeof item.image === "string" ? item.image : "",
-                  };
-                })()
-              : null;
-          if (!parsedOption || !parsedOption.value || parsedOption.value.length > ASK_USER_MAX_OPTION_LENGTH ||
-            parsedOption.label.length > ASK_USER_MAX_OPTION_LENGTH || parsedOption.badge.length > ASK_USER_MAX_OPTION_LENGTH ||
-            parsedOption.icon.length > ASK_USER_MAX_OPTION_LENGTH || parsedOption.image.length > ASK_USER_MAX_RICH_IMAGE_LENGTH) return null;
+          const parsedOption =
+            typeof option === "string"
+              ? { value: option.trim(), label: option.trim(), badge: "", icon: "", image: "" }
+              : option && typeof option === "object" && !Array.isArray(option)
+                ? (() => {
+                    const item = option as Record<string, unknown>;
+                    return {
+                      value: typeof item.value === "string" ? item.value.trim() : "",
+                      label:
+                        typeof item.label === "string" && item.label.trim()
+                          ? item.label
+                          : typeof item.value === "string"
+                            ? item.value
+                            : "",
+                      badge: typeof item.badge === "string" ? item.badge : "",
+                      icon: typeof item.icon === "string" ? item.icon : "",
+                      image: typeof item.image === "string" ? item.image : "",
+                    };
+                  })()
+                : null;
+          if (
+            !parsedOption ||
+            !parsedOption.value ||
+            parsedOption.value.length > ASK_USER_MAX_OPTION_LENGTH ||
+            parsedOption.label.length > ASK_USER_MAX_OPTION_LENGTH ||
+            parsedOption.badge.length > ASK_USER_MAX_OPTION_LENGTH ||
+            parsedOption.icon.length > ASK_USER_MAX_OPTION_LENGTH ||
+            parsedOption.image.length > ASK_USER_MAX_RICH_IMAGE_LENGTH
+          )
+            return null;
           options.push(parsedOption);
         }
         const optionDetails = Array.isArray(record.option_details) ? record.option_details : [];
@@ -510,33 +611,36 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
             icon: typeof item.icon === "string" ? item.icon : "",
             image: typeof item.image === "string" ? item.image : "",
           };
-          if (rich.value.length > ASK_USER_MAX_OPTION_LENGTH ||
+          if (
+            rich.value.length > ASK_USER_MAX_OPTION_LENGTH ||
             rich.label.length > ASK_USER_MAX_OPTION_LENGTH ||
             rich.badge.length > ASK_USER_MAX_OPTION_LENGTH ||
             rich.icon.length > ASK_USER_MAX_OPTION_LENGTH ||
-            rich.image.length > ASK_USER_MAX_RICH_IMAGE_LENGTH) return null;
+            rich.image.length > ASK_USER_MAX_RICH_IMAGE_LENGTH
+          )
+            return null;
           if (index < 0) {
             if (hadBaseOptions) return null;
             options.push(rich);
-          }
-          else options[index] = { ...options[index], ...rich };
+          } else options[index] = { ...options[index], ...rich };
         }
         if (new Set(options.map((option) => option.value)).size !== options.length) return null;
         if (options.length > ASK_USER_MAX_OPTIONS) return null;
         const rawSelection = record.selection_type;
-        const selectionType = rawSelection === undefined
-          ? "text"
-          : typeof rawSelection === "string" &&
-              (rawSelection.toLowerCase() === "text" ||
-                rawSelection.toLowerCase() === "single" ||
-                rawSelection.toLowerCase() === "multi" ||
-                rawSelection.toLowerCase() === "slider" ||
-                rawSelection.toLowerCase() === "rating" ||
-                rawSelection.toLowerCase() === "confirm" ||
-                rawSelection.toLowerCase() === "date" ||
-                rawSelection.toLowerCase() === "time")
-            ? rawSelection.toLowerCase() as AskUserSelectionType
-            : null;
+        const selectionType =
+          rawSelection === undefined
+            ? "text"
+            : typeof rawSelection === "string" &&
+                (rawSelection.toLowerCase() === "text" ||
+                  rawSelection.toLowerCase() === "single" ||
+                  rawSelection.toLowerCase() === "multi" ||
+                  rawSelection.toLowerCase() === "slider" ||
+                  rawSelection.toLowerCase() === "rating" ||
+                  rawSelection.toLowerCase() === "confirm" ||
+                  rawSelection.toLowerCase() === "date" ||
+                  rawSelection.toLowerCase() === "time")
+              ? (rawSelection.toLowerCase() as AskUserSelectionType)
+              : null;
         if (selectionType == null) {
           return null;
         }
@@ -549,19 +653,26 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
         if (record.placeholder !== undefined && typeof record.placeholder !== "string") return null;
         const description = typeof record.description === "string" ? record.description : "";
         const placeholder = typeof record.placeholder === "string" ? record.placeholder : "";
-        if (description.length > ASK_USER_MAX_DESCRIPTION_LENGTH || placeholder.length > ASK_USER_MAX_PLACEHOLDER_LENGTH) {
+        if (
+          description.length > ASK_USER_MAX_DESCRIPTION_LENGTH ||
+          placeholder.length > ASK_USER_MAX_PLACEHOLDER_LENGTH
+        ) {
           return null;
         }
         const minLength = parseInteger(record.min_length, ASK_USER_MAX_TEXT_ANSWER_LENGTH);
         const maxLength = parseInteger(record.max_length, ASK_USER_MAX_TEXT_ANSWER_LENGTH);
         const minItems = parseInteger(record.min_items, ASK_USER_MAX_OPTIONS);
         const maxItems = parseInteger(record.max_items, ASK_USER_MAX_OPTIONS);
-        if (minLength === null || maxLength === null || minItems === null || maxItems === null) return null;
-        if (selectionType === "text" && (record.min_items != null || record.max_items != null)) return null;
-        if (selectionType !== "text" && (record.min_length != null || record.max_length != null)) return null;
+        if (minLength === null || maxLength === null || minItems === null || maxItems === null)
+          return null;
+        if (selectionType === "text" && (record.min_items != null || record.max_items != null))
+          return null;
+        if (selectionType !== "text" && (record.min_length != null || record.max_length != null))
+          return null;
         if (minLength != null && maxLength != null && minLength > maxLength) return null;
         if (minItems != null && maxItems != null && minItems > maxItems) return null;
-        if (selectionType !== "multi" && (record.min_items != null || record.max_items != null)) return null;
+        if (selectionType !== "multi" && (record.min_items != null || record.max_items != null))
+          return null;
         if (minItems != null && minItems > options.length) return null;
         if (maxItems != null && maxItems > options.length) return null;
         const numericSelection = selectionType === "slider" || selectionType === "rating";
@@ -569,26 +680,75 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
         const parsedMaxValue = parseFiniteNumber(record.max_value);
         const parsedStep = parseFiniteNumber(record.step);
         if (parsedMinValue === null || parsedMaxValue === null || parsedStep === null) return null;
-        const minValue = numericSelection ? (parsedMinValue !== undefined ? parsedMinValue : selectionType === "rating" ? 1 : undefined) : undefined;
-        const maxValue = numericSelection ? (parsedMaxValue !== undefined ? parsedMaxValue : selectionType === "rating" ? 5 : undefined) : undefined;
-        const step = numericSelection ? (parsedStep !== undefined ? parsedStep : selectionType === "rating" ? 1 : undefined) : undefined;
-        if (numericSelection && (minValue == null || maxValue == null || step == null || !Number.isFinite(minValue) || !Number.isFinite(maxValue) || !Number.isFinite(step) || minValue >= maxValue || step <= 0 || step > maxValue - minValue)) return null;
+        const minValue = numericSelection
+          ? parsedMinValue !== undefined
+            ? parsedMinValue
+            : selectionType === "rating"
+              ? 1
+              : undefined
+          : undefined;
+        const maxValue = numericSelection
+          ? parsedMaxValue !== undefined
+            ? parsedMaxValue
+            : selectionType === "rating"
+              ? 5
+              : undefined
+          : undefined;
+        const step = numericSelection
+          ? parsedStep !== undefined
+            ? parsedStep
+            : selectionType === "rating"
+              ? 1
+              : undefined
+          : undefined;
+        if (
+          numericSelection &&
+          (minValue == null ||
+            maxValue == null ||
+            step == null ||
+            !Number.isFinite(minValue) ||
+            !Number.isFinite(maxValue) ||
+            !Number.isFinite(step) ||
+            minValue >= maxValue ||
+            step <= 0 ||
+            step > maxValue - minValue)
+        )
+          return null;
         if (selectionType === "rating" && minValue != null && maxValue != null && step != null) {
           const ratingSteps = (maxValue - minValue) / step;
-          if (!Number.isFinite(ratingSteps) || ratingSteps < 1 || ratingSteps > ASK_USER_MAX_RATING_STEPS - 1 ||
-            Math.abs(ratingSteps - Math.round(ratingSteps)) > 1e-7) return null;
+          if (
+            !Number.isFinite(ratingSteps) ||
+            ratingSteps < 1 ||
+            ratingSteps > ASK_USER_MAX_RATING_STEPS - 1 ||
+            Math.abs(ratingSteps - Math.round(ratingSteps)) > 1e-7
+          )
+            return null;
         }
-        if (!numericSelection && (record.min_value != null || record.max_value != null || record.step != null || record.unit != null)) return null;
+        if (
+          !numericSelection &&
+          (record.min_value != null ||
+            record.max_value != null ||
+            record.step != null ||
+            record.unit != null)
+        )
+          return null;
         const unit = typeof record.unit === "string" ? record.unit : "";
         if (unit.length > 64) return null;
         const danger = record.danger === undefined ? false : record.danger;
         if (typeof danger !== "boolean") return null;
         const timeoutSecondsValue = parseInteger(record.timeout_seconds, 3600);
         if (selectionType === "confirm") {
-          if (timeoutSecondsValue != null && (!Number.isInteger(timeoutSecondsValue) || timeoutSecondsValue < 1 || timeoutSecondsValue > 3600)) return null;
+          if (
+            timeoutSecondsValue != null &&
+            (!Number.isInteger(timeoutSecondsValue) ||
+              timeoutSecondsValue < 1 ||
+              timeoutSecondsValue > 3600)
+          )
+            return null;
         } else if (danger || timeoutSecondsValue != null) return null;
         if (timeoutSecondsValue === null) return null;
-        const parsedVisibleIf = record.visible_if === undefined ? undefined : parseAskUserCondition(record.visible_if);
+        const parsedVisibleIf =
+          record.visible_if === undefined ? undefined : parseAskUserCondition(record.visible_if);
         if (record.visible_if !== undefined && !parsedVisibleIf) return null;
         const timeoutSeconds = timeoutSecondsValue;
         const visibleIf: AskUserCondition | undefined = parsedVisibleIf ?? undefined;
@@ -596,40 +756,77 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
         let defaultValues: string[] = [];
         if (record.default !== undefined) {
           if (selectionType === "multi" && typeof record.default === "string") {
-            defaultValues = record.default.split(",").map((item) => item.trim()).filter(Boolean);
-          } else if (selectionType === "multi" && Array.isArray(record.default) && record.default.every((item) => typeof item === "string")) {
+            defaultValues = record.default
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean);
+          } else if (
+            selectionType === "multi" &&
+            Array.isArray(record.default) &&
+            record.default.every((item) => typeof item === "string")
+          ) {
             defaultValues = (record.default as string[]).map((item) => item.trim()).filter(Boolean);
-          } else if ((selectionType === "text" || selectionType === "single" || selectionType === "date" || selectionType === "time") && typeof record.default === "string") {
+          } else if (
+            (selectionType === "text" ||
+              selectionType === "single" ||
+              selectionType === "date" ||
+              selectionType === "time") &&
+            typeof record.default === "string"
+          ) {
             defaultValue = selectionType === "single" ? record.default.trim() : record.default;
-          } else if ((selectionType === "slider" || selectionType === "rating") &&
+          } else if (
+            (selectionType === "slider" || selectionType === "rating") &&
             ((typeof record.default === "number" && Number.isFinite(record.default)) ||
-              (typeof record.default === "string" && Number.isFinite(Number(record.default))))) {
+              (typeof record.default === "string" && Number.isFinite(Number(record.default))))
+          ) {
             defaultValue = String(record.default);
-          } else if (selectionType === "confirm" &&
+          } else if (
+            selectionType === "confirm" &&
             (typeof record.default === "boolean" ||
               (typeof record.default === "string" &&
-                (record.default.trim() === "true" || record.default.trim() === "false")))) {
+                (record.default.trim() === "true" || record.default.trim() === "false")))
+          ) {
             defaultValue = String(record.default).trim().toLowerCase();
           } else {
             return null;
           }
         }
-        if ((selectionType === "date" && defaultValue != null && !isValidDateValue(defaultValue)) ||
-          (selectionType === "time" && defaultValue != null && !isValidTimeValue(defaultValue))) return null;
-        if (selectionType === "single" && defaultValue && !options.some((option) => option.value === defaultValue.trim())) return null;
-        if (selectionType === "multi" && (
-          new Set(defaultValues).size !== defaultValues.length ||
-          (minItems != null && defaultValues.length < minItems) ||
-          (maxItems != null && defaultValues.length > maxItems) ||
-          defaultValues.some((item) => !options.some((option) => option.value === item))
-        )) return null;
-        if (selectionType === "text" && defaultValue != null && (
-          (defaultValue.trim().length > 0 && minLength != null && defaultValue.length < minLength) ||
-          (maxLength != null && defaultValue.length > maxLength)
-        )) return null;
+        if (
+          (selectionType === "date" && defaultValue != null && !isValidDateValue(defaultValue)) ||
+          (selectionType === "time" && defaultValue != null && !isValidTimeValue(defaultValue))
+        )
+          return null;
+        if (
+          selectionType === "single" &&
+          defaultValue &&
+          !options.some((option) => option.value === defaultValue.trim())
+        )
+          return null;
+        if (
+          selectionType === "multi" &&
+          (new Set(defaultValues).size !== defaultValues.length ||
+            (minItems != null && defaultValues.length < minItems) ||
+            (maxItems != null && defaultValues.length > maxItems) ||
+            defaultValues.some((item) => !options.some((option) => option.value === item)))
+        )
+          return null;
+        if (
+          selectionType === "text" &&
+          defaultValue != null &&
+          ((defaultValue.trim().length > 0 &&
+            minLength != null &&
+            defaultValue.length < minLength) ||
+            (maxLength != null && defaultValue.length > maxLength))
+        )
+          return null;
         if ((selectionType === "slider" || selectionType === "rating") && defaultValue != null) {
           const numericDefault = Number(defaultValue);
-          if (!Number.isFinite(numericDefault) || numericDefault < minValue! || numericDefault > maxValue!) return null;
+          if (
+            !Number.isFinite(numericDefault) ||
+            numericDefault < minValue! ||
+            numericDefault > maxValue!
+          )
+            return null;
           if (!isStepAligned(numericDefault, minValue!, step!)) return null;
         }
         return {
@@ -664,7 +861,10 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
     }
     const ids = new Set(parsed.map((q) => q.id));
     for (const question of parsed) {
-      if (question.visibleIf && conditionReferences(question.visibleIf).some((id) => !ids.has(id) || id === question.id)) {
+      if (
+        question.visibleIf &&
+        conditionReferences(question.visibleIf).some((id) => !ids.has(id) || id === question.id)
+      ) {
         return { questions: [], error: "invalid" };
       }
     }
@@ -674,35 +874,62 @@ function parseAskUserQuestions(args: unknown): ParsedAskUserRequest {
   }
 }
 
-function AskUserToolStep({
-  tool,
-  loading,
-  onToolApproval,
-  isFirst,
-  isLast,
-}: ToolPartProps) {
+function AskUserToolStep({ tool, loading, onToolApproval, isFirst, isLast }: ToolPartProps) {
   const { t } = useTranslation("message");
   const [expanded, setExpanded] = React.useState(true);
 
   const args = React.useMemo(() => safeJsonParse(tool.input), [tool.input]);
   const parsedRequest = React.useMemo(() => parseAskUserQuestions(args), [args]);
   const questions = parsedRequest.questions;
-  const initialAnswers = React.useMemo(() => Object.fromEntries(
-    questions
-      .map((question) => {
-        const value = question.selectionType === "multi"
-          ? question.defaultValues
-          : question.defaultValue ?? ((question.selectionType === "slider" || question.selectionType === "rating") && question.minValue != null
-            ? String(question.minValue)
-            : undefined);
-        return [question.id, value] as const;
-      })
-      .filter((entry): entry is [string, AskUserValue] => entry[1] != null),
-  ), [questions]);
-  const [answers, setAnswers] = React.useState<Record<string, AskUserValue>>(initialAnswers);
+  const initialAnswers = React.useMemo(
+    () =>
+      Object.fromEntries(
+        questions
+          .map((question) => {
+            const value =
+              question.selectionType === "multi"
+                ? question.defaultValues
+                : (question.defaultValue ??
+                  ((question.selectionType === "slider" || question.selectionType === "rating") &&
+                  question.minValue != null
+                    ? String(question.minValue)
+                    : undefined));
+            return [question.id, value] as const;
+          })
+          .filter((entry): entry is [string, AskUserValue] => entry[1] != null),
+      ),
+    [questions],
+  );
+  const { id: conversationId } = useParams();
+  type Interaction = {
+    answers?: Record<string, unknown>;
+    timers?: Record<string, { wall_deadline?: number; ack?: boolean }>;
+  };
+  const restored = (tool.metadata?.ask_user_interaction as Interaction | undefined)?.answers;
+  const normalizeDraft = (value: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.entries(value).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.map(String) : String(value),
+      ]),
+    );
+  const [answers, setAnswers] = React.useState<Record<string, AskUserValue>>(() => ({
+    ...initialAnswers,
+    ...normalizeDraft(restored ?? {}),
+  }));
+  const [interaction, setInteraction] = React.useState<Interaction>(
+    () => (tool.metadata?.ask_user_interaction as Interaction) ?? {},
+  );
+  const [draftError, setDraftError] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const draftQueue = React.useRef<Promise<unknown>>(Promise.resolve());
+  const editVersion = React.useRef(0);
+  const serverOffset = React.useRef(0);
+  const [now, setNow] = React.useState(Date.now());
 
   React.useEffect(() => {
-    setAnswers(initialAnswers);
+    setAnswers({ ...initialAnswers, ...normalizeDraft(restored ?? {}) });
+    setInteraction((tool.metadata?.ask_user_interaction as Interaction) ?? {});
   }, [initialAnswers, tool.toolCallId, tool.input]);
 
   const isPending = tool.approvalState.type === "pending";
@@ -718,10 +945,16 @@ function AskUserToolStep({
       : t("tool_part.ask_user_questions_count", { count: questions.length });
 
   const visibleQuestions = React.useMemo(
-    () => questions.filter((question) => !question.visibleIf || evaluateAskUserCondition(question.visibleIf, answers)),
+    () =>
+      questions.filter(
+        (question) => !question.visibleIf || evaluateAskUserCondition(question.visibleIf, answers),
+      ),
     [answers, questions],
   );
-  const visibleQuestionIds = React.useMemo(() => new Set(visibleQuestions.map((question) => question.id)), [visibleQuestions]);
+  const visibleQuestionIds = React.useMemo(
+    () => new Set(visibleQuestions.map((question) => question.id)),
+    [visibleQuestions],
+  );
   React.useEffect(() => {
     setAnswers((previous) => {
       const next = Object.fromEntries(
@@ -731,49 +964,101 @@ function AskUserToolStep({
     });
   }, [visibleQuestionIds]);
 
-  const confirmQuestion = visibleQuestions.find((question) =>
-    question.selectionType === "confirm" && (question.danger || question.timeoutSeconds != null),
-  );
-  const metadataDeadline = typeof tool.metadata?.ask_user_confirm_deadline_at === "number"
-    ? tool.metadata.ask_user_confirm_deadline_at
-    : undefined;
-  const [confirmSecondsRemaining, setConfirmSecondsRemaining] = React.useState<number | undefined>();
-  const timeoutHandled = React.useRef(false);
-  React.useEffect(() => {
-    timeoutHandled.current = false;
-    if (!isPending || !confirmQuestion) {
-      setConfirmSecondsRemaining(undefined);
-      return;
-    }
-    const timeoutSeconds = confirmQuestion.timeoutSeconds ?? 30;
-    const deadline = metadataDeadline ?? Date.now() + timeoutSeconds * 1000;
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      setConfirmSecondsRemaining(remaining);
-      if (remaining === 0 && !timeoutHandled.current) {
-        timeoutHandled.current = true;
-        void onToolApproval?.(
-          tool.toolCallId,
-          false,
-          "Confirmation timed out and was rejected",
-          undefined,
-          true,
-        );
-      }
+  const encodedAnswers = () =>
+    Object.fromEntries(
+      visibleQuestions.flatMap((q) => {
+        const value = answers[q.id];
+        if (value == null || value === "") return [];
+        return [
+          [
+            q.id,
+            q.selectionType === "confirm"
+              ? value === "true"
+              : q.selectionType === "slider" || q.selectionType === "rating"
+                ? Number(value)
+                : value,
+          ],
+        ];
+      }),
+    );
+  const persistDraft = () => {
+    if (!conversationId || !isPending) return Promise.resolve();
+    const version = editVersion.current;
+    const payload = {
+      toolCallId: tool.toolCallId,
+      input: tool.input,
+      answers: encodedAnswers(),
+      displayed: visibleQuestions.map((q) => q.id),
     };
-    update();
-    const interval = window.setInterval(update, 1000);
-    return () => window.clearInterval(interval);
-  }, [confirmQuestion, isPending, metadataDeadline, onToolApproval, tool.toolCallId]);
+    const next = draftQueue.current
+      .catch(() => {})
+      .then(async () => {
+        const response = await api.post<{
+          metadata: { ask_user_interaction?: Interaction };
+          serverTime: number;
+        }>(`conversations/${conversationId}/ask-user/draft`, payload);
+        serverOffset.current = response.serverTime - Date.now();
+        setInteraction(response.metadata.ask_user_interaction ?? {});
+        if (editVersion.current === version) {
+          const normalized = normalizeDraft(response.metadata.ask_user_interaction?.answers ?? {});
+          setAnswers((previous) =>
+            JSON.stringify(previous) === JSON.stringify(normalized) ? previous : normalized,
+          );
+        }
+        setDraftError("");
+      });
+    draftQueue.current = next;
+    return next;
+  };
+  const draftKey = JSON.stringify(encodedAnswers());
+  const displayedKey = visibleQuestions.map((q) => q.id).join("|");
+  React.useEffect(() => {
+    if (!isPending || !conversationId) return;
+    const timer = setTimeout(() => {
+      void persistDraft().catch((e) => setDraftError(String(e)));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [draftKey, displayedKey, isPending, conversationId, tool.input]);
+  React.useEffect(() => {
+    if (!isPending) return;
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [isPending]);
+  const remaining = (id: string) => {
+    const deadline = interaction.timers?.[id]?.wall_deadline;
+    return deadline == null
+      ? undefined
+      : Math.max(0, Math.ceil((deadline - now - serverOffset.current) / 1000));
+  };
+  const expiredIds = visibleQuestions
+    .filter(
+      (q) =>
+        q.selectionType === "confirm" &&
+        remaining(q.id) === 0 &&
+        interaction.timers?.[q.id]?.ack === undefined &&
+        answers[q.id] !== "false",
+    )
+    .map((q) => q.id)
+    .join("|");
+  React.useEffect(() => {
+    if (!isPending || !expiredIds) return;
+    editVersion.current++;
+    setAnswers((previous) => ({
+      ...previous,
+      ...Object.fromEntries(expiredIds.split("|").map((id) => [id, "false"])),
+    }));
+  }, [expiredIds, isPending]);
 
   const allAnswered =
     questions.length > 0 &&
     visibleQuestions.every((q) => {
       const value = answers[q.id];
       if (Array.isArray(value)) {
-        return (value.length > 0 || !q.required) &&
+        return (
+          (value.length > 0 || !q.required) &&
           (q.minItems == null || value.length >= q.minItems) &&
-          (q.maxItems == null || value.length <= q.maxItems);
+          (q.maxItems == null || value.length <= q.maxItems)
+        );
       }
       if (q.selectionType === "confirm") {
         return q.required
@@ -781,39 +1066,61 @@ function AskUserToolStep({
           : value === undefined || value === "true" || value === "false";
       }
       if (q.selectionType === "slider" || q.selectionType === "rating") {
+        if ((value === undefined || value === "") && !q.required) return true;
         const numericValue = Number(value);
-        return Number.isFinite(numericValue) &&
-          q.minValue != null && q.maxValue != null && q.step != null &&
-          numericValue >= q.minValue && numericValue <= q.maxValue &&
-          isStepAligned(numericValue, q.minValue, q.step);
+        return (
+          Number.isFinite(numericValue) &&
+          q.minValue != null &&
+          q.maxValue != null &&
+          q.step != null &&
+          numericValue >= q.minValue &&
+          numericValue <= q.maxValue &&
+          isStepAligned(numericValue, q.minValue, q.step)
+        );
       }
       if (!value?.trim()) return !q.required;
-      if (q.selectionType === "single" && !q.options.some((option) => option.value === value.trim())) return false;
+      if (
+        q.selectionType === "single" &&
+        !q.options.some((option) => option.value === value.trim())
+      )
+        return false;
       if (q.selectionType === "date" && !isValidDateValue(value)) return false;
       if (q.selectionType === "time" && !isValidTimeValue(value)) return false;
-      return (q.minLength == null || value.length >= q.minLength) &&
-        (q.maxLength == null || value.length <= q.maxLength);
+      return (
+        (q.minLength == null || value.length >= q.minLength) &&
+        (q.maxLength == null || value.length <= q.maxLength)
+      );
     });
 
-  const handleSubmit = () => {
-    if (!onToolApproval || !allAnswered) return;
+  const handleSubmit = async () => {
+    if (!onToolApproval || !allAnswered || submitting) return;
     const payload = JSON.stringify({
       answers: Object.fromEntries(
         visibleQuestions
           .map((q) => {
             const value = answers[q.id];
             if (value == null) return [q.id, undefined] as const;
-            if (q.selectionType === "slider" || q.selectionType === "rating") return [q.id, Number(value)] as const;
+            if (q.selectionType === "slider" || q.selectionType === "rating")
+              return [q.id, Number(value)] as const;
             if (q.selectionType === "confirm") return [q.id, value === "true"] as const;
             return [q.id, value] as const;
           })
           .filter((entry): entry is [string, AskUserValue | number | boolean] => entry[1] != null),
       ),
     });
-    void onToolApproval(tool.toolCallId, true, "", payload);
+    setSubmitting(true);
+    try {
+      await persistDraft();
+      await onToolApproval(tool.toolCallId, true, "", payload);
+    } catch (e) {
+      setDraftError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const setAnswer = (questionId: string, value: AskUserValue) => {
+    editVersion.current++;
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
@@ -870,38 +1177,45 @@ function AskUserToolStep({
         )}
         {visibleQuestions.map((q) => (
           <div key={q.id} className="space-y-1.5">
-            {questions.length > 1 && (
-              <div className="text-sm text-foreground">{q.question}</div>
-            )}
-            {q.description && (
-              <div className="text-muted-foreground text-xs">{q.description}</div>
-            )}
+            {questions.length > 1 && <div className="text-sm text-foreground">{q.question}</div>}
+            {q.description && <div className="text-muted-foreground text-xs">{q.description}</div>}
 
             {isPending && onToolApproval ? (
               <>
-                {(q.selectionType === "text" || q.selectionType === "single") && q.options.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {q.options.map((option, index) => (
-                      <button
-                        key={`${q.id}-${index}`}
-                        type="button"
-                        onClick={() => setAnswer(q.id, option.value)}
-                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                          answers[q.id] === option.value
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50"
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5">
-                          {option.image && <img alt="" className="h-5 w-5 rounded object-cover" src={option.image} />}
-                          {option.icon && <span aria-hidden="true">{option.icon}</span>}
-                          <span>{option.label || option.value}</span>
-                          {option.badge && <span className="rounded bg-primary/10 px-1 text-[10px] text-primary">{option.badge}</span>}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {(q.selectionType === "text" || q.selectionType === "single") &&
+                  q.options.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {q.options.map((option, index) => (
+                        <button
+                          key={`${q.id}-${index}`}
+                          type="button"
+                          onClick={() => setAnswer(q.id, option.value)}
+                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                            answers[q.id] === option.value
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {option.image && (
+                              <img
+                                alt=""
+                                className="h-5 w-5 rounded object-cover"
+                                src={option.image}
+                              />
+                            )}
+                            {option.icon && <span aria-hidden="true">{option.icon}</span>}
+                            <span>{option.label || option.value}</span>
+                            {option.badge && (
+                              <span className="rounded bg-primary/10 px-1 text-[10px] text-primary">
+                                {option.badge}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 {q.selectionType === "multi" && (
                   <div className="flex flex-wrap gap-1.5">
                     {q.options.map((option, index) => {
@@ -914,9 +1228,12 @@ function AskUserToolStep({
                           onClick={() => {
                             const current = answers[q.id];
                             const selectedValues: string[] = Array.isArray(current) ? current : [];
-                            setAnswer(q.id, selectedValues.includes(option.value)
-                              ? selectedValues.filter((value: string) => value !== option.value)
-                              : [...selectedValues, option.value]);
+                            setAnswer(
+                              q.id,
+                              selectedValues.includes(option.value)
+                                ? selectedValues.filter((value: string) => value !== option.value)
+                                : [...selectedValues, option.value],
+                            );
                           }}
                           className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                             selected
@@ -924,12 +1241,22 @@ function AskUserToolStep({
                               : "border-muted-foreground/30 text-muted-foreground hover:border-primary/50"
                           }`}
                         >
-                        <span className="flex items-center gap-1.5">
-                          {option.image && <img alt="" className="h-5 w-5 rounded object-cover" src={option.image} />}
-                          {option.icon && <span aria-hidden="true">{option.icon}</span>}
-                          <span>{option.label || option.value}</span>
-                          {option.badge && <span className="rounded bg-primary/10 px-1 text-[10px] text-primary">{option.badge}</span>}
-                        </span>
+                          <span className="flex items-center gap-1.5">
+                            {option.image && (
+                              <img
+                                alt=""
+                                className="h-5 w-5 rounded object-cover"
+                                src={option.image}
+                              />
+                            )}
+                            {option.icon && <span aria-hidden="true">{option.icon}</span>}
+                            <span>{option.label || option.value}</span>
+                            {option.badge && (
+                              <span className="rounded bg-primary/10 px-1 text-[10px] text-primary">
+                                {option.badge}
+                              </span>
+                            )}
+                          </span>
                         </button>
                       );
                     })}
@@ -938,10 +1265,12 @@ function AskUserToolStep({
                 {q.selectionType === "text" && (
                   <Input
                     value={typeof answers[q.id] === "string" ? answers[q.id] : ""}
-                    onChange={(e) => setAnswer(
-                      q.id,
-                      e.target.value.slice(0, q.maxLength ?? ASK_USER_MAX_TEXT_ANSWER_LENGTH),
-                    )}
+                    onChange={(e) =>
+                      setAnswer(
+                        q.id,
+                        e.target.value.slice(0, q.maxLength ?? ASK_USER_MAX_TEXT_ANSWER_LENGTH),
+                      )
+                    }
                     placeholder={q.placeholder || q.question}
                     className="text-sm"
                     onKeyDown={(e) => {
@@ -952,46 +1281,62 @@ function AskUserToolStep({
                     }}
                   />
                 )}
-                {q.selectionType === "slider" && q.minValue != null && q.maxValue != null && q.step != null && (
-                  <div className="space-y-1">
-                    <input
-                      aria-label={q.question}
-                      className="w-full accent-primary"
-                      max={q.maxValue}
-                      min={q.minValue}
-                      onChange={(event) => setAnswer(q.id, event.target.value)}
-                      step={q.step}
-                      type="range"
-                      value={typeof answers[q.id] === "string" ? answers[q.id] : String(q.minValue)}
-                    />
-                    <div className="text-muted-foreground text-xs">
-                      {answers[q.id] ?? q.minValue}{q.unit ? ` ${q.unit}` : ""}
+                {q.selectionType === "slider" &&
+                  q.minValue != null &&
+                  q.maxValue != null &&
+                  q.step != null && (
+                    <div className="space-y-1">
+                      <input
+                        aria-label={q.question}
+                        className="w-full accent-primary"
+                        max={q.maxValue}
+                        min={q.minValue}
+                        onChange={(event) => setAnswer(q.id, event.target.value)}
+                        step={q.step}
+                        type="range"
+                        value={
+                          typeof answers[q.id] === "string" ? answers[q.id] : String(q.minValue)
+                        }
+                      />
+                      <div className="text-muted-foreground text-xs">
+                        {answers[q.id] ?? q.minValue}
+                        {q.unit ? ` ${q.unit}` : ""}
+                      </div>
                     </div>
-                  </div>
-                )}
-                {q.selectionType === "rating" && q.minValue != null && q.maxValue != null && q.step != null && (
-                  <div className="flex flex-wrap items-center gap-0.5">
-                    {Array.from({ length: Math.min(10, Math.floor((q.maxValue - q.minValue) / q.step) + 1) }).map((_, index) => {
-                      const value = Math.min(q.maxValue!, q.minValue! + index * q.step!);
-                      const current = Number(answers[q.id] ?? q.minValue);
-                      return (
-                        <button
-                          aria-label={String(value)}
-                          className={`px-1 text-xl ${value <= current ? "text-primary" : "text-muted-foreground/50"}`}
-                          key={`${q.id}-rating-${index}`}
-                          onClick={() => setAnswer(q.id, String(value))}
-                          type="button"
-                        >
-                          {value <= current ? "★" : "☆"}
-                        </button>
-                      );
-                    })}
-                    {q.unit && <span className="ml-1 text-muted-foreground text-xs">{q.unit}</span>}
-                  </div>
-                )}
+                  )}
+                {q.selectionType === "rating" &&
+                  q.minValue != null &&
+                  q.maxValue != null &&
+                  q.step != null && (
+                    <div className="flex flex-wrap items-center gap-0.5">
+                      {Array.from({
+                        length: Math.min(10, Math.floor((q.maxValue - q.minValue) / q.step) + 1),
+                      }).map((_, index) => {
+                        const value = Math.min(q.maxValue!, q.minValue! + index * q.step!);
+                        const current = Number(answers[q.id] ?? q.minValue);
+                        return (
+                          <button
+                            aria-label={String(value)}
+                            className={`px-1 text-xl ${value <= current ? "text-primary" : "text-muted-foreground/50"}`}
+                            key={`${q.id}-rating-${index}`}
+                            onClick={() => setAnswer(q.id, String(value))}
+                            type="button"
+                          >
+                            {value <= current ? "★" : "☆"}
+                          </button>
+                        );
+                      })}
+                      {q.unit && (
+                        <span className="ml-1 text-muted-foreground text-xs">{q.unit}</span>
+                      )}
+                    </div>
+                  )}
                 {q.selectionType === "confirm" && (
-                  <div className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${q.danger ? "border-destructive/60 bg-destructive/5" : "border-muted"}`}>
+                  <div
+                    className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${q.danger ? "border-destructive/60 bg-destructive/5" : "border-muted"}`}
+                  >
                     <Button
+                      disabled={remaining(q.id) === 0}
                       onClick={() => setAnswer(q.id, "true")}
                       size="sm"
                       type="button"
@@ -1007,9 +1352,11 @@ function AskUserToolStep({
                     >
                       {t("tool_part.ask_user_confirm_no")}
                     </Button>
-                    {confirmQuestion?.id === q.id && confirmSecondsRemaining != null && (
-                      <span className={`text-xs ${confirmSecondsRemaining <= 5 ? "text-destructive" : "text-muted-foreground"}`}>
-                        {confirmSecondsRemaining}s
+                    {remaining(q.id) != null && (
+                      <span
+                        className={`text-xs ${(remaining(q.id) ?? 30) <= 5 ? "text-destructive" : "text-muted-foreground"}`}
+                      >
+                        {remaining(q.id)}s
                       </span>
                     )}
                   </div>
@@ -1029,8 +1376,10 @@ function AskUserToolStep({
                   const value = answeredValues[q.id];
                   return Array.isArray(value)
                     ? value.map(String).join(", ")
-                    : typeof value === "string"
-                      ? value
+                    : typeof value === "string" ||
+                        typeof value === "number" ||
+                        typeof value === "boolean"
+                      ? String(value)
                       : "";
                 })()}
               </div>
@@ -1038,6 +1387,17 @@ function AskUserToolStep({
           </div>
         ))}
 
+        {draftError && (
+          <p role="alert" className="text-destructive text-sm">
+            {draftError}
+            <Button
+              size="sm"
+              onClick={() => void persistDraft().catch((e) => setDraftError(String(e)))}
+            >
+              重试保存
+            </Button>
+          </p>
+        )}
         {isPending && onToolApproval && (
           <div className="flex justify-end gap-2">
             <Button
@@ -1050,8 +1410,8 @@ function AskUserToolStep({
             <Button
               size="sm"
               variant="secondary"
-              disabled={!allAnswered}
-              onClick={handleSubmit}
+              disabled={!allAnswered || submitting || !!draftError}
+              onClick={() => void handleSubmit()}
             >
               <Send className="mr-1.5 h-3.5 w-3.5" />
               {t("tool_part.ask_user_submit")}
@@ -1292,9 +1652,12 @@ export function ToolPart({
                         }
                         return <JsonBlock key={i} value={parsed} />;
                       }
-                      if (part.type === "image") return <ImagePartRenderer key={i} url={part.url} />;
-                      if (part.type === "video") return <VideoPartRenderer key={i} url={part.url} />;
-                      if (part.type === "audio") return <AudioPartRenderer key={i} url={part.url} />;
+                      if (part.type === "image")
+                        return <ImagePartRenderer key={i} url={part.url} />;
+                      if (part.type === "video")
+                        return <VideoPartRenderer key={i} url={part.url} />;
+                      if (part.type === "audio")
+                        return <AudioPartRenderer key={i} url={part.url} />;
                       return null;
                     })}
                   </div>

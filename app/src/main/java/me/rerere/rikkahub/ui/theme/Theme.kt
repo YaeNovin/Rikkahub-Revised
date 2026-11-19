@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.datastore.isAutoAccentActive
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.material3.DynamicColorSchemeOptions
 import me.rerere.material3.createDynamicColorScheme
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
@@ -56,14 +57,25 @@ fun RikkahubTheme(
     content: @Composable () -> Unit
 ) {
     val settings by rememberUserSettingsState()
+    val amoledDarkMode by rememberAmoledDarkMode()
+    val amoledPureBlack by rememberAmoledPureBlack()
+    RikkahubThemeContent(settings, colorMode, amoledDarkMode, amoledPureBlack, content)
+}
 
+/** Shared production theme pipeline, also used by fixed debug display regressions. */
+@Composable
+internal fun RikkahubThemeContent(
+    settings: Settings,
+    colorMode: ColorMode,
+    amoledDarkMode: Boolean = false,
+    amoledPureBlack: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     val darkTheme = when (colorMode) {
         ColorMode.SYSTEM -> isSystemInDarkTheme()
         ColorMode.LIGHT -> false
         ColorMode.DARK -> true
     }
-    val amoledDarkMode by rememberAmoledDarkMode()
-    val amoledPureBlack by rememberAmoledPureBlack()
     val autoAccentColorArgb = settings.advancedAppearanceSetting.autoAccentColorArgb
         .takeIf { settings.isAutoAccentActive() }
     val generatedColorOptions = remember(
@@ -83,8 +95,8 @@ fun RikkahubTheme(
         dynamicColorEnabled = settings.dynamicColor,
         systemDynamicColorSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
     )
-    val colorScheme = when (colorSource) {
-        is ThemeColorSource.AutoAccent -> remember(
+    val colorScheme = when {
+        colorSource is ThemeColorSource.AutoAccent -> remember(
             colorSource.colorArgb,
             darkTheme,
             generatedColorOptions,
@@ -94,7 +106,7 @@ fun RikkahubTheme(
                 options = generatedColorOptions,
             )
         }
-        ThemeColorSource.SystemDynamic -> {
+        colorSource == ThemeColorSource.SystemDynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             val systemScheme = if (darkTheme) {
                 dynamicDarkColorScheme(context)
@@ -117,7 +129,7 @@ fun RikkahubTheme(
                 }
             }
         }
-        ThemeColorSource.SelectedTheme -> {
+        else -> {
             val customTheme = settings.customThemes.firstOrNull { it.id == settings.themeId }
             if (customTheme != null) {
                 customTheme.generateColorScheme(dark = darkTheme, options = generatedColorOptions)
@@ -154,9 +166,18 @@ fun RikkahubTheme(
     }
     val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
     val textColorMode = settings.advancedAppearanceSetting.textColorMode
-    val wallpaperTextSeed = rememberWallpaperTextSeed(textColorMode == me.rerere.rikkahub.data.datastore.TextColorMode.SYSTEM_WALLPAPER)
+    val appearance = settings.advancedAppearanceSetting
+    val wallpaperTextSeed = rememberWallpaperTextSeed(
+        textColorMode == me.rerere.rikkahub.data.datastore.TextColorMode.SYSTEM_WALLPAPER,
+        appearance.wallpaperTextSeedArgb?.toInt(), appearance.wallpaperTextSeedWallpaperId,
+    )
+    val textTypography = remember(textColorMode) {
+        if (textColorMode == me.rerere.rikkahub.data.datastore.TextColorMode.THEME) Typography
+        else Typography.withReadabilityWeight()
+    }
     val textColorScheme = remember(colorSchemeConverted, textColorMode, wallpaperTextSeed.argb) {
         colorSchemeConverted.withTextPalette(wallpaperTextSeed.argb.takeIf { textColorMode == me.rerere.rikkahub.data.datastore.TextColorMode.SYSTEM_WALLPAPER })
+            .withAccessibleTextRoles()
     }
 
     // 更新状态栏图标颜色
@@ -182,7 +203,7 @@ fun RikkahubTheme(
     ) {
         MaterialExpressiveTheme(
             colorScheme = textColorScheme,
-            typography = Typography,
+            typography = textTypography,
             content = content,
             motionScheme = MotionScheme.expressive()
         )

@@ -3,10 +3,11 @@ package me.rerere.rikkahub.data.ai
 import android.net.Uri
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
@@ -36,13 +37,29 @@ class ChatImageGenerationService(
         val provider = model.findProvider(settings.providers) ?: error("Image generation provider is unavailable")
         val constraints = providerManager.imageGenerationConstraints(provider, model)
         check(constraints.supportsGeneration) { "Image generation is not supported" }
-        val items = providerManager.getProviderByType(provider).generateImage(
-            provider,
-            options.copy(prompt = prompt).constrained(constraints).toParams(model),
-        ).toList().filter { it.data.isNotBlank() || !it.temporaryFilePath.isNullOrBlank() }
-        check(items.isNotEmpty()) { "Image provider returned no image" }
-        val images = items.map { item -> UIMessagePart.Image(materialize(item).toString()) }
-        ChatImageGenerationResult(images, model.id, items.firstOrNull()?.seed)
+        generate(provider, options.copy(prompt = prompt).constrained(constraints).toParams(model))
+    }
+
+    /** Execute the exact confirmed request; tool callers persist each final image as it is saved. */
+    suspend fun generate(
+        provider: ProviderSetting,
+        params: ImageGenerationParams,
+        onImageSaved: suspend (UIMessagePart.Image) -> Unit = {},
+    ): ChatImageGenerationResult = withContext(Dispatchers.IO) {
+        require(params.prompt.isNotBlank()) { "Image prompt cannot be empty" }
+        kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { generationKeepAlive?.track(it) }
+        val images = mutableListOf<UIMessagePart.Image>()
+        var seed: Long? = null
+        providerManager.getProviderByType(provider).generateImage(provider, params).collect { item ->
+            if (!item.partial && (item.data.isNotBlank() || !item.temporaryFilePath.isNullOrBlank())) {
+                val image = UIMessagePart.Image(materialize(item).toString())
+                onImageSaved(image)
+                images += image
+                if (seed == null) seed = item.seed
+            }
+        }
+        check(images.isNotEmpty()) { "Image provider returned no final image" }
+        ChatImageGenerationResult(images, params.model.id, seed)
     }
 
     private fun materialize(item: ImageGenerationItem): Uri {

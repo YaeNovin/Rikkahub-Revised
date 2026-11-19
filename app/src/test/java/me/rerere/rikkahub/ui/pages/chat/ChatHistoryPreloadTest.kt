@@ -7,7 +7,7 @@ class ChatHistoryPreloadTest {
     @Test
     fun `preload prioritizes nearest earlier messages`() {
         assertEquals(
-            listOf(6, 5, 4, 10),
+            listOf(6, 5, 10, 11),
             historyPreloadIndices(
                 firstVisibleIndex = 7,
                 lastVisibleIndex = 9,
@@ -27,7 +27,7 @@ class ChatHistoryPreloadTest {
             ),
         )
         assertEquals(
-            listOf(7, 6, 5),
+            listOf(7, 6),
             historyPreloadIndices(
                 firstVisibleIndex = 8,
                 lastVisibleIndex = 9,

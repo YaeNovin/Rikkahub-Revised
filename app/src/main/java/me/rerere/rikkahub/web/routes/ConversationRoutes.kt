@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.web.routes
 
+import me.rerere.rikkahub.web.watchWebSession
+
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -15,6 +17,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -49,9 +53,11 @@ fun Route.conversationRoutes(
     chatService: ChatService,
     conversationRepo: ConversationRepository,
     folderRepo: FolderRepository,
-    settingsStore: SettingsStore
+    settingsStore: SettingsStore,
+    authStore: SettingsStore = settingsStore,
 ) {
     route("/conversations") {
+        conversationInteractionRoutes(chatService, settingsStore)
         // GET /api/conversations - List conversations of current assistant
         get {
             val settings = settingsStore.settingsFlow.first()
@@ -177,7 +183,7 @@ fun Route.conversationRoutes(
             val conversation = conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
-            chatService.generateTitle(uuid, conversation, force = true)
+            chatService.generateTitle(uuid, conversation, force = true, source = settingsStore)
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }
 
@@ -205,7 +211,7 @@ fun Route.conversationRoutes(
             conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             val conversation = chatService.getConversationFlow(uuid).first()
             val settings = settingsStore.settingsFlow.first()
             val assistant = settings.assistants.firstOrNull { it.id == conversation.assistantId }
@@ -275,7 +281,7 @@ fun Route.conversationRoutes(
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<SendMessageRequest>()
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             applyInitialConversationInjections(
                 chatService = chatService,
                 settingsStore = settingsStore,
@@ -283,7 +289,7 @@ fun Route.conversationRoutes(
                 modeInjectionIds = request.modeInjectionIds,
                 lorebookIds = request.lorebookIds,
             )
-            chatService.sendMessage(uuid, request.parts, answer = true)
+            chatService.sendMessage(uuid, request.parts, answer = true, source = settingsStore)
 
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }
@@ -294,8 +300,8 @@ fun Route.conversationRoutes(
             val messageId = call.parameters["messageId"].toUuid("message id")
             val request = call.receive<EditMessageRequest>()
 
-            chatService.initializeConversation(uuid)
-            chatService.editMessage(uuid, messageId, request.parts)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
+            chatService.editMessage(uuid, messageId, request.parts, source = settingsStore)
 
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }
@@ -306,7 +312,7 @@ fun Route.conversationRoutes(
             val request = call.receive<ForkConversationRequest>()
             val messageId = request.messageId.toUuid("message id")
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             val fork = chatService.forkConversationAtMessage(uuid, messageId)
 
             call.respond(HttpStatusCode.Created, ForkConversationResponse(conversationId = fork.id.toString()))
@@ -317,7 +323,7 @@ fun Route.conversationRoutes(
             val uuid = call.parameters["id"].toUuid("conversation id")
             val messageId = call.parameters["messageId"].toUuid("message id")
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             chatService.deleteMessage(uuid, messageId)
 
             call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
@@ -329,7 +335,7 @@ fun Route.conversationRoutes(
             val nodeId = call.parameters["nodeId"].toUuid("node id")
             val request = call.receive<SelectMessageNodeRequest>()
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             chatService.selectMessageNode(uuid, nodeId, request.selectIndex)
 
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
@@ -341,13 +347,13 @@ fun Route.conversationRoutes(
             val request = call.receive<RegenerateRequest>()
             val messageId = request.messageId.toUuid("message id")
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             val conversation = chatService.getConversationFlow(uuid).first()
             val node = conversation.getMessageNodeByMessageId(messageId)
             val message = node?.messages?.find { it.id == messageId }
                 ?: throw NotFoundException("Message not found")
 
-            chatService.regenerateAtMessage(uuid, message)
+            chatService.regenerateAtMessage(uuid, message, source = settingsStore)
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }
 
@@ -362,7 +368,7 @@ fun Route.conversationRoutes(
         post("/{id}/tool-approval") {
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<ToolApprovalRequest>()
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             when (
                 chatService.handleToolApprovalAndAwait(
                     conversationId = uuid,
@@ -371,6 +377,7 @@ fun Route.conversationRoutes(
                     reason = request.reason,
                     answer = request.answer,
                     cancelled = request.cancelled,
+                    source = settingsStore,
                 )
             ) {
                 ToolApprovalResult.APPLIED ->
@@ -388,10 +395,11 @@ fun Route.conversationRoutes(
 
         // SSE /api/conversations/{id}/stream - Stream conversation updates
         sse("/{id}/stream") {
+            watchWebSession { !authStore.settingsFlow.value.webServerJwtEnabled }
             val id = call.parameters["id"] ?: return@sse
             val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return@sse
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeConversation(uuid, settingsStore, updateSelection = false)
             chatService.addConversationReference(uuid)
 
             heartbeat {
@@ -424,8 +432,12 @@ fun Route.conversationRoutes(
                     ConversationStreamPayload.BatchErrors(events)
                 }
 
-                merge(conversationEvents, errorEvents).collect { payload ->
+                val processingEvents = chatService.getProcessingStatusFlow(uuid).map { ConversationStreamPayload.Processing(it.orEmpty()) }
+                merge(conversationEvents, errorEvents, processingEvents).collect { payload ->
                     when (payload) {
+                        is ConversationStreamPayload.Processing -> send(event = "processing", data = buildJsonObject {
+                            put("type", "processing"); put("conversationId", id); put("status", payload.status)
+                        }.toString())
                         is ConversationStreamPayload.Conversation -> {
                             sequence += 1
                             val currentDto = payload.value
@@ -473,6 +485,7 @@ fun Route.conversationRoutes(
 }
 
 private sealed interface ConversationStreamPayload {
+    data class Processing(val status: String) : ConversationStreamPayload
     data class Conversation(val value: ConversationDto) : ConversationStreamPayload
     data class BatchErrors(val messages: List<String>) : ConversationStreamPayload
 }

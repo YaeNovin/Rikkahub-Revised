@@ -62,6 +62,7 @@ fun ZoomableAsyncImage(
     val export = LocalExportContext.current
     val badge = isCompactBadgeImage(model, intrinsicSize)
     val targetLink = safeImageLink(linkUrl)
+    val showLinkActions = LocalLinkActionHandler.current
     var retry by remember(model) { mutableIntStateOf(0) }
     var loading by remember(model, retry) { mutableStateOf(true) }
     var failure by remember(model, retry) { mutableStateOf<String?>(null) }
@@ -104,9 +105,12 @@ fun ZoomableAsyncImage(
         .then(if (badge && !displaySize.isUsableImageSize()) Modifier.widthIn(min = 48.dp, max = maxDisplayWidthDp.dp).heightIn(min = 20.dp, max = 28.dp) else Modifier)
         .combinedClickable(
             onClick = { if (failure != null) retry++ else if (targetLink != null) context.openUrl(targetLink) else showImageViewer = true },
-            onLongClick = { showImageViewer = true },
+            onLongClick = {
+                if (targetLink != null && showLinkActions != null) showLinkActions(LinkTarget(targetLink, contentDescription.orEmpty()) { showImageViewer = true })
+                else showImageViewer = true
+            },
             onClickLabel = if (failure != null) "重新加载图片" else if (targetLink != null) "打开图片链接" else "预览图片",
-            onLongClickLabel = "放大预览图片",
+            onLongClickLabel = if (targetLink != null && showLinkActions != null) "链接操作" else "放大预览图片",
         )
     if (failure != null) {
         Text(

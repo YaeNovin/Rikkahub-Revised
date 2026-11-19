@@ -1,0 +1,20 @@
+p5.js 1.11.11
+Copyright p5.js contributors / Processing Foundation.
+Licensed under GNU Lesser General Public License v2.1 (LGPL-2.1).
+The full license is provided in p5-1.11.11-LGPL-2.1.txt.
+
+Unmodified browser distribution:
+https://unpkg.com/p5@1.11.11/lib/p5.min.js
+SHA-256: 1343f616bf9914da8253faae00201ea5f72772916998bc6add4c2a07e00a662c
+
+Upstream source (including original source modules and build instructions):
+https://github.com/processing/p5.js/tree/v1.11.11
+https://github.com/processing/p5.js/archive/refs/tags/v1.11.11.tar.gz
+Readable browser distribution:
+https://unpkg.com/p5@1.11.11/lib/p5.js
+Package metadata:
+https://registry.npmjs.org/p5/1.11.11
+
+The library is a separate, unmodified JavaScript asset. The application-owned
+pattern-geometry.js and pattern-preview.js adapters are not modifications to p5.js.
+No p5.sound, WebGL sketches, user scripts or network assets are enabled.

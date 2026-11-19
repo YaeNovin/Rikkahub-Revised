@@ -15,6 +15,8 @@ import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.parseOutputSchema
+import me.rerere.ai.provider.closedOutputSchema
 import me.rerere.ai.util.json
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
@@ -51,7 +53,7 @@ internal fun JsonObjectBuilder.applyClaudeRequestOptions(
     val outputConfig = buildJsonObject {
         reasoningEffort?.let { put("effort", it) }
         if (support.supportsStructuredOutput && options.responseFormat == ClaudeResponseFormat.JSON_SCHEMA) {
-            parseClaudeJsonSchema(options.responseJsonSchema)?.let { schema ->
+            parseOutputSchema(options.responseJsonSchema).closedOutputSchema().let { schema ->
                 put("format", buildJsonObject {
                     put("type", "json_schema")
                     put("schema", schema)
@@ -171,7 +173,7 @@ private fun buildClaudeToolChoice(
     val disableParallel = options.parallelToolCalls.disableParallelToolUse
     val requestedType = options.toolChoice.apiValue
     val type = when {
-        requestedType == "any" && !support.supportsForcedToolChoice -> "auto"
+        requestedType == "any" && (!support.supportsForcedToolChoice || params.reasoningLevel.isEnabled) -> "auto"
         requestedType != null -> requestedType
         disableParallel != null -> "auto"
         else -> return null

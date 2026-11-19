@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.rikkahub.data.model.memoryCapabilityMode
 import me.rerere.rikkahub.data.ai.context.makeRequestContextSnapshot
 import me.rerere.rikkahub.data.ai.context.withRequestContext
@@ -36,6 +37,10 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.supportsFunctionCalling
+import me.rerere.rikkahub.data.datastore.searchAvailability
+import me.rerere.rikkahub.data.datastore.effectiveGoogleSearchOptions
+import me.rerere.ai.provider.providers.google.supportsGoogleToolCombination
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
@@ -67,7 +72,12 @@ import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.ai.transformers.resolvePromptVariables
 import me.rerere.rikkahub.data.ai.tools.createKnowledgeBaseTools
 import me.rerere.rikkahub.data.ai.tools.KnowledgeBaseCapabilities
-import me.rerere.rikkahub.data.ai.tools.createSessionCapabilitiesTool
+import me.rerere.rikkahub.data.ai.tools.SESSION_CAPABILITIES_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.withSessionCapabilitiesTool
+import me.rerere.rikkahub.data.ai.tools.withRenderingTools
+import me.rerere.rikkahub.data.ai.tools.CHAT_IMAGE_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.INSPECT_GENERATED_IMAGE_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.withChatImageTools
 import me.rerere.rikkahub.data.model.suggestionCapabilities
 import me.rerere.rikkahub.data.ai.transforms.KnowledgeRetrievalTransformer
 import me.rerere.rikkahub.data.datastore.Settings
@@ -98,7 +108,8 @@ private const val ROLLING_CONTEXT_SYSTEM_PROMPT =
 @Serializable
 sealed interface GenerationChunk {
     data class Messages(
-        val messages: List<UIMessage>
+        val messages: List<UIMessage>,
+        val persisted: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
     ) : GenerationChunk
 }
 
@@ -109,6 +120,7 @@ class GenerationHandler(
     private val knowledgeBaseRepository: KnowledgeBaseRepository,
     private val knowledgeRetrievalTransformer: KnowledgeRetrievalTransformer,
     private val requestStatisticsRecorder: RequestStatisticsRecorder,
+    private val imageTools: ChatImageToolCoordinator,
 ) {
     fun generateText(
         settings: Settings,
@@ -143,6 +155,9 @@ class GenerationHandler(
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
+        suspend fun checkpoint() {
+            emitImageToolCheckpoint(messages)
+        }
         val requestStartIndex = requestMessageStartIndex.coerceIn(0, messages.size)
         fun requestMessages(): List<UIMessage> = if (requestStartIndex > 0) {
             messages.drop(requestStartIndex)
@@ -181,14 +196,29 @@ class GenerationHandler(
                     )
                 }
                 addAll(tools)
-            }
-            val toolCallsAvailable = model.abilities.contains(ModelAbility.TOOL)
+            }.withRenderingTools(enabled = model.supportsFunctionCalling()).withChatImageTools(
+                settings = settings,
+                assistant = assistant,
+                chatModel = model,
+                hasConversation = conversationId != null,
+                constraintsFor = providerManager::imageGenerationConstraints,
+                inspect = { id -> imageTools.inspect(id, requireNotNull(conversationId)) },
+            )
+            val availableSearch = searchAvailability(assistant, model, provider)
+            val nativeOnly = provider is me.rerere.ai.provider.ProviderSetting.Google &&
+                !model.supportsGoogleToolCombination() && !availableSearch.external && (availableSearch.native || availableSearch.urlContext)
+            val toolCallsAvailable = model.supportsFunctionCalling() && !nativeOnly
             val toolsInternal = if (toolCallsAvailable) {
-                registeredTools + createSessionCapabilitiesTool(
+                registeredTools.withSessionCapabilitiesTool(
                     assistant = assistant,
-                    toolCallsAvailable = true,
-                    availableToolNames = { registeredTools.map(Tool::name) + "get_session_capabilities" },
                     knowledgeBaseCapabilities = knowledgeBaseCapabilities,
+                    searchCapabilities = searchAvailability(assistant, model, provider).let {
+                        kotlinx.serialization.json.buildJsonObject {
+                            put("external", it.external && registeredTools.any { tool -> tool.name == "search_web" })
+                            put("native", it.native)
+                            put("url_context", it.urlContext)
+                        }
+                    },
                     suggestionCapabilities = suggestionConversation?.let { source ->
                         { details -> source.suggestionCapabilities(settings, details, enabledKnowledgeBaseIds.isNotEmpty()) }
                     },
@@ -210,7 +240,7 @@ class GenerationHandler(
 
             // A persisted Pending ask_user must remain visible and actionable after a restart.
             // Do not send the same assistant turn to the provider again while it is waiting.
-            if (waitingForApproval && pendingTools.isEmpty()) {
+            if (waitingForApproval) {
                 Log.i(TAG, "generateText: waiting for pending tool approval")
                 break
             }
@@ -312,6 +342,11 @@ class GenerationHandler(
                     break
                 }
 
+                // A tool is still part of this response. flowOn is buffered: wait for a durable
+                // owner checkpoint before creating or executing the paid image task.
+                messages = messages.dropLast(1) + messages.last().copy(finishedAt = null)
+                if (generatedTools.any { it.toolName == CHAT_IMAGE_TOOL_NAME }) checkpoint()
+
                 // Check for tools that need approval
                 var hasPendingApproval = false
                 val updatedTools = generatedTools.map { tool ->
@@ -329,6 +364,29 @@ class GenerationHandler(
                         Log.w(TAG, "generateText: invalid arguments for ${tool.toolName}")
                     }
                     when {
+                        tool.toolName == CHAT_IMAGE_TOOL_NAME && toolDef != null && parsedToolInput != null &&
+                            tool.approvalState is ToolApprovalState.Auto -> {
+                            try {
+                                if (shouldDeferImageForQuestions(generatedTools)) {
+                                    return@map tool.copy(output = listOf(UIMessagePart.Text(
+                                        "Image generation deferred: wait for ask_user answers, then formulate the prompt in a NEW generate_image call. No image request was submitted or charged."
+                                    )))
+                                }
+                                val source = messages.lastOrNull { it.role == MessageRole.USER }
+                                    ?: error("缺少用户生图请求")
+                                val task = imageTools.prepare(requireNotNull(conversationId), messages.last().id,
+                                    source.id, source.toText(), tool)
+                                val automatic = assistant.autoApproveImageGeneration && !messages.imageAutonomyBlockedByAnswer() &&
+                                    imageTools.approveAutomatically(task)
+                                if (!automatic) hasPendingApproval = true
+                                tool.copy(approvalState = if (automatic) ToolApprovalState.Approved else ToolApprovalState.Pending,
+                                    metadata = me.rerere.rikkahub.data.ai.tools.imageToolPendingMetadata(tool.metadata, task.id))
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                tool.copy(approvalState = ToolApprovalState.Denied(error.message ?: "无法创建生图任务"))
+                            }
+                        }
                         // A malformed ask_user call from an older/persisted turn must not remain
                         // Pending forever. Make it executable so the structured validation error
                         // below can be returned to the model and the conversation can continue.
@@ -389,13 +447,15 @@ class GenerationHandler(
                     emit(GenerationChunk.Messages(messages))
                 }
 
+                if (generatedTools.any { it.toolName == CHAT_IMAGE_TOOL_NAME }) checkpoint()
+
                 // If there are pending approvals, break and wait for user
                 if (hasPendingApproval) {
                     Log.i(TAG, "generateText: waiting for tool approval")
                     break
                 }
 
-                toolsToProcess = updatedTools
+                toolsToProcess = updatedTools.filterNot { it.isExecuted }
             } else {
                 // Resuming after user interaction - use the resumable tools directly.
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} resumable tools")
@@ -412,6 +472,11 @@ class GenerationHandler(
             // Handle tools (execute approved tools, handle denied tools)
             val executedTools = arrayListOf<UIMessagePart.Tool>()
             toolsToProcess.forEach { tool ->
+                if (tool.toolName == CHAT_IMAGE_TOOL_NAME && conversationId != null &&
+                    (tool.approvalState is ToolApprovalState.Denied || tool.approvalState is ToolApprovalState.Cancelled ||
+                        tool.approvalState is ToolApprovalState.Expired)) {
+                    imageTools.cancel(conversationId, messages.last().id, tool)
+                }
                 if (tool.toolName == AskUserProtocol.TOOL_NAME) {
                     val requestError = AskUserProtocol.parseRequest(tool.input).exceptionOrNull()
                     if (requestError != null) {
@@ -502,11 +567,17 @@ class GenerationHandler(
                     else -> {
                         // Auto or Approved - execute the tool
                         runCatching {
-                            val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
-                                ?: error("Tool ${tool.toolName} not found")
                             val args = json.parseToolArguments(tool.input, tool.toolName)
-                            Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
-                            val result = toolDef.execute(args)
+                            Log.i(TAG, "generateText: executing tool ${tool.toolName}")
+                            val result = if (tool.toolName == CHAT_IMAGE_TOOL_NAME) {
+                                // Recovery must still deliver saved results if the user disabled
+                                // image tools meanwhile. The coordinator rechecks paid authorization.
+                                imageTools.execute(requireNotNull(conversationId), messages.last().id, tool)
+                            } else {
+                                val toolDef = toolsInternal.find { it.name == tool.toolName }
+                                    ?: error("Tool ${tool.toolName} not found")
+                                toolDef.execute(args)
+                            }
                             val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
@@ -551,6 +622,7 @@ class GenerationHandler(
             }
             messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
             messages = messages.withKnowledgeCitationsFromToolResults()
+            if (executedTools.any { it.toolName == CHAT_IMAGE_TOOL_NAME }) checkpoint()
             emit(
                 GenerationChunk.Messages(
                     messages.transforms(
@@ -597,6 +669,8 @@ class GenerationHandler(
         contextScopeKey: String? = null,
         generationTrigger: LorebookGenerationTrigger = LorebookGenerationTrigger.NORMAL,
     ): List<UIMessageAnnotation.KnowledgeCitation> {
+        val imageInspectionAvailable = tools.any { it.name == INSPECT_GENERATED_IMAGE_TOOL_NAME }
+        val capabilityTool = tools.singleOrNull { it.name == SESSION_CAPABILITIES_TOOL_NAME }
         val internalMessages = buildList {
             val system = buildString {
                 val effectiveSystemPrompt =
@@ -612,6 +686,10 @@ class GenerationHandler(
                     appendLine()
                     append(nonToolCapabilityPrompt)
                 }
+                appendLine()
+                append(searchAvailability(assistant, model, provider).let {
+                    it.copy(external = it.external && tools.any { tool -> tool.name == "search_web" }).prompt()
+                })
                 if (!rollingContextSummary.isNullOrBlank()) {
                     appendLine()
                     append(ROLLING_CONTEXT_SYSTEM_PROMPT)
@@ -639,7 +717,7 @@ class GenerationHandler(
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(messages)
-        }.transforms(
+        }.imageToolContextFor(model, imageInspectionAvailable).transforms(
             transformers = transformers,
             context = context,
             model = model,
@@ -663,8 +741,8 @@ class GenerationHandler(
                     generationTrigger = generationTrigger,
         ).compactHistoricalMediaForRequest(
             mediaSizeBytes = ::resolveContentMediaSize,
-        )
-        val initialProviderMessages = if (resumeInterruptedResponse) {
+        ).imageToolContextFor(model, imageInspectionAvailable)
+        val initialProviderMessages = (if (resumeInterruptedResponse) {
             buildInterruptedStreamContinuation(
                 requestMessages = internalMessages,
                 currentMessages = messages,
@@ -672,6 +750,7 @@ class GenerationHandler(
         } else {
             internalMessages
         }
+        ).imageToolContextFor(model, imageInspectionAvailable).withCurrentSessionCapabilities(capabilityTool)
         val requestCitations = initialProviderMessages.currentRequestKnowledgeCitations()
             .plus(
                 messages.lastOrNull()
@@ -696,8 +775,10 @@ class GenerationHandler(
             grokOptions = assistant.grokOptions,
             qwenOptions = assistant.qwenOptions,
             deepSeekOptions = assistant.deepSeekOptions,
-            geminiOptions = assistant.geminiOptions,
+            geminiOptions = if (provider is me.rerere.ai.provider.ProviderSetting.Google) assistant.geminiOptions.copy(
+                search = effectiveGoogleSearchOptions(assistant, model, provider)) else assistant.geminiOptions,
             claudeOptions = assistant.claudeOptions,
+            miniMaxOptions = assistant.miniMaxOptions,
             customHeaders = buildList {
                 addAll(assistant.customHeaders)
                 addAll(model.customHeaders)
@@ -854,6 +935,8 @@ class GenerationHandler(
                                     System.nanoTime() - statisticsAttemptStartedNanos
                                     ).coerceAtLeast(0L),
                                 completedAt = System.currentTimeMillis(),
+                                canceled = error is CancellationException,
+                                failure = error.message,
                             )
                             throw error
                         }
@@ -924,7 +1007,8 @@ class GenerationHandler(
                     if (!reconnectScheduled) throw error
 
                     streamRecoveryCount++
-                    providerMessages = continuationMessages
+                    providerMessages = continuationMessages.imageToolContextFor(model, imageInspectionAvailable)
+                        .withCurrentSessionCapabilities(capabilityTool)
                 }
             }
         } finally {
@@ -1122,7 +1206,7 @@ class GenerationHandler(
 
         val providerHandler = providerManager.getProviderByType(provider)
 
-        if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
+        if (!ModelRegistry.QWEN_MT.match(model.parameterModelId())) {
             // Use regular translation with prompt
             val prompt = settings.translatePrompt.applyPlaceholders(
                 *PromptVariableResolutionContext(

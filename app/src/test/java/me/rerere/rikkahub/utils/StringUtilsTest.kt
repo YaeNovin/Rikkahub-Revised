@@ -1,11 +1,21 @@
 package me.rerere.rikkahub.utils
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StringUtilsTest {
+    @Test fun `prompt variable detection safely handles braces regex characters and escaped replacement text`() {
+        for (token in listOf("{content}", "{{ content }}", "{{CONTENT}}")) {
+            assertTrue(token.containsPromptVariable("content"))
+            assertEquals("\\$1", token.applyPlaceholders("content" to "\\$1"))
+        }
+        assertTrue("{{ a.b[0] }}".containsPromptVariable("a.b[0]"))
+        assertFalse("{axb0}".containsPromptVariable("a.b[0]"))
+        assertFalse("plain \\ text".containsPromptVariable("content"))
+    }
 
     @Test
     fun `extract chinese double quotes`() {

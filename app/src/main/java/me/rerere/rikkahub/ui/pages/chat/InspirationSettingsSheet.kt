@@ -10,7 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import me.rerere.rikkahub.ui.components.ui.windowBoundedHeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,21 +39,30 @@ internal fun InspirationSettingsSheet(assistantId: Uuid?, onDismiss: () -> Unit)
     val store = koinInject<SettingsStore>()
     val settings by store.settingsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val sessionKey = rememberSaveable { Uuid.random().toString() }
+    val sessionKey = rememberSaveable(assistantId) { Uuid.random().toString() }
     val editor = androidx.lifecycle.viewmodel.compose.viewModel<InspirationEditorState>(key = "inspiration-editor:${assistantId ?: "global"}") {
         InspirationEditorState()
     }
-    remember(sessionKey) {
-        editor.begin(sessionKey, settings.inspirationSettings(assistantId),
-            assistantId != null && settings.getAssistantById(assistantId)?.inspirationSettings == null)
+    LaunchedEffect(editor, sessionKey, settings.init) {
+        if (!settings.init) {
+            editor.begin(sessionKey, settings.inspirationSettings(assistantId),
+                assistantId != null && settings.getAssistantById(assistantId)?.inspirationSettings == null)
+        }
     }
+    val ready = !settings.init && editor.isReady(sessionKey)
     var saving by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     val catalog = inspirationCatalog()
     val displayed = (if (editor.draft.includeBuiltIns) catalog else emptyList()) + editor.draft.customCards
-    val maxHeight = (LocalConfiguration.current.screenHeightDp * .88f).dp
     AppearanceModalBottomSheet(onDismissRequest = { if (!saving) onDismiss() }) {
-        Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).imePadding().padding(horizontal = 16.dp)) {
+        if (!ready) {
+            Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator()
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+            return@AppearanceModalBottomSheet
+        }
+        Column(Modifier.fillMaxWidth().windowBoundedHeight(.88f).padding(horizontal = 16.dp)) {
             Text(stringResource(R.string.inspiration_manage), style = MaterialTheme.typography.titleLarge)
             Text(if (assistantId == null) stringResource(R.string.inspiration_global_scope)
                 else stringResource(R.string.inspiration_assistant_scope, settings.getAssistantById(assistantId)?.name.orEmpty()),
@@ -124,14 +133,14 @@ internal fun InspirationSettingsSheet(assistantId: Uuid?, onDismiss: () -> Unit)
             }
         }
     }
-    editor.editing?.let { original ->
+    editor.editing?.takeIf { ready }?.let { original ->
         InspirationCardEditor(original, onDismiss = { editor.editing = null }, onSave = { card ->
             editor.draft = editor.draft.copy(customCards = if (editor.draft.customCards.any { it.id == card.id })
                 editor.draft.customCards.map { if (it.id == card.id) card else it } else editor.draft.customCards + card).normalized()
             editor.editing = null
         })
     }
-    editor.deleting?.let { card -> AppearanceAlertDialog(onDismissRequest = { editor.deleting = null },
+    editor.deleting?.takeIf { ready }?.let { card -> AppearanceAlertDialog(onDismissRequest = { editor.deleting = null },
         title = { Text(stringResource(R.string.inspiration_delete)) }, text = { Text(card.title) },
         confirmButton = { TextButton(onClick = { editor.draft = editor.draft.removeCard(card.id); editor.deleting = null }) { Text(stringResource(R.string.confirm)) } },
         dismissButton = { TextButton(onClick = { editor.deleting = null }) { Text(stringResource(R.string.cancel)) } }) }

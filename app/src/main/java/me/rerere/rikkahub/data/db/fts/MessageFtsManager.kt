@@ -55,6 +55,11 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun deleteConversation(conversationId: String) = withContext(Dispatchers.IO) {
+        deleteConversationInTransaction(conversationId)
+    }
+
+    /** Call on the Room transaction thread; switching dispatchers would lose its SQLite transaction. */
+    internal fun deleteConversationInTransaction(conversationId: String) {
         db.execSQL("DELETE FROM message_fts WHERE conversation_id = ?", arrayOf(conversationId))
     }
 
@@ -73,7 +78,11 @@ class MessageFtsManager(private val database: AppDatabase) {
     suspend fun search(
         keyword: String,
         sort: MessageSearchSort = MessageSearchSort.RELEVANCE,
+        limit: Int = 50,
+        offset: Int = 0,
     ): List<MessageSearchResult> = withContext(Dispatchers.IO) {
+        require(limit in 1..101 && offset >= 0)
+        if (keyword.isBlank()) return@withContext emptyList()
         val results = mutableListOf<MessageSearchResult>()
         val cursor = db.query(
             """
@@ -81,10 +90,10 @@ class MessageFtsManager(private val database: AppDatabase) {
                    simple_snippet(message_fts, 0, '[', ']', '...', 30) AS snippet
             FROM message_fts
             WHERE text MATCH jieba_query(?)
-            ORDER BY ${sort.orderBy}
-            LIMIT 50
+            ORDER BY ${sort.orderBy}, rowid
+            LIMIT ? OFFSET ?
             """.trimIndent(),
-            arrayOf(keyword)
+            arrayOf<Any>(keyword, limit, offset)
         )
         Log.i(TAG, "search: $keyword")
         cursor.use {

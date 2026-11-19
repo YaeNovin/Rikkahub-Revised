@@ -1,5 +1,9 @@
 {
   "dependencies": {
     "@types/ink": "^2.0.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^8.0.6",
+    "@playwright/test": "^1.63.0"
   }
 }

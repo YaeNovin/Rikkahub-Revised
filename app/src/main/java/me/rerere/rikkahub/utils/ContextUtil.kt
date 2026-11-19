@@ -23,6 +23,8 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.R
 
 import java.io.File
@@ -151,7 +153,7 @@ fun Context.getComponentActivity(): ComponentActivity? {
     return null
 }
 
-fun Context.exportImage(
+suspend fun Context.exportImage(
     activity: Activity,
     bitmap: Bitmap,
     fileName: String = "RikkaHub_${System.currentTimeMillis()}.png"
@@ -161,47 +163,55 @@ fun Context.exportImage(
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                activity,
-                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                1
-            )
-            return
+            withContext(Dispatchers.Main.immediate) {
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    1
+                )
+            }
+            error("Storage permission is required to save images")
         }
     }
 
-    // 保存到相册
-    var outputStream: OutputStream? = null
-    try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10及以上使用MediaStore API
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
-            }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let {
-                outputStream = contentResolver.openOutputStream(it)
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream!!)
-            }
-        } else {
-            // Android 9及以下直接写入文件
-            val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            val image = File(imagesDir, fileName)
-            outputStream = FileOutputStream(image)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+    withContext(Dispatchers.IO) {
+        var outputStream: OutputStream? = null
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+                }
+                val uri = requireNotNull(
+                    contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                ) { "Unable to create gallery image" }
+                outputStream = requireNotNull(contentResolver.openOutputStream(uri)) {
+                    "Unable to open gallery image"
+                }
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)) {
+                    "Unable to encode gallery image"
+                }
+            } else {
+                val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                    .apply { mkdirs() }
+                val image = File(imagesDir, fileName)
+                outputStream = FileOutputStream(image)
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)) {
+                    "Unable to encode gallery image"
+                }
 
-            // 通知图库更新
-            val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-            mediaScanIntent.data = Uri.fromFile(image)
-            sendBroadcast(mediaScanIntent)
+                val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                mediaScanIntent.data = Uri.fromFile(image)
+                sendBroadcast(mediaScanIntent)
+            }
+            Log.i(TAG, "Image saved successfully: $fileName")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save image", e)
+            throw e
+        } finally {
+            outputStream?.close()
         }
-        Log.i(TAG, "Image saved successfully: $fileName")
-    } catch (e: Exception) {
-        Log.e(TAG, "Failed to save image", e)
-    } finally {
-        outputStream?.close()
     }
 }
 

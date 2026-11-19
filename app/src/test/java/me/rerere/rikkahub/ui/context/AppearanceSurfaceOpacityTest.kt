@@ -21,7 +21,7 @@ class AppearanceSurfaceOpacityTest {
     }
 
     @Test
-    fun `cards and top bar are opaque without an active background`() {
+    fun `cards use material opacity without a wallpaper while top bar keeps its source fallback`() {
         val policy = appearanceSurfaceOpacityPolicy(
             cardOpacity = 0.42f,
             topBarOpacity = 0.42f,
@@ -30,7 +30,7 @@ class AppearanceSurfaceOpacityTest {
             cardBackgroundActive = false,
         )
 
-        assertEquals(1f, policy.card, 0f)
+        assertEquals(.42f, policy.card, 0f)
         assertEquals(1f, policy.topBar, 0f)
         assertEquals(0.55f, policy.input, 0f)
         assertEquals(0.55f, policy.dock, 0f)

@@ -115,7 +115,7 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse SSE data: $data", e)
+            me.rerere.common.android.Logging.logSoftwareError(TAG, "Failed to parse speech stream", e)
             null
         }
     }

@@ -27,6 +27,7 @@ import { Switch } from "~/components/ui/switch";
 import { PickerErrorAlert } from "./picker-error-alert";
 
 export interface McpPickerButtonProps {
+  showLabel?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -44,7 +45,7 @@ function getEnabledToolsCount(tools: McpToolOption[] | undefined): {
   return { enabled, total };
 }
 
-export function McpPickerButton({ disabled = false, className }: McpPickerButtonProps) {
+export function McpPickerButton({ disabled = false, className, showLabel = false }: McpPickerButtonProps) {
   const { t } = useTranslation("input");
   const { settings, currentAssistant } = useCurrentAssistant();
 
@@ -132,6 +133,7 @@ export function McpPickerButton({ disabled = false, className }: McpPickerButton
     <Popover {...popoverProps}>
       <PopoverTrigger asChild>
         <Button
+          aria-label={t("mcp.title")}
           type="button"
           variant="ghost"
           size="sm"
@@ -147,6 +149,7 @@ export function McpPickerButton({ disabled = false, className }: McpPickerButton
           ) : (
             <Terminal className="size-3.5" />
           )}
+          {showLabel && <span>{t("mcp.title")}</span>}
           {selectedEnabledCount > 0 ? (
             <span className="rounded-full bg-primary/10 px-1 py-0.5 text-[9px] text-primary">
               {selectedEnabledCount}

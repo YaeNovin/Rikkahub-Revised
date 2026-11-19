@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import me.rerere.rikkahub.ui.components.richtext.richContentColors
+import me.rerere.rikkahub.ui.components.richtext.rememberReadableTextSurface
+import me.rerere.rikkahub.ui.theme.SurfaceTextTheme
 import me.rerere.rikkahub.ui.components.ui.JsonTree
 import me.rerere.rikkahub.ui.components.ui.LongTextContent
 import me.rerere.rikkahub.ui.components.ui.isLongDisplayText
@@ -51,13 +53,14 @@ internal fun presentLogBody(body: String, systemInstruction: Boolean = false): L
 }
 
 @Composable
-internal fun LogBodyContent(label: String, body: String, systemInstruction: Boolean = false) {
+internal fun LogBodyContent(label: String, body: String, systemInstruction: Boolean = false, collapsible: Boolean = false) {
     val long = remember(body) { isLongDisplayText(body) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     val presentation by produceState<LogBodyPresentation?>(null, body, systemInstruction) {
         value = withContext(Dispatchers.Default) { presentLogBody(body, systemInstruction) }
     }
     val rich = richContentColors()
+    val readable = rememberReadableTextSurface(rich.container, MaterialTheme.colorScheme.onSurface)
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -67,21 +70,23 @@ internal fun LogBodyContent(label: String, body: String, systemInstruction: Bool
                 Text("${presentation?.format ?: "…"} · ${body.length} 字符", style = MaterialTheme.typography.labelSmall)
             }
             TextButton(onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, body))) } }) { Text("复制") }
-            if (long) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
+            if (long || collapsible) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
         }
         Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
-            color = rich.container, contentColor = MaterialTheme.colorScheme.onSurface,
+            color = rich.container, contentColor = readable.foreground,
             border = BorderStroke(1.dp, rich.border), tonalElevation = 0.dp) {
-            when {
-                long && !expanded -> Text(
-                    (presentation?.text ?: body).take(400), Modifier.padding(12.dp),
-                    maxLines = 4, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, fontFamily = JetbrainsMono,
-                )
-                presentation?.json != null && !long -> JsonTree(presentation!!.json!!, Modifier.padding(8.dp), initialExpandLevel = 2)
-                long -> LongTextContent(presentation?.text ?: body, Modifier.fillMaxWidth().height(360.dp))
-                else -> Text(presentation?.text ?: body, Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall, fontFamily = JetbrainsMono)
+            SurfaceTextTheme(readable.foreground, backgrounds = readable.backgrounds) {
+                when {
+                    (long || collapsible) && !expanded -> Text(
+                        (presentation?.text ?: body).take(400), Modifier.padding(12.dp),
+                        maxLines = 4, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall, fontFamily = JetbrainsMono,
+                    )
+                    presentation?.json != null && !long -> JsonTree(presentation!!.json!!, Modifier.padding(8.dp), initialExpandLevel = 2)
+                    long -> LongTextContent(presentation?.text ?: body, Modifier.fillMaxWidth().height(360.dp))
+                    else -> Text(presentation?.text ?: body, Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall, fontFamily = JetbrainsMono)
+                }
             }
         }
     }

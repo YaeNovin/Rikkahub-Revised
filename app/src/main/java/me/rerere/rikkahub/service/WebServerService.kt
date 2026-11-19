@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -14,6 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
@@ -39,6 +42,8 @@ class WebServerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wakeLockJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -51,14 +56,20 @@ class WebServerService : Service() {
                     stopSelf()
                     return START_NOT_STICKY
                 }
-                startObservingState()
+                holdServerAwake()
                 webServerManager.start(port = port, localhostOnly = localhostOnly)
+                // Enqueue the new start before observing, so a previous attempt's
+                // terminal error cannot immediately stop this service instance.
+                startObservingState()
             }
 
             ACTION_STOP -> {
-                webServerManager.stop()
                 serviceScope.launch {
-                    settingsStore.update { it.copy(webServerEnabled = false) }
+                    try {
+                        settingsStore.update { it.copy(webServerEnabled = false) }
+                    } finally {
+                        webServerManager.stop()
+                    }
                 }
                 // 不立即 stopSelf，等状态流检测到停止后再结束
             }
@@ -72,23 +83,49 @@ class WebServerService : Service() {
                 serviceScope.launch {
                     val settings = settingsStore.settingsFlowRaw.first()
                     if (settings.webServerEnabled) {
-                        startObservingState()
+                        holdServerAwake()
                         webServerManager.start(
                             port = settings.webServerPort,
                             localhostOnly = settings.webServerLocalhostOnly
                         )
+                        startObservingState()
                     } else {
                         stopSelf()
                     }
                 }
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        releaseServerAwake()
         serviceScope.cancel()
+        if (webServerManager.state.value.let { it.isRunning || it.isLoading }) webServerManager.stop()
+        super.onDestroy()
+    }
+
+    /** A listening server needs CPU time even with no visible Activity or active generation. */
+    private fun holdServerAwake() {
+        if (wakeLockJob != null) return
+        val lock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:web-server")
+            .apply { setReferenceCounted(false) }
+        wakeLock = lock
+        wakeLockJob = serviceScope.launch {
+            while (isActive) {
+                // Bounded lease prevents an orphaned lock after an unexpected lifecycle failure.
+                lock.acquire(90_000L)
+                delay(60_000L)
+            }
+        }
+    }
+
+    private fun releaseServerAwake() {
+        wakeLockJob?.cancel()
+        wakeLockJob = null
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 
     private fun startForegroundCompat(): Boolean {
@@ -126,7 +163,8 @@ class WebServerService : Service() {
                         updateNotification(buildRunningNotification(url))
                     }
 
-                    wasRunning && !state.isRunning && !state.isLoading -> {
+                    !state.isRunning && !state.isLoading && (wasRunning || state.error != null) -> {
+                        releaseServerAwake()
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
@@ -155,6 +193,7 @@ class WebServerService : Service() {
         .setContentIntent(buildLaunchPendingIntent())
         .setOngoing(true)
         .setOnlyAlertOnce(true)
+        .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         .build()
 
     private fun buildRunningNotification(url: String): android.app.Notification {
@@ -174,6 +213,7 @@ class WebServerService : Service() {
             .setContentIntent(buildLaunchPendingIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .addAction(0, getString(R.string.notification_web_server_stop), stopPendingIntent)
             .build()

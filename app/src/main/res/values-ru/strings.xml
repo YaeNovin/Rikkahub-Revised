@@ -286,7 +286,12 @@
   <string name="chat_page_history">История чата</string>
   <string name="chat_page_menu_ai_translator">AI-переводчик</string>
   <string name="chat_page_menu_image_generation">Генерация изображений</string>
-  <string name="chat_page_message_count">%d сообщений</string>
+  <plurals name="chat_page_message_count">
+    <item quantity="one">%d сообщение</item>
+    <item quantity="few">%d сообщения</item>
+    <item quantity="many">%d сообщений</item>
+    <item quantity="other">%d сообщений</item>
+  </plurals>
   <string name="chat_page_move_to_assistant">Перейти к ассистенту</string>
   <string name="chat_page_new_chat">Новый чат</string>
   <string name="chat_page_new_message">Новое сообщение</string>
@@ -300,7 +305,12 @@
   <string name="chat_page_yesterday">Вчера</string>
   <string name="chat_size_dialog_content">Текущее количество сообщений: %1$d. Это может привести к вылету или зависанию приложения, а также к потере данных этой беседы. Пожалуйста, создайте новый чат как можно скорее, чтобы продолжить общение.</string>
   <string name="chat_size_dialog_title">Данные этого разговора слишком большие</string>
-  <string name="citations_count">%1$d цитирований</string>
+  <plurals name="citations_count">
+    <item quantity="one">%1$d цитирование</item>
+    <item quantity="few">%1$d цитирования</item>
+    <item quantity="many">%1$d цитирований</item>
+    <item quantity="other">%1$d цитирования</item>
+  </plurals>
   <string name="code_block_collapse">Свернуть</string>
   <string name="code_block_copy">Копировать код</string>
   <string name="code_block_expand">Развернуть</string>
@@ -699,9 +709,9 @@
   <string name="setting_files_page_clean_action">Очистить</string>
   <string name="setting_files_page_clean_confirmation">Все файлы в этой категории будут удалены без возможности восстановления.</string>
   <string name="setting_files_page_clean_content_description">Очистить файлы</string>
-  <string name="setting_files_page_clean_failed_toast">Не удалось удалить некоторые файлы</string>
+  <string name="setting_files_page_clean_failed_toast">Удалено файлов: %1$d. Не удалось удалить: %2$d.</string>
   <string name="setting_files_page_clean_title">Очистить файлы?</string>
-  <string name="setting_files_page_cleaned_toast">Файлы удалены</string>
+  <string name="setting_files_page_cleaned_toast">Удалено файлов: %1$d. Вложения чатов: %2$d; созданные изображения: %3$d.</string>
   <string name="setting_files_page_delete_action">Удалить</string>
   <string name="setting_files_page_delete_content_description">Удалить</string>
   <string name="setting_files_page_delete_failed_toast">Не удалось удалить</string>

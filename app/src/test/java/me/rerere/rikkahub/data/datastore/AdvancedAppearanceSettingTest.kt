@@ -126,7 +126,8 @@ class AdvancedAppearanceSettingTest {
         assertFalse(resolved.usesGlobalBackground)
         assertEquals(assistant.background, resolved.background)
         assertEquals(assistant.backgroundOpacity, resolved.opacity)
-        assertEquals(assistant.backgroundBlurRadius, resolved.blurRadius)
+        assertEquals(0f, resolved.blurRadius) // The default translucent material does not blur.
+        assertEquals(assistant.backgroundBlurRadius, settings.getCurrentAssistant().backgroundBlurRadius)
     }
 
     @Test
@@ -191,8 +192,8 @@ class AdvancedAppearanceSettingTest {
     }
 
     @Test
-    fun `navigation glass requires an active chat background`() {
-        assertFalse(Settings().isNavigationGlassActive())
+    fun `navigation material remains active without a chat background`() {
+        assertTrue(Settings().isNavigationGlassActive())
 
         val globalOnlySettings = Settings(
             advancedAppearanceSetting = AdvancedAppearanceSetting(
@@ -200,7 +201,7 @@ class AdvancedAppearanceSettingTest {
                 globalBackground = "file:///backgrounds/example.jpg",
             )
         )
-        assertFalse(globalOnlySettings.isNavigationGlassActive())
+        assertTrue(globalOnlySettings.isNavigationGlassActive())
 
         val assistant = Assistant(background = "file:///backgrounds/assistant.jpg")
         val settings = Settings(
@@ -314,7 +315,7 @@ class AdvancedAppearanceSettingTest {
     }
 
     @Test
-    fun `blank assistant background does not activate chat effects`() {
+    fun `blank assistant background disables wallpaper effects but retains input scene blur`() {
         val assistant = Assistant(background = "   ")
         val settings = Settings(
             assistantId = assistant.id,
@@ -330,8 +331,8 @@ class AdvancedAppearanceSettingTest {
         )
 
         assertFalse(settings.hasActiveChatBackground())
-        assertFalse(settings.isNavigationGlassActive())
-        assertFalse(settings.isChatInputGlassActive())
+        assertTrue(settings.isNavigationGlassActive())
+        assertTrue(settings.isChatInputGlassActive())
         assertFalse(settings.isChatDockGlassActive())
         assertFalse(settings.isEnhancedChatBubbleActive())
     }
@@ -358,9 +359,9 @@ class AdvancedAppearanceSettingTest {
     }
 
     @Test
-    fun `chat input glass falls back when no chat background exists`() {
+    fun `chat input scene blur does not require a chat wallpaper`() {
         val displaySetting = DisplaySetting(enableBlurEffect = true)
-        assertFalse(Settings(displaySetting = displaySetting).isChatInputGlassActive())
+        assertTrue(Settings(displaySetting = displaySetting).isChatInputGlassActive())
 
         val assistant = Assistant(background = "file:///backgrounds/assistant.jpg")
         assertTrue(

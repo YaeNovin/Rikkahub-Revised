@@ -44,9 +44,11 @@ const SEARCH_SERVICE_LABELS: Record<string, string> = {
   firecrawl: "Firecrawl",
   jina: "Jina",
   bocha: "博查",
+  deepseek: "DeepSeek",
 };
 
 export interface SearchPickerButtonProps {
+  showLabel?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -102,7 +104,7 @@ function getServiceLabel(service: SearchServiceOption, t: TFunction): string {
   return SEARCH_SERVICE_LABELS[type] ?? type;
 }
 
-export function SearchPickerButton({ disabled = false, className }: SearchPickerButtonProps) {
+export function SearchPickerButton({ disabled = false, className, showLabel = false }: SearchPickerButtonProps) {
   const { t } = useTranslation("input");
   const { settings, currentAssistant } = useCurrentAssistant();
   const { currentModel } = useCurrentModel();
@@ -165,6 +167,7 @@ export function SearchPickerButton({ disabled = false, className }: SearchPicker
       <PopoverTrigger asChild>
         <Button
           type="button"
+          aria-label={t("search.title")}
           variant="ghost"
           size="sm"
           disabled={!canUse || loading}
@@ -188,6 +191,7 @@ export function SearchPickerButton({ disabled = false, className }: SearchPicker
           ) : (
             <Earth className="size-4" />
           )}
+          {showLabel && <span>{t("search.title")}</span>}
           <span className="hidden sm:block">
             <ChevronDown className="size-3.5" />
           </span>

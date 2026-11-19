@@ -7,6 +7,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.stream.DecodeResult
 import me.rerere.ai.provider.stream.SseEvent
@@ -23,12 +24,19 @@ import me.rerere.common.http.jsonObjectOrNull
 
 internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     private val state = ResponseStreamState()
+    private val outputIds = mutableMapOf<Int, String>()
+    private val aliases = mutableMapOf<String, String>()
+    private val providerIds = mutableMapOf<String, String>()
+    private val itemKinds = mutableMapOf<String, String>()
 
     override fun accept(event: SseEvent): DecodeResult {
         if (state.finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(state.finish(), completed = true)
 
-        val payload = json.parseToJsonElement(event.data).jsonObject
+        if (event.data.isBlank()) return DecodeResult()
+        val raw = json.parseToJsonElement(event.data).jsonObject
+        val payload = if (raw["type"] == null && event.event?.startsWith("response.") == true)
+            JsonObject(raw + ("type" to JsonPrimitive(event.event))) else raw
         val eventType = payload["type"]?.jsonPrimitive?.contentOrNull
         val chunks = parseEvent(payload)
         val completed = eventType == "response.completed" || eventType == "response.incomplete" ||
@@ -43,7 +51,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
 
     private fun parseEvent(payload: JsonObject): List<StreamChunk> {
         val chunkType = payload["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-        val itemId = payload["item_id"]?.jsonPrimitive?.contentOrNull
+        val itemId = resolveItemId(payload, chunkType)
         val contentIndex = payload["content_index"]?.jsonPrimitive?.intOrNull ?: 0
         val summaryIndex = payload["summary_index"]?.jsonPrimitive?.intOrNull ?: contentIndex
         val textId = itemId?.let { "$it:text:$contentIndex" }
@@ -51,18 +59,18 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         val contentReasoningId = itemId?.let { "$it:reasoning:content:$contentIndex" }
 
         return when (chunkType) {
-            "response.output_text.delta" -> state.textDelta(
-                textId ?: error("item_id not found"),
+            "response.output_text.delta", "response.refusal.delta" -> state.textDelta(
+                textId ?: missingItemIdentity(chunkType),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
             )
             "response.reasoning_summary_text.delta" -> state.reasoningDelta(
-                summaryReasoningId ?: error("item_id not found"),
+                summaryReasoningId ?: missingItemIdentity(chunkType),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
                 state.reasoningMetadata[itemId],
                 ReasoningType.SUMMARY_TEXT,
             )
             "response.reasoning_text.delta" -> state.reasoningDelta(
-                contentReasoningId ?: error("item_id not found"),
+                contentReasoningId ?: missingItemIdentity(chunkType),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
                 state.reasoningMetadata[itemId],
                 ReasoningType.REASONING_TEXT,
@@ -70,13 +78,13 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             "response.content_part.added" -> {
                 val part = payload["part"]?.jsonObject ?: return emptyList()
                 if (part["type"]?.jsonPrimitive?.contentOrNull == "output_text") {
-                    state.startText(textId ?: error("item_id not found"))
+                    state.startText(textId ?: missingItemIdentity(chunkType))
                 } else emptyList()
             }
-            "response.content_part.done", "response.output_text.done" ->
-                state.endText(textId ?: error("item_id not found"))
+            "response.content_part.done", "response.output_text.done", "response.refusal.done" ->
+                state.endText(textId ?: missingItemIdentity(chunkType))
             "response.reasoning_summary_part.added" -> state.startReasoning(
-                summaryReasoningId ?: error("item_id not found"),
+                summaryReasoningId ?: missingItemIdentity(chunkType),
                 state.reasoningMetadata[itemId],
                 ReasoningType.SUMMARY_TEXT,
             )
@@ -86,7 +94,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             "response.output_item.added" -> {
                 val item = payload["item"]?.jsonObject ?: error("chunk item not found")
                 val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
+                val id = itemId ?: missingItemIdentity(chunkType)
                 when (type) {
                     "function_call" -> {
                         val callId = item["call_id"]?.jsonPrimitive?.contentOrNull ?: id
@@ -100,7 +108,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                     "image_generation_call" -> state.startImage(id)
                     "reasoning" -> {
                         state.reasoningMetadata[id] = OpenAIReasoningMetadata(
-                            reasoningId = id,
+                            reasoningId = providerIds[id],
                             encryptedContent = item["encrypted_content"]?.jsonPrimitive?.contentOrNull,
                         ).toMetadata()
                         emptyList()
@@ -113,11 +121,11 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             "response.output_item.done" -> {
                 val item = payload["item"]?.jsonObject ?: error("chunk item not found")
                 val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
-                val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
+                val id = itemId ?: missingItemIdentity(chunkType)
                 when (type) {
                     "reasoning" -> {
                         val metadata = OpenAIReasoningMetadata(
-                            reasoningId = id,
+                            reasoningId = providerIds[id],
                             encryptedContent = item["encrypted_content"]?.jsonPrimitive?.contentOrNull,
                         ).toMetadata()
                         state.reasoningMetadata[id] = metadata
@@ -145,14 +153,14 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 }
             }
             "response.function_call_arguments.delta" -> {
-                val requiredItemId = itemId ?: error("item_id not found")
+                val requiredItemId = itemId ?: missingItemIdentity(chunkType)
                 state.toolDelta(
                     state.toolCallIdsByItemId[requiredItemId] ?: requiredItemId,
                     payload["delta"]?.toToolArgumentString() ?: "",
                 )
             }
             "response.function_call_arguments.done" -> {
-                val requiredItemId = itemId ?: error("item_id not found")
+                val requiredItemId = itemId ?: missingItemIdentity(chunkType)
                 val toolCallId = state.toolCallIdsByItemId[requiredItemId] ?: requiredItemId
                 buildList {
                     if (toolCallId !in state.toolIdsWithInput) {
@@ -165,7 +173,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 }
             }
             "response.image_generation_call.partial_image" -> {
-                val requiredItemId = itemId ?: error("item_id not found")
+                val requiredItemId = itemId ?: missingItemIdentity(chunkType)
                 buildList {
                     addAll(state.startImage(requiredItemId))
                     add(StreamChunk.ImageSnapshot(
@@ -180,6 +188,52 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             else -> parseServerToolStatusEvent(chunkType, itemId)
         }
     }
+
+    /** Compatible gateways sometimes omit item_id. output_index is the protocol's
+     * independent item identity; retain one stable local ID even if a real ID arrives late.
+     * Never guess between multiple tool calls (that could execute the wrong arguments).
+     */
+    private fun resolveItemId(payload: JsonObject, event: String): String? {
+        val item = payload["item"] as? JsonObject
+        val actual = (payload["item_id"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+            ?: (item?.get("id") as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+        val index = (payload["output_index"] as? JsonPrimitive)?.intOrNull
+        val kind = (item?.get("type") as? JsonPrimitive)?.contentOrNull ?: when {
+            event.startsWith("response.reasoning") -> "reasoning"
+            event.startsWith("response.output_text") || event.startsWith("response.refusal") || event.startsWith("response.content_part") -> "message"
+            event.startsWith("response.function_call") -> "function_call"
+            event.startsWith("response.image_generation_call") -> "image_generation_call"
+            else -> null
+        }
+        if (actual == null && index == null && kind == null) return null
+        // A new tool item cannot inherit the previous tool's ID. Even a single
+        // existing call is ambiguous once a second, unidentified item is announced.
+        if (actual == null && index == null && event == "response.output_item.added" &&
+            kind !in setOf("message", "reasoning")) return null
+        val known = kind?.let { target -> itemKinds.filterValues { it == target }.keys }
+        val provisional = known?.singleOrNull()?.takeIf { it == "compat:$kind:0" && outputIds.isEmpty() }
+        val stable = actual?.let(aliases::get) ?: index?.let(outputIds::get) ?: provisional
+            ?: actual
+            ?: if (index != null) "compat:output:$index" else {
+                when {
+                    known?.size == 1 -> known.single()
+                    known?.isNotEmpty() == true -> throw java.io.IOException(
+                        "Responses protocol: $event omitted item_id and output_index for multiple output items")
+                    kind == "message" || kind == "reasoning" -> "compat:$kind:0"
+                    else -> return null
+                }
+            }
+        if (index != null) outputIds[index] = stable
+        if (actual != null) {
+            aliases[actual] = stable
+            providerIds[stable] = actual
+        }
+        if (kind != null) itemKinds[stable] = kind
+        return stable
+    }
+
+    private fun missingItemIdentity(event: String): Nothing = throw java.io.IOException(
+        "Responses protocol: $event omitted item_id and output_index; output item cannot be identified safely")
 
     private fun parseTerminalResponse(payload: JsonObject): List<StreamChunk> {
         val response = payload["response"]?.jsonObject
@@ -234,7 +288,8 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         return TokenUsage(
             promptTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
             completionTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            totalTokens = usage["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+            totalTokens = usage["total_tokens"]?.jsonPrimitive?.intOrNull
+                ?: ((usage["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0) + (usage["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0)),
             cachedTokens = usage["input_tokens_details"]?.jsonObjectOrNull
                 ?.get("cached_tokens")?.jsonPrimitive?.intOrNull ?: 0,
         )

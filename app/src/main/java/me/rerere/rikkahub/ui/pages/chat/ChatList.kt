@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import kotlinx.coroutines.ensureActive
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.Idea01
@@ -18,6 +20,9 @@ import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Files02
 import androidx.compose.animation.AnimatedContent
+import androidx.activity.compose.LocalActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.fadeIn
@@ -59,7 +64,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalFloatingToolbar
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -128,7 +132,6 @@ import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.richtext.preloadMarkdownContents
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.ListSelectableItem
-import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.components.ui.Tooltip
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.ui.modifier.shimmer
@@ -142,8 +145,8 @@ private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ImageGenerationLoadingKey = "ImageGenerationLoading"
 private const val ScrollBottomKey = "ScrollBottomKey"
-private const val HISTORY_PRELOAD_BEFORE_COUNT = 3
-private const val HISTORY_PRELOAD_AFTER_COUNT = 1
+private const val HISTORY_PRELOAD_BEFORE_COUNT = 2
+private const val HISTORY_PRELOAD_AFTER_COUNT = 2
 private const val HISTORY_PRELOAD_CHAR_BUDGET = 256 * 1024
 private const val STREAMING_SCROLL_INTERVAL_MS = 96L
 
@@ -357,7 +360,9 @@ private fun ChatListNormal(
     var isRecentScroll by remember { mutableStateOf(false) }
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
-    val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val activity = LocalActivity.current as? me.rerere.rikkahub.RouteActivity
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentDisplaySetting by rememberUpdatedState(settings.displaySetting)
     val previewReturn = LocalChatPreviewReturn.current
     val allowAutomaticScroll = previewReturn?.anchor == null && previewReturn?.restoring != true &&
         !me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible.current
@@ -377,12 +382,14 @@ private fun ChatListNormal(
             }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(activity, lifecycleOwner, state, scope) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
-            if (settings.displaySetting.enableVolumeKeyScroll) {
+            if (currentDisplaySetting.enableVolumeKeyScroll && allowAutomaticScrollUpdated &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            ) {
                 val layout = state.layoutInfo
                 val scrollAmount = (layout.viewportSize.height - layout.afterContentPadding).coerceAtLeast(0) *
-                    settings.displaySetting.volumeKeyScrollRatio
+                    currentDisplaySetting.volumeKeyScrollRatio
                 scope.launch { state.scrollBy(if (isVolumeUp) -scrollAmount else scrollAmount) }
                 true
             } else false
@@ -429,15 +436,12 @@ private fun ChatListNormal(
         !conversation.suggestionSession.paused && !conversation.suggestionSession.collapsed && !loading && !imageGenerationLoading && !captureProgress && !selecting &&
         conversation.suggestionSourceMessage() != null &&
         (hasCurrentSuggestions || conversation.suggestionSession.info?.error != null || suggestionGenerationState != me.rerere.rikkahub.service.SuggestionGenerationState.IDLE)
-    val layoutDirection = LocalLayoutDirection.current
     // The suggestion footer now reserves the composer inset itself. Do not count it twice.
-    val messageBottomInset = if (showSuggestions) 0.dp else innerPadding.calculateBottomPadding()
-    val messageOverlayPadding = PaddingValues(
-        start = innerPadding.calculateStartPadding(layoutDirection),
-        top = innerPadding.calculateTopPadding(),
-        end = innerPadding.calculateEndPadding(layoutDirection),
-        bottom = messageBottomInset,
-    )
+    val messageOverlayPadding = remember(innerPadding, showSuggestions) {
+        chatOverlayPadding(innerPadding, reserveComposer = !showSuggestions)
+    }
+    val messageContentPadding = remember(messageOverlayPadding) { chatMessagePadding(messageOverlayPadding) }
+    val composerPadding = remember(innerPadding) { chatComposerPadding(innerPadding) }
 
     LaunchedEffect(state, conversation.id) {
         snapshotFlow {
@@ -463,26 +467,31 @@ private fun ChatListNormal(
             .collectLatest { visibleRange ->
                 if (visibleRange == null) return@collectLatest
                 val nodes = conversationUpdated.messageNodes
-                val contents = historyPreloadIndices(
-                    firstVisibleIndex = visibleRange.first,
-                    lastVisibleIndex = visibleRange.second,
-                    messageCount = visibleRange.third,
-                ).flatMap { index ->
-                    nodes.getOrNull(index)
-                        ?.currentMessage
-                        ?.markdownPreloadContents(assistantUpdated)
-                        .orEmpty()
+                val assistantSnapshot = assistantUpdated
+                // Capture immutable UI state here; transforms and parsing belong to workers.
+                kotlinx.coroutines.withContext(me.rerere.rikkahub.ui.components.richtext.RichTextParsingDispatcher) {
+                    var remaining = HISTORY_PRELOAD_CHAR_BUDGET
+                    val contents = historyPreloadIndices(
+                        firstVisibleIndex = visibleRange.first,
+                        lastVisibleIndex = visibleRange.second,
+                        messageCount = visibleRange.third,
+                    ).flatMap { index ->
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        val message = nodes.getOrNull(index)?.currentMessage
+                        val size = message?.streamingVisibleTextLength() ?: 0
+                        if (size > remaining) emptyList() else {
+                            remaining -= size
+                            message?.markdownPreloadContents(assistantSnapshot).orEmpty()
+                        }
+                    }
+                    preloadMarkdownContents(contents, HISTORY_PRELOAD_CHAR_BUDGET)
                 }
-                preloadMarkdownContents(
-                    contents = contents,
-                    maxTotalChars = HISTORY_PRELOAD_CHAR_BUDGET,
-                )
             }
     }
 
     ChatSuggestionLayout(
         showSuggestions = showSuggestions,
-        bottomInset = innerPadding.calculateBottomPadding(),
+        bottomPadding = composerPadding,
         suggestions = {
             ChatSuggestions(
                 conversation = conversation,
@@ -566,13 +575,14 @@ private fun ChatListNormal(
         ChatFontProvider(displaySetting = settings.displaySetting) {
             LazyColumn(
                 state = state,
-                contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + messageBottomInset),
+                // Scroll under floating controls, while keeping the first item
+                // below their measured safe-area inset at the start of the list.
+                contentPadding = messageContentPadding,
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .hazeSource(state = hazeState)
-                    .padding(top = innerPadding.calculateTopPadding()),
+                    .hazeSource(state = hazeState),
             ) {
             if (
                 conversation.messageNodes.isEmpty() &&
@@ -670,7 +680,7 @@ private fun ChatListNormal(
 
             if (imageGenerationLoading) {
                 item(ImageGenerationLoadingKey, contentType = "ImageGenerationSkeleton") {
-                    ImageGenerationSkeleton()
+                    me.rerere.rikkahub.ui.components.message.ImageGenerationSkeleton()
                 }
             }
 
@@ -688,37 +698,7 @@ private fun ChatListNormal(
 
             if (loading) {
                 item(LoadingIndicatorKey) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        AnimatedVisibility(
-                            visible = processingStatus == null,
-                        ) {
-                            RabbitLoadingIndicator(
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                                Text(
-                                    text = processingStatus ?: "",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
+                    ChatGenerationStatus(processingStatus = processingStatus)
                 }
             }
 
@@ -836,37 +816,6 @@ private fun ChatListNormal(
             )
 
         }
-    }
-}
-
-@Composable
-private fun ImageGenerationSkeleton() {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.Start,
-    ) {
-        Text(
-            text = stringResource(R.string.chat_image_generating),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.82f)
-                .widthIn(max = 320.dp)
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
-                .shimmer(
-                    isLoading = true,
-                    // Keep the base surface visible and overlay a clearly visible
-                    // highlight band while the image request is running.
-                    shimmerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
-                    backgroundColor = Color.Transparent,
-                    durationMillis = 1_100,
-                ),
-        )
     }
 }
 
@@ -1090,9 +1039,9 @@ private fun BoxScope.MessageJumper(
             ) {
                 Icon(
                     imageVector = HugeIcons.ArrowUpDouble,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.prompt_page_position_top_of_chat),
                     modifier = Modifier
-                        .padding(4.dp)
+                        .padding(12.dp)
                 )
             }
             Surface(
@@ -1113,9 +1062,9 @@ private fun BoxScope.MessageJumper(
             ) {
                 Icon(
                     imageVector = HugeIcons.ArrowUp01,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.prompt_page_position_top_of_chat),
                     modifier = Modifier
-                        .padding(4.dp)
+                        .padding(12.dp)
                 )
             }
             Surface(
@@ -1131,9 +1080,9 @@ private fun BoxScope.MessageJumper(
             ) {
                 Icon(
                     imageVector = HugeIcons.ArrowDown01,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
                     modifier = Modifier
-                        .padding(4.dp)
+                        .padding(12.dp)
                 )
             }
             Surface(
@@ -1151,7 +1100,7 @@ private fun BoxScope.MessageJumper(
                     imageVector = HugeIcons.ArrowDownDouble,
                     contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
                     modifier = Modifier
-                        .padding(4.dp)
+                        .padding(12.dp)
                 )
             }
         }

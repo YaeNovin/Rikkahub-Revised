@@ -79,7 +79,7 @@ class GoogleGeminiOptionsRequestTest {
     }
 
     @Test
-    fun `does not send Gemini 3 options to older Gemini models`() {
+    fun `Gemini 25 receives supported assistant options without Gemini 3 media options`() {
         val body = buildRequest(
             modelId = "gemini-2.5-flash",
             options = GeminiGenerationOptions(
@@ -97,13 +97,13 @@ class GoogleGeminiOptionsRequestTest {
         assertTrue(generation.containsKey("temperature"))
         assertTrue(generation.containsKey("topP"))
         assertFalse(generation.containsKey("mediaResolution"))
-        assertFalse(generation.containsKey("seed"))
-        assertFalse(generation.containsKey("stopSequences"))
-        assertFalse(generation.containsKey("responseMimeType"))
-        assertFalse(generation.containsKey("responseJsonSchema"))
-        assertFalse(generation.containsKey("presencePenalty"))
-        assertFalse(generation.containsKey("frequencyPenalty"))
-        assertEquals(5, body["safetySettings"]!!.jsonArray.size)
+        assertEquals(42, generation["seed"]!!.jsonPrimitive.int)
+        assertTrue(generation.containsKey("stopSequences"))
+        assertEquals("application/json", generation["responseMimeType"]!!.jsonPrimitive.content)
+        assertTrue(generation.containsKey("responseJsonSchema"))
+        assertEquals(0.25f, generation["presencePenalty"]!!.jsonPrimitive.float)
+        assertEquals(0.5f, generation["frequencyPenalty"]!!.jsonPrimitive.float)
+        assertEquals(4, body["safetySettings"]!!.jsonArray.size)
     }
 
     @Test

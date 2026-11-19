@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,6 +58,7 @@ import kotlin.time.toJavaInstant
 fun UpdateCard(vm: ChatVM) {
     val state by vm.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val toaster = LocalToaster.current
 
     state.onError {
@@ -131,7 +134,7 @@ fun UpdateCard(vm: ChatVM) {
                 vm.updateChecker.downloadUpdate(context, item)
                 showDetail = false
                 toaster.show(
-                    context.getString(R.string.update_card_downloading),
+                    appResources.getString(R.string.update_card_downloading),
                     type = ToastType.Info,
                 )
             }

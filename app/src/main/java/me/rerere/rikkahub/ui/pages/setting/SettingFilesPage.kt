@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.Clean
@@ -77,6 +79,7 @@ fun SettingFilesPage(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val folders = remember { listOf(FileFolders.UPLOAD) }
 
     // 预先获取字符串资源
@@ -180,19 +183,19 @@ fun SettingFilesPage(
                                 filesManager.deleteFilesOlderThan(days!!)
                             }
                             val message = when {
-                                result.failedFiles > 0 -> context.getString(
+                                result.failedFiles > 0 -> appResources.getString(
                                     R.string.setting_files_page_clean_failed_toast,
                                     result.totalDeleted,
                                     result.failedFiles,
                                 )
 
                                 result.totalDeleted == 0 -> if (cleanAllFiles) {
-                                    context.getString(R.string.setting_files_page_clean_none_all_toast)
+                                    appResources.getString(R.string.setting_files_page_clean_none_all_toast)
                                 } else {
-                                    context.getString(R.string.setting_files_page_clean_none_toast, days)
+                                    appResources.getString(R.string.setting_files_page_clean_none_toast, days)
                                 }
 
-                                else -> context.getString(
+                                else -> appResources.getString(
                                     R.string.setting_files_page_cleaned_toast,
                                     result.totalDeleted,
                                     result.deletedChatFiles,

@@ -85,7 +85,7 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 }
                 .build()
 
-            Log.i(TAG, "search: $url")
+            // Network content is captured only by the private, opt-in diagnostic interceptor.
 
             val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
@@ -93,8 +93,8 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 val searchResponse = runCatching {
                     json.decodeFromString<SearXNGResponse>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println("SearXNG response body: $bodyRaw")
+                    // Failure propagates to the structured application diagnostics.
+                    // Raw network content is not written to stdout.
                     error("Failed to decode SearXNG response: ${it.message}")
                 }.getOrThrow()
 
@@ -112,7 +112,7 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 return@withContext Result.success(SearchResult(items = items))
             } else {
                 val errorBody = response.body?.string()
-                println("SearXNG API error: ${response.code} - $errorBody")
+                // Raw network content is not written to stdout.
                 error("SearXNG request failed with status ${response.code}")
             }
         }

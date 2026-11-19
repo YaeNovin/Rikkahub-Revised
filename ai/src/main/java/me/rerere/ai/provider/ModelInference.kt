@@ -7,6 +7,7 @@ package me.rerere.ai.provider
 fun inferModelTypeFromId(modelId: String): ModelType {
     val id = modelId.substringAfterLast('/').trim().lowercase()
     if (id.isEmpty()) return ModelType.CHAT
+    if (isDecisionModelId(id)) return ModelType.DECISION
 
     val tokens = id.split(MODEL_TOKEN_SEPARATOR).filter(String::isNotEmpty).toSet()
     if (
@@ -48,6 +49,7 @@ private val IMAGE_TOKEN = Regex("(?:^|[-_./])image(?:$|[-_./])")
 private val VIDEO_TOKEN = Regex("(?:^|[-_./])video(?:$|[-_./])")
 private val EMBEDDING_MODEL_TOKENS = setOf("bge", "e5", "gte")
 private val IMAGE_MODEL_MARKERS = listOf(
+    "tt-image",
     "gpt-image",
     "dall-e",
     "imagen",

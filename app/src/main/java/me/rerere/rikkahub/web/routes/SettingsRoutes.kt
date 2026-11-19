@@ -24,7 +24,8 @@ import me.rerere.rikkahub.web.dto.UpdateSearchServiceRequest
 import java.util.Locale
 
 fun Route.settingsRoutes(
-    settingsStore: SettingsStore
+    settingsStore: SettingsStore,
+    sharedStore: SettingsStore = settingsStore,
 ) {
     route("/settings") {
         post("/assistant") {
@@ -141,7 +142,7 @@ fun Route.settingsRoutes(
         post("/search/service") {
             val request = call.receive<UpdateSearchServiceRequest>()
 
-            settingsStore.update { settings ->
+            sharedStore.update { settings ->
                 if (settings.searchServices.isEmpty()) {
                     throw BadRequestException("No search services configured")
                 }
@@ -158,7 +159,7 @@ fun Route.settingsRoutes(
             val modelId = request.modelId.toUuid("modelId")
             val targetTool = parseBuiltInTool(request.tool)
 
-            settingsStore.update { settings ->
+            sharedStore.update { settings ->
                 val model = settings.findModelById(modelId)
                     ?: throw NotFoundException("Model not found")
                 if (model.type != ModelType.CHAT) {

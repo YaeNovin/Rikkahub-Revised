@@ -380,6 +380,7 @@ function ChatInputInner({
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key !== "Enter") return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (isGenerating) return;
       if (event.nativeEvent.isComposing) return;
 

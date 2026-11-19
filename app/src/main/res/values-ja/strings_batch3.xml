@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="setting_advanced_appearance_preview_background">全画面プレビューのグローバル背景</string>
+  <string name="setting_advanced_appearance_preview_background_desc">全画面図表でグローバル背景の不透明度、ぼかし、ページスタイルを使用します。不透明なページスタイルでは背景が隠れます。無効にするとテーマ背景を使用します。</string>
+  <string name="webview_preview_background_enable">グローバルプレビュー背景を有効化</string>
+  <string name="webview_preview_background_disable">グローバルプレビュー背景を無効化</string>
+  <string name="assistant_page_background_blur">背景のぼかし</string>
+  <string name="assistant_page_background_blur_desc">このアシスタントの背景画像に調整可能なガウスぼかしを適用します</string>
+  <string name="assistant_page_background_blur_off">ぼかし: オフ</string>
+  <string name="assistant_page_background_blur_value">ぼかし: %1$d dp</string>
+  <string name="assistant_page_background_global_override_title">アシスタント背景は無効です</string>
+  <string name="assistant_page_background_global_override_desc">グローバル背景がメインチャット画面を上書きしています。アシスタントの画像とグラデーションは保持されますが、グローバル上書きを解除するまで編集・表示できません。</string>
+  <string name="assistant_request_overview_title">リクエストの経路と範囲</string>
+  <string name="assistant_request_current_model">現在のモデル: %1$s</string>
+  <string name="assistant_request_no_model">未設定</string>
+  <string name="assistant_request_no_route">使用可能なリクエスト経路がありません。チャットモデルを設定するまで、カスタム値は保存されますが反映されません。</string>
+  <string name="assistant_request_scope_desc">アシスタントレベルの値はこのアシスタントのチャットリクエストだけに適用されます。モデルレベルの値は、そのモデルを使うバックグラウンド機能にも適用されます。</string>
+  <string name="assistant_request_priority_desc">順序: アプリの既定値 → アシスタント値 → モデル値。同じキーは後の値が優先され、JSON オブジェクトは再帰的に結合されます。</string>
+  <string name="assistant_request_diagnostics_title">設定チェック</string>
+  <string name="assistant_request_tools_title">一括設定</string>
+  <string name="assistant_request_import_desc">完全な JSON オブジェクトをトップレベルのカスタム本文フィールドとして読み込みます。同じキーは置き換えられます。</string>
+  <string name="assistant_request_import_json">JSON オブジェクトを読み込む</string>
+  <string name="assistant_request_import_invalid">有効な JSON オブジェクトを入力してください。配列とプリミティブのルート値は使用できません。</string>
+  <string name="assistant_request_official_templates">現在の公式 API 用テンプレート</string>
+  <string name="assistant_request_template_desc">テンプレートは選択したモデル、通信プロトコル、公式エンドポイントで絞り込まれます。確認して有効にするまで新しい項目は無効です。</string>
+  <string name="assistant_request_template_added">%1$s (追加済み)</string>
+  <string name="assistant_request_preview_title">有効なカスタム設定</string>
+  <string name="assistant_request_preview_desc">アシスタントとモデルの値を結合した後のプレビューです。無効な項目や無効化された項目は省略され、機密値はマスクされます。アプリが生成するリクエスト項目は表示されません。</string>
+  <string name="assistant_request_entry_enabled">有効</string>
+  <string name="assistant_request_unnamed_field">名前なしフィールド</string>
+  <string name="assistant_page_memory_context_sources">その他のコンテキストソース</string>
+  <string name="setting_advanced_appearance_performance_section">互換性とパフォーマンス</string>
+</resources>

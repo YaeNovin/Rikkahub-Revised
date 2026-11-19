@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -24,18 +25,21 @@ class HistoryVM(
     private val settingsStore: SettingsStore,
     private val chatService: ChatService,
 ) : ViewModel() {
+    private val pendingDeletions = PendingConversationDeletions()
     val assistant = settingsStore.settingsFlow
         .map { it.getCurrentAssistant() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val conversations = assistant.flatMapLatest { assistant ->
         conversationRepo.getConversationsOfAssistant(assistant?.id ?: Uuid.random())
+    }.combine(pendingDeletions.ids) { conversations, pending ->
+        conversations.filterNot { it.id in pending }
     }.catch {
         Log.e(TAG, "Error: ${it.message}")
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun deleteConversation(conversation: Conversation) {
-        viewModelScope.launch {
+    suspend fun deleteConversation(conversation: Conversation, confirmDeletion: suspend () -> Boolean) {
+        pendingDeletions.run(conversation.id, confirmDeletion) {
             conversationRepo.deleteConversation(conversation)
         }
     }
@@ -57,13 +61,4 @@ class HistoryVM(
     fun getPinnedConversations(): Flow<List<Conversation>> =
         conversationRepo.getPinnedConversations()
 
-    fun restoreConversation(conversation: Conversation) {
-        viewModelScope.launch {
-            conversationRepo.insertConversation(conversation)
-        }
-    }
-
-    suspend fun getFullConversation(conversationId: Uuid): Conversation? {
-        return conversationRepo.getConversationById(conversationId)
-    }
 }

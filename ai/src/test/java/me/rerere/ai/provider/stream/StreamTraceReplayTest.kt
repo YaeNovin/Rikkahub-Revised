@@ -422,6 +422,10 @@ class StreamTraceReplayTest {
         putJsonArray("annotations") {
             annotations.forEach { annotation ->
                 when (annotation) {
+                    is UIMessageAnnotation.GoogleSearchSuggestions -> add(buildJsonObject {
+                        put("type", "google_search_suggestions")
+                        put("html", annotation.html)
+                    })
                     is UIMessageAnnotation.UrlCitation -> add(buildJsonObject {
                         put("type", "url_citation")
                         put("title", annotation.title)

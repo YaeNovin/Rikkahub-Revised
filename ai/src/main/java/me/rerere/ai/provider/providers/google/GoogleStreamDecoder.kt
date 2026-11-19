@@ -56,8 +56,8 @@ internal class GoogleStreamDecoder(
             parseUsage(jsonData["usageMetadata"] as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
             val candidate = jsonData["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@buildList
             candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
-            val content = candidate["content"]?.jsonObject ?: return@buildList
-            val message = parseMessage(content, candidate["groundingMetadata"] as? JsonObject)
+            val content = candidate["content"] as? JsonObject ?: JsonObject(emptyMap())
+            val message = parseMessage(content, candidate)
             addAll(streamState.append(message, responseId))
         }
         return DecodeResult(chunks)
@@ -87,10 +87,10 @@ internal class GoogleStreamDecoder(
         return streamState.finish(finishReason, responseId, model)
     }
 
-    private fun parseMessage(content: JsonObject, groundingMetadata: JsonObject?): UIMessage = UIMessage(
+    private fun parseMessage(content: JsonObject, candidate: JsonObject): UIMessage = UIMessage(
         role = MessageRole.ASSISTANT,
         parts = content["parts"]?.jsonArray?.mapNotNull { parsePart(it.jsonObject) }.orEmpty(),
-        annotations = parseAnnotations(groundingMetadata),
+        annotations = parseGoogleGroundingAnnotations(candidate),
     )
 
     private fun parsePart(part: JsonObject): UIMessagePart? = when {
@@ -181,14 +181,6 @@ internal class GoogleStreamDecoder(
         }
         else -> error("unknown message part type: $part")
     }
-
-    private fun parseAnnotations(metadata: JsonObject?): List<UIMessageAnnotation> =
-        metadata?.get("groundingChunks")?.jsonArray.orEmpty().mapNotNull { chunk ->
-            val web = chunk.jsonObject["web"]?.jsonObject ?: return@mapNotNull null
-            val url = web["uri"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val title = web["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            UIMessageAnnotation.UrlCitation(title, url)
-        }
 
     private fun parseUsage(usage: JsonObject?): TokenUsage? {
         if (usage == null) return null

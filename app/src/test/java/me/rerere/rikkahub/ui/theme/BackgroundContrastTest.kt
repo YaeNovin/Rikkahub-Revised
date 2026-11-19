@@ -55,22 +55,21 @@ class BackgroundContrastTest {
     }
 
     @Test
-    fun `black text gets a local white readability halo`() {
-        val halo = backgroundReadabilityHaloColor(Color.Black)
-
-        assertEquals(Color.White, halo)
-        assertEquals(21f, wcagContrastRatio(Color.Black, halo), 0.001f)
+    fun `normal typography gains ten percent weight without shadow or font size changes`() {
+        val source = androidx.compose.ui.text.TextStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+            fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp))
+        val result = source.withReadabilityWeight()
+        assertEquals(440, result.fontWeight!!.weight)
+        assertEquals(source.fontSize, result.fontSize)
+        assertEquals(null, result.shadow)
     }
 
     @Test
-    fun `white text gets a local black readability halo`() {
-        val shadow = backgroundReadabilityShadow(Color.White)
-
-        assertEquals(Color.Black.red, shadow.color.red, 0.0001f)
-        assertEquals(Color.Black.green, shadow.color.green, 0.0001f)
-        assertEquals(Color.Black.blue, shadow.color.blue, 0.0001f)
-        assertTrue(shadow.color.alpha > 0.9f)
-        assertTrue(shadow.blurRadius > 0f)
+    fun `bold typography preserves hierarchy and caps maximum weight`() {
+        assertEquals(770, androidx.compose.ui.text.TextStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            .withReadabilityWeight().fontWeight!!.weight)
+        assertEquals(1000, androidx.compose.ui.text.TextStyle(fontWeight = androidx.compose.ui.text.font.FontWeight(1000))
+            .withReadabilityWeight().fontWeight!!.weight)
     }
 
     @Test

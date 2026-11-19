@@ -234,7 +234,7 @@ internal class WorkspaceTerminalViewClient(
 
     override fun onSingleTapUp(e: MotionEvent) {
         if (openUrlAtTap(e)) return
-        focusAndShowKeyboard()
+        terminalView?.performClick()
     }
 
     /**

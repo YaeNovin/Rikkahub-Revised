@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,7 +64,14 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import org.koin.compose.koinInject
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private const val MAX_AVATAR_IMPORT_BYTES = 32L * 1024 * 1024
 
 @Composable
 fun TextAvatar(
@@ -106,6 +114,7 @@ fun UIAvatar(
     val filesManager: FilesManager = koinInject()
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
     var showPickOption by remember { mutableStateOf(false) }
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
@@ -147,16 +156,28 @@ fun UIAvatar(
     ) { uri: Uri? ->
         uri?.let { selectedUri ->
             val tempFile = File(context.appTempFolder, "avatar_pick_${System.currentTimeMillis()}.jpg")
-            runCatching {
-                context.contentResolver.openInputStream(selectedUri)?.use { input ->
-                    tempFile.outputStream().use { output -> input.copyTo(output) }
-                } ?: error("Failed to open input stream for $selectedUri")
-                preCropTempFile?.delete()
-                preCropTempFile = tempFile
-                launchImageCrop(tempFile.toUri())
-            }.onFailure {
-                tempFile.delete()
-                launchImageCrop(selectedUri)
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val inputStream = requireNotNull(
+                            context.contentResolver.openInputStream(selectedUri)
+                        ) { "Failed to open input stream for $selectedUri" }
+                        inputStream.use { input ->
+                            tempFile.outputStream().use { output ->
+                                copyAvatarWithLimit(input, output)
+                            }
+                        }
+                    }
+                    preCropTempFile?.delete()
+                    preCropTempFile = tempFile
+                    launchImageCrop(tempFile.toUri())
+                }.onFailure { error ->
+                    withContext(Dispatchers.IO) { tempFile.delete() }
+                    toaster.show(
+                        context.formatUserFacingError(error),
+                        type = ToastType.Error,
+                    )
+                }
             }
         }
     }
@@ -353,6 +374,18 @@ fun UIAvatar(
                 }
             }
         )
+    }
+}
+
+private fun copyAvatarWithLimit(input: InputStream, output: OutputStream) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var copied = 0L
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) return
+        copied += count
+        require(copied <= MAX_AVATAR_IMPORT_BYTES) { "Selected image is too large" }
+        output.write(buffer, 0, count)
     }
 }
 

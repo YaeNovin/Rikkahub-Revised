@@ -81,7 +81,7 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
                 }
             }
 
-            Log.i(TAG, "search: $body")
+            // Network content is captured only by the private, opt-in diagnostic interceptor.
 
             val request = Request.Builder()
                 .url(PERPLEXITY_ENDPOINT)

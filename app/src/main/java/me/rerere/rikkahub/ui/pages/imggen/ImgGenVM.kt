@@ -152,6 +152,7 @@ class ImgGenVM(
             sequentialMaxImages = sequentialMaxImages.value,
             promptOptimizationMode = promptOptimizationMode.value,
             geminiOptions = geminiImageOptions.value,
+            gptImage26Options = gptImage26Options.value,
         )
 
     private val _prompt = MutableStateFlow("")
@@ -168,6 +169,8 @@ class ImgGenVM(
 
     private val _outputFormat = MutableStateFlow<String?>(null)
     val outputFormat: StateFlow<String?> = _outputFormat
+    private val _gptImage26Options = MutableStateFlow(me.rerere.ai.provider.GptImage26Options())
+    val gptImage26Options: StateFlow<me.rerere.ai.provider.GptImage26Options> = _gptImage26Options
 
     private val _background = MutableStateFlow<String?>(null)
     val background: StateFlow<String?> = _background
@@ -567,6 +570,7 @@ class ImgGenVM(
         _size.value = state.size
         _quality.value = state.quality
         _outputFormat.value = state.outputFormat
+        _gptImage26Options.value = state.gptImage26Options
         _background.value = state.background
         _outputCompression.value = state.outputCompression.coerceIn(0, 100)
         _resolution.value = state.resolution

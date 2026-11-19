@@ -1,5 +1,10 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
+import me.rerere.rikkahub.ui.hooks.currentAppLocale
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -48,6 +53,7 @@ import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.PromptVariableReference
 import me.rerere.rikkahub.utils.plus
 import me.rerere.rikkahub.utils.applyPlaceholders
+import me.rerere.rikkahub.utils.containsPromptVariable
 
 @Composable
 internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPadding: PaddingValues) {
@@ -56,6 +62,17 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
         contentPadding = contentPadding + PaddingValues(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        item {
+            PromptSettingItem(
+                title = "决策模型评估提示词",
+                variableScope = null,
+                promptValue = settings.decisionPrompt,
+                defaultPrompt = me.rerere.ai.provider.DEFAULT_SUGGESTION_DECISION_PROMPT,
+                settings = settings,
+                onSavePrompt = { prompt -> vm.updateSettings { it.copy(decisionPrompt = prompt) } },
+                guidance = "作为建议评分标准直接发送。对话、目标和候选建议单独提供，无需填入变量。",
+            )
+        }
         item {
             PromptSettingItem(
                 title = stringResource(R.string.setting_model_page_prompt_translation),
@@ -121,6 +138,7 @@ private fun PromptSettingItem(
     onSavePrompt: (String) -> Unit,
     reasoningLevel: ReasoningLevel? = null,
     onUpdateReasoningLevel: ((ReasoningLevel) -> Unit)? = null,
+    guidance: String? = null,
 ) {
     var showEditor by remember { mutableStateOf(false) }
 
@@ -130,7 +148,9 @@ private fun PromptSettingItem(
             headlineContent = { Text(stringResource(R.string.setting_model_page_prompt)) },
             supportingContent = {
                 Text(
-                    if (variableScope == null) {
+                    if (guidance != null) {
+                        guidance
+                    } else if (variableScope == null) {
                         stringResource(R.string.setting_model_page_ocr_prompt_vars)
                     } else {
                         stringResource(
@@ -173,7 +193,7 @@ private fun PromptSettingItem(
         val requiredVariable = variableScope.requiredContentVariable()
         val missingRequiredVariable = requiredVariable != null &&
             !editorValue.text.containsPromptVariable(requiredVariable)
-        val preview = expandedPromptPreview(
+        val preview = if (guidance != null) editorValue.text else expandedPromptPreview(
             prompt = editorValue.text,
             scope = variableScope,
             settings = settings,
@@ -185,7 +205,8 @@ private fun PromptSettingItem(
                 modifier = Modifier
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 16.dp)
-                    .imePadding(),
+                    .imePadding()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
@@ -194,7 +215,7 @@ private fun PromptSettingItem(
                 )
                 if (variableScope == null) {
                     Text(
-                        text = stringResource(R.string.setting_model_page_ocr_prompt_no_variables),
+                        text = guidance ?: stringResource(R.string.setting_model_page_ocr_prompt_no_variables),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -282,9 +303,6 @@ private fun PromptVariableScope?.requiredContentVariable(): String? = when (this
     else -> null
 }
 
-private fun String.containsPromptVariable(key: String): Boolean =
-    Regex("\\{\\{?\\s*${Regex.escape(key)}\\s*}}?", RegexOption.IGNORE_CASE).containsMatchIn(this)
-
 @Composable
 private fun expandedPromptPreview(
     prompt: String,
@@ -305,7 +323,7 @@ private fun expandedPromptPreview(
     ).resolvePromptVariables().toMutableMap().apply {
         put("content", stringResource(R.string.setting_model_page_prompt_preview_sample))
         put("source_text", stringResource(R.string.setting_model_page_prompt_preview_sample))
-        put("target_lang", java.util.Locale.getDefault().displayName)
+        put("target_lang", currentAppLocale().let { it.getDisplayName(it) })
         put("target_tokens", "1024")
         put("additional_context", "")
         put("max_title_length", settings.titleMaxLength.toString())

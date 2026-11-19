@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.stats
 
+import me.rerere.rikkahub.ui.hooks.rememberAppDateTimeFormatter
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +60,6 @@ import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
@@ -229,7 +230,7 @@ private fun GithubActivityHeatmap(
     val activeCounts = visibleDates.mapNotNull { date -> activityPerDay[date]?.takeIf { it > 0 } }.sorted()
     val thresholds = heatmapThresholds(activeCounts)
     val activeDays = activeCounts.size
-    val formatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+    val formatter = rememberAppDateTimeFormatter("MMM d")
 
     Text(
         text = stringResource(

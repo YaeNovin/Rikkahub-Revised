@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.provider.parameterModelId
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -29,10 +30,10 @@ import okhttp3.HttpUrl
 
 internal fun ProviderSetting.OpenAI.supportsArkSeedance(model: Model): Boolean =
     baseUrl.isVolcengineArkBaseUrl() && model.type == ModelType.VIDEO &&
-        (model.modelId.isSeedanceVideoModelId() || model.modelId.isArkEndpointId())
+        (model.parameterModelId().isSeedanceVideoModelId() || model.modelId.isArkEndpointId())
 
 internal fun seedanceVideoGenerationConstraints(model: Model): VideoGenerationConstraints {
-    val normalized = model.modelId.lowercase()
+    val normalized = model.parameterModelId().lowercase()
     val isSeedance15Pro = normalized.contains("seedance-1-5-pro") ||
         normalized.contains("seedance-1.5-pro") || normalized.contains("seedance_1_5_pro")
     val isSeedance2 = Regex("seedance[-_.]?2(?:[-_.]|$)").containsMatchIn(normalized)

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.GrokResponseFormat
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.util.json
 
@@ -17,7 +18,7 @@ internal fun JsonObjectBuilder.applyGrokChatOptions(
     params: TextGenerationParams,
     hasFunctionTools: Boolean,
 ) {
-    val support = resolveGrokModelParameterSupport(params.model.modelId)
+    val support = resolveGrokModelParameterSupport(params.model.parameterModelId())
     if (!support.available) return
     val options = params.grokOptions
     val isReasoningModel = support.reasoningModel || params.model.supportsReasoningCapability()
@@ -51,7 +52,7 @@ internal fun JsonObjectBuilder.applyGrokResponseOptions(
     params: TextGenerationParams,
     hasAnyTools: Boolean,
 ) {
-    val support = resolveGrokModelParameterSupport(params.model.modelId)
+    val support = resolveGrokModelParameterSupport(params.model.parameterModelId())
     if (!support.available) return
     val options = params.grokOptions
 

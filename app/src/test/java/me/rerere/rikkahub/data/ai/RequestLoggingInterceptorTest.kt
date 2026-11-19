@@ -22,6 +22,29 @@ class RequestLoggingInterceptorTest {
     )
 
     @Test
+    fun `application interceptor captures DNS failures without a network exchange`() {
+        me.rerere.common.android.Logging.clear()
+        try {
+            val client = okhttp3.OkHttpClient.Builder()
+                .proxy(java.net.Proxy.NO_PROXY)
+                .dns { throw java.net.UnknownHostException("Synthetic DNS failure") }
+                .addInterceptor(RequestLoggingInterceptor())
+                .build()
+            val request = okhttp3.Request.Builder().url("https://fixture.invalid/v1/responses")
+                .tag(ProviderRequestDiagnostics::class.java, diagnostics)
+                .build()
+            org.junit.Assert.assertThrows(java.net.UnknownHostException::class.java) {
+                client.newCall(request).execute().close()
+            }
+            val entry = me.rerere.common.android.Logging.getProviderRequestLogs().single()
+            assertNull(entry.responseCode)
+            assertEquals("failed", entry.durationPhase)
+            assertTrue(entry.error.orEmpty().contains("Synthetic DNS failure"))
+            assertEquals(me.rerere.common.android.DiagnosticOutcome.FAILED, entry.diagnostic?.outcome)
+        } finally { me.rerere.common.android.Logging.clear() }
+    }
+
+    @Test
     fun `redacts sensitive request headers and URL query parameters`() {
         val headers = Headers.Builder()
             .add("x-goog-api-key", "secret-google-key")
@@ -40,7 +63,7 @@ class RequestLoggingInterceptorTest {
         assertEquals("[REDACTED]", headers["X-Custom-Credential"])
         assertFalse(url.contains("secret-query"))
         assertTrue(url.contains("key=%5BREDACTED%5D"))
-        assertTrue(url.contains("alt=sse"))
+        assertTrue(url.contains("alt=%5BREDACTED%5D"))
     }
 
     @Test

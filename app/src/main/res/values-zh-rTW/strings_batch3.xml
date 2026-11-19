@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="setting_advanced_appearance_preview_background">全螢幕預覽的全域背景</string>
+  <string name="setting_advanced_appearance_preview_background_desc">在全螢幕圖表中使用全域背景及其不透明度、模糊和頁面樣式。不透明頁面樣式會隱藏背景。停用後使用主題背景。</string>
+  <string name="webview_preview_background_enable">啟用全域預覽背景</string>
+  <string name="webview_preview_background_disable">停用全域預覽背景</string>
+  <string name="assistant_page_background_blur">背景模糊</string>
+  <string name="assistant_page_background_blur_desc">對此助手的背景圖片套用可調整的高斯模糊</string>
+  <string name="assistant_page_background_blur_off">模糊：關閉</string>
+  <string name="assistant_page_background_blur_value">模糊：%1$d dp</string>
+  <string name="assistant_page_background_global_override_title">助手背景已停用</string>
+  <string name="assistant_page_background_global_override_desc">全域背景覆蓋了主要聊天畫面。助手圖片和漸層會保留，但在關閉全域覆蓋前無法編輯或顯示。</string>
+  <string name="assistant_request_overview_title">請求路由與範圍</string>
+  <string name="assistant_request_current_model">目前模型：%1$s</string>
+  <string name="assistant_request_no_model">尚未設定</string>
+  <string name="assistant_request_no_route">找不到可用的請求路由。在設定聊天模型前，自訂值會儲存但不會生效。</string>
+  <string name="assistant_request_scope_desc">助手層級值只套用於此助手的聊天請求。模型層級值也會套用於使用該模型的背景功能。</string>
+  <string name="assistant_request_priority_desc">順序：應用程式預設值 → 助手值 → 模型值。相同索引鍵以後者為準；JSON 物件會遞迴合併。</string>
+  <string name="assistant_request_diagnostics_title">設定檢查</string>
+  <string name="assistant_request_tools_title">批次設定</string>
+  <string name="assistant_request_import_desc">將完整 JSON 物件匯入為頂層自訂本文欄位。相同索引鍵的現有欄位會被取代。</string>
+  <string name="assistant_request_import_json">匯入 JSON 物件</string>
+  <string name="assistant_request_import_invalid">請輸入有效的 JSON 物件。不支援陣列和基本型別根值。</string>
+  <string name="assistant_request_official_templates">目前官方 API 的範本</string>
+  <string name="assistant_request_template_desc">範本會依所選模型、通訊協定和官方端點篩選。檢閱並啟用前，新項目會保持停用。</string>
+  <string name="assistant_request_template_added">%1$s（已新增）</string>
+  <string name="assistant_request_preview_title">生效的自訂設定</string>
+  <string name="assistant_request_preview_desc">助手與模型值合併後的預覽。無效或停用的項目會省略，敏感值會遮罩。應用程式產生的請求欄位不會顯示。</string>
+  <string name="assistant_request_entry_enabled">已啟用</string>
+  <string name="assistant_request_unnamed_field">未命名欄位</string>
+  <string name="assistant_page_memory_context_sources">其他上下文來源</string>
+  <string name="setting_advanced_appearance_performance_section">相容性與效能</string>
+</resources>

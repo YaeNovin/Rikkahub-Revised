@@ -50,29 +50,8 @@ fun SimpleHtmlBlock(
     html: String,
     modifier: Modifier = Modifier
 ) {
-    val parseErrorMessage = stringResource(R.string.error_message_html_processing)
-    val document = remember(html, parseErrorMessage) {
-        runCatching { Jsoup.parse(protectRawSvg(html)) }.getOrElse {
-            Jsoup.parse("<p>${parseErrorMessage.escapeHtml()}</p>")
-        }
-    }
-
-    val uriHandler = LocalUriHandler.current
-
-    Column(modifier = modifier) {
-        document.body().childNodes().forEach { node ->
-            RenderNode(
-                node = node,
-                onLinkClick = { url ->
-                    try {
-                        uriHandler.openUri(url)
-                    } catch (e: Exception) {
-                        // Handle link click error silently
-                    }
-                }
-            )
-        }
-    }
+    // This public entry receives author HTML, not Markdown-generated trusted tags.
+    HighlightCodeBlock(code = html, language = "html", modifier = modifier)
 }
 
 @Composable
@@ -94,7 +73,7 @@ private fun RenderNode(
 
         is Element -> {
             rawSvgSource(node)?.let { svg ->
-                HighlightCodeBlock(svg.source, "svg", Modifier.fillMaxWidth(), completeCodeBlock = svg.complete)
+                HighlightCodeBlock(svg.source, svg.language, Modifier.fillMaxWidth(), completeCodeBlock = svg.complete)
                 return
             }
             if (node.normalName() in setOf("p", "a", "span", "strong", "b", "em", "i") && node.containsInlineImage()) {
@@ -110,7 +89,7 @@ private fun RenderNode(
                         val style = node.attr("style")
                         val inlineStyle = if (style.isNotEmpty()) parseInlineStyle(style) else null
 
-                        Text(
+                        LinkText(
                             text = annotatedString,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = inlineStyle?.color ?: LocalContentColor.current,
@@ -145,7 +124,7 @@ private fun RenderNode(
                         val style = node.attr("style")
                         val inlineStyle = if (style.isNotEmpty()) parseInlineStyle(style) else null
 
-                        Text(
+                        LinkText(
                             text = annotatedString,
                             style = textStyle.copy(
                                 color = inlineStyle?.color ?: LocalContentColor.current,
@@ -196,7 +175,7 @@ private fun RenderNode(
                         val style = node.attr("style")
                         val inlineStyle = if (style.isNotEmpty()) parseInlineStyle(style) else null
 
-                        Text(
+                        LinkText(
                             text = annotatedString,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = inlineStyle?.color ?: LocalContentColor.current,
@@ -230,7 +209,7 @@ private fun RenderList(
 
                     val annotatedString = buildAnnotatedStringFromElement(item, onLinkClick)
                     if (annotatedString.text.isNotBlank()) {
-                        Text(
+                        LinkText(
                             text = annotatedString,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = LocalContentColor.current
@@ -279,7 +258,7 @@ private fun RenderDetails(
                 AnnotatedString(summaryText)
             }
 
-            Text(
+            LinkText(
                 text = summaryAnnotatedString,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = LocalContentColor.current,
@@ -333,7 +312,7 @@ private fun RenderImage(
     }
 }
 
-private fun buildAnnotatedStringFromElement(
+internal fun buildAnnotatedStringFromElement(
     element: Element,
     onLinkClick: (String) -> Unit
 ): AnnotatedString {
@@ -398,18 +377,17 @@ private fun processElementNodes(
                                 start,
                                 builder.length
                             )
-                            builder.addStringAnnotation(
-                                tag = "URL",
-                                annotation = href,
+                            builder.addLink(
+                                url = androidx.compose.ui.text.LinkAnnotation.Url(href),
                                 start = start,
                                 end = builder.length
                             )
                         }
                     }
 
-                    "code" -> {
+                    "code", "kbd", "samp" -> {
                         val start = builder.length
-                        processElementNodes(node, builder, onLinkClick)
+                        builder.withChatLiteral { processElementNodes(node, this, onLinkClick) }
                         builder.addStyle(
                             SpanStyle(
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
@@ -669,7 +647,7 @@ private fun RenderTable(
             cells.add {
                 val annotatedString = buildAnnotatedStringFromElement(cell, onLinkClick)
                 if (annotatedString.text.isNotBlank()) {
-                    Text(
+                    LinkText(
                         text = annotatedString,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             color = LocalContentColor.current

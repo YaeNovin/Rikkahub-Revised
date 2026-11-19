@@ -22,6 +22,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.computeAIIconByName
+import me.rerere.rikkahub.utils.computeAIIcon
+import me.rerere.ai.provider.Model
 import me.rerere.rikkahub.utils.toCssHex
 
 @Composable
@@ -61,6 +63,19 @@ private fun AIIcon(
             modifier = Modifier.padding(4.dp)
         )
     }
+}
+
+@Composable
+fun AutoAIIcon(
+    model: Model,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+    color: Color = MaterialTheme.colorScheme.secondaryContainer,
+) {
+    val path = remember(model.modelId, model.displayName) { computeAIIcon(model) }
+    val name = model.displayName.ifBlank { model.modelId }
+    if (path == null) TextAvatar(text = name, modifier = modifier, loading = loading, color = color)
+    else AIIcon(path, name, modifier, loading, color)
 }
 
 @Composable

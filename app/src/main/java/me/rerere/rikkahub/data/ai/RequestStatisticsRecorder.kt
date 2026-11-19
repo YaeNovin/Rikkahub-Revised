@@ -47,6 +47,9 @@ class RequestStatisticsRecorder(
         totalDurationNanos: Long,
         completedAt: Long,
     ) {
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            me.rerere.common.android.Logging.completeModelRequest(requestId, firstTokenNanos, totalDurationNanos)
+        }
         runCatching {
             requestStatDAO.attachUsage(
                 requestId = requestId,
@@ -68,8 +71,12 @@ class RequestStatisticsRecorder(
         firstTokenNanos: Long?,
         totalDurationNanos: Long,
         completedAt: Long,
+        canceled: Boolean = false,
+        failure: String? = null,
     ) {
-        withContext(NonCancellable) {
+        withContext(NonCancellable + kotlinx.coroutines.Dispatchers.IO) {
+            me.rerere.common.android.Logging.completeModelRequest(requestId, firstTokenNanos, totalDurationNanos,
+                failed = !canceled, canceled = canceled, failure = failure)
             runCatching {
                 requestStatDAO.completeAttempt(
                     requestId = requestId,

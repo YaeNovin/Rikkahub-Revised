@@ -30,7 +30,9 @@ data class AdvancedAppearanceCapabilities(
 
     fun supportsSurfaceStyle(style: BackgroundSurfaceStyle): Boolean =
         style == BackgroundSurfaceStyle.OPAQUE ||
+            style == BackgroundSurfaceStyle.MICA ||
             style == BackgroundSurfaceStyle.TRANSLUCENT ||
+            style == BackgroundSurfaceStyle.ACRYLIC ||
             supportsRealtimeBlur
 
     fun supportsBubbleStyle(style: ChatBubbleStyle): Boolean =

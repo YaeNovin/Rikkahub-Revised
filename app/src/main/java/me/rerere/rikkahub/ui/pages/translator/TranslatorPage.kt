@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.translator
 
+import me.rerere.rikkahub.ui.hooks.currentAppLocale
+
 import android.content.ClipData
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Clipboard
@@ -247,7 +249,7 @@ private fun LanguageSelector(
             Locale.GERMAN -> stringResource(R.string.language_german)
             Locale.ITALIAN -> stringResource(R.string.language_italian)
             Locale("es", "ES") -> stringResource(R.string.language_spanish)
-            else -> locale.getDisplayLanguage(Locale.getDefault())
+            else -> locale.getDisplayLanguage(currentAppLocale())
         }
     }
 

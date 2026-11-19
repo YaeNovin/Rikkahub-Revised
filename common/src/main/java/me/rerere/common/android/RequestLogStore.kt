@@ -16,6 +16,8 @@ internal class RequestLogStore(
     private val maxEntries: Int = 500,
     private val maxBytes: Long = 32L * 1024 * 1024,
     private val onFailure: (Exception) -> Unit = {},
+    private val acceptEvents: Boolean = false,
+    private val retentionMillis: Long? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private data class Record(val entry: LogEntry, val bytes: Long)
@@ -24,19 +26,33 @@ internal class RequestLogStore(
 
     @Synchronized
     fun read(): List<LogEntry> {
+        return summaries().mapNotNull { detail(it.id) }
+    }
+
+    @Synchronized
+    fun summaries(): List<LogEntry> {
         load()
         return records.values.map { it.entry }.sortedByDescending { it.timestamp }
     }
 
     @Synchronized
+    fun detail(id: Uuid): LogEntry? {
+        load()
+        if (id !in records) return null
+        return try { decode(File(directory, "$id.json")) } catch (error: Exception) { onFailure(error); null }
+    }
+
+    @Synchronized
     fun save(entry: LogEntry) {
-        require(entry is LogEntry.RequestLog || entry is LogEntry.ProviderRequestLog)
+        require(acceptEvents || entry is LogEntry.RequestLog || entry is LogEntry.ProviderRequestLog)
         load()
         try {
             val bytes = json.encodeToString<LogEntry>(entry).toByteArray(Charsets.UTF_8)
             require(bytes.size <= maxBytes) { "Request log exceeds storage limit" }
             atomicWrite(File(directory, "${entry.id}.json"), bytes)
-            records[entry.id] = Record(entry, bytes.size.toLong())
+            val summary = entry.summaryOnly()
+            records[entry.id] = Record(summary, bytes.size.toLong())
+            atomicWrite(File(directory, "${entry.id}.index"), json.encodeToString<LogEntry>(summary).toByteArray(Charsets.UTF_8))
             pruneDisk()
         } catch (error: Exception) { onFailure(error) }
     }
@@ -45,7 +61,7 @@ internal class RequestLogStore(
     fun clear() {
         // Never recursively remove a directory. Only files owned by this store are deleted.
         try {
-            directory.listFiles().orEmpty().filter { isRecordFile(it) || isTemporaryFile(it) }.forEach {
+            directory.listFiles().orEmpty().filter { isRecordFile(it) || isTemporaryFile(it) || isIndexFile(it) }.forEach {
                 check(it.delete() || !it.exists()) { "Unable to clear request log" }
             }
             records.clear()
@@ -56,6 +72,7 @@ internal class RequestLogStore(
     private fun load() {
         if (loaded) return
         loaded = true
+        directory.listFiles().orEmpty().filter { isTemporaryFile(it) }.forEach { it.delete() }
         try { pruneDisk() } catch (error: Exception) { onFailure(error) }
         // Limit hydration even if a previous version left too many files.
         var loadedBytes = 0L
@@ -64,8 +81,13 @@ internal class RequestLogStore(
                 try {
                     val length = file.length()
                     if (records.size >= maxEntries || loadedBytes + length > maxBytes) return@forEach
-                    val entry = json.decodeFromString<LogEntry>(file.readText(Charsets.UTF_8))
-                    if ((entry is LogEntry.RequestLog || entry is LogEntry.ProviderRequestLog) && file.name == "${entry.id}.json") {
+                    val index = File(directory, "${file.nameWithoutExtension}.index")
+                    val entry = if (index.isFile && index.lastModified() >= file.lastModified()) {
+                        runCatching { decode(index).summaryOnly() }.getOrElse { decode(file).summaryOnly() }
+                    } else decode(file).summaryOnly().also {
+                        atomicWrite(index, json.encodeToString<LogEntry>(it).toByteArray(Charsets.UTF_8))
+                    }
+                    if ((acceptEvents || entry is LogEntry.RequestLog || entry is LogEntry.ProviderRequestLog) && file.name == "${entry.id}.json") {
                         records[entry.id] = Record(entry, length)
                         loadedBytes += length
                     }
@@ -73,22 +95,36 @@ internal class RequestLogStore(
             }
     }
 
+    private fun decode(file: File): LogEntry {
+        require(file.length() <= maxBytes) { "Oversized log" }
+        return json.decodeFromString<LogEntry>(file.readText(Charsets.UTF_8))
+    }
+
     private fun pruneDisk() {
         var count = 0
         var bytes = 0L
         directory.listFiles().orEmpty().filter(::isRecordFile).sortedByDescending { it.lastModified() }.forEach { file ->
-            if (count >= maxEntries || bytes + file.length() > maxBytes) {
+            val index = File(directory, "${file.nameWithoutExtension}.index")
+            val weight = file.length() + index.length()
+            if (count >= maxEntries || bytes + weight > maxBytes ||
+                retentionMillis?.let { file.lastModified() < System.currentTimeMillis() - it } == true) {
                 check(file.delete() || !file.exists()) { "Unable to prune request log" }
                 records.remove(Uuid.parse(file.nameWithoutExtension))
-            } else { count++; bytes += file.length() }
+                index.delete()
+            } else { count++; bytes += weight }
         }
+        directory.listFiles().orEmpty().filter { isIndexFile(it) && !File(directory, "${it.nameWithoutExtension}.json").exists() }.forEach { it.delete() }
     }
 
     private fun isRecordFile(file: File): Boolean = file.isFile && file.extension == "json" &&
         runCatching { Uuid.parse(file.nameWithoutExtension) }.isSuccess
 
-    private fun isTemporaryFile(file: File): Boolean = file.isFile && file.name.endsWith(".json.tmp") &&
-        runCatching { Uuid.parse(file.name.removePrefix(".").removeSuffix(".json.tmp")) }.isSuccess
+    private fun isTemporaryFile(file: File): Boolean = file.isFile &&
+        (file.name.endsWith(".json.tmp") || file.name.endsWith(".index.tmp")) &&
+        runCatching { Uuid.parse(file.name.removePrefix(".").removeSuffix(".tmp").substringBeforeLast('.')) }.isSuccess
+
+    private fun isIndexFile(file: File): Boolean = file.isFile && file.extension == "index" &&
+        runCatching { Uuid.parse(file.nameWithoutExtension) }.isSuccess
 }
 
 /** Sync before atomically replacing the old version. A failed write keeps the old record. */

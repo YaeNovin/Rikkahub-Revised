@@ -11,6 +11,8 @@ import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeCitationEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
+import me.rerere.rikkahub.data.knowledge.knowledgeLexicalScorer
+import me.rerere.rikkahub.data.knowledge.rankKnowledgePages
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
@@ -21,6 +23,27 @@ class KnowledgeBaseRepository(
     fun observeBases(): Flow<List<KnowledgeBaseEntity>> = dao.observeBases()
 
     fun observeDocuments(baseId: String): Flow<List<KnowledgeDocumentEntity>> = dao.observeDocuments(baseId)
+
+    suspend fun getDocument(id: String) = dao.getDocument(id)
+    suspend fun getDocuments(baseId: String) = dao.getDocuments(baseId)
+    suspend fun getPendingImports() = dao.getPendingImports()
+    suspend fun getDocumentChunks(id: String) = dao.getDocumentChunks(id)
+
+    suspend fun transitionImport(id: String, expected: List<String>, status: String, error: String? = null) =
+        dao.transitionImport(id, expected, status, error, Clock.System.now().toEpochMilliseconds()) > 0
+
+    suspend fun saveImportChunks(document: KnowledgeDocumentEntity, chunks: List<KnowledgeChunkEntity>, replace: Boolean) {
+        database.withTransaction {
+            check(dao.getDocument(document.id)?.status == KnowledgeDocumentEntity.STATUS_INDEXING) {
+                "Document import was cancelled or removed"
+            }
+            dao.updateDocument(document)
+            if (replace) {
+                dao.deleteChunks(document.id)
+                if (chunks.isNotEmpty()) dao.insertChunks(chunks)
+            } else if (chunks.isNotEmpty()) dao.updateChunks(chunks)
+        }
+    }
 
     suspend fun getBases(ids: Set<String>): List<KnowledgeBaseEntity> {
         if (ids.isEmpty()) return emptyList()
@@ -106,15 +129,25 @@ class KnowledgeBaseRepository(
         )
     }
 
-    suspend fun searchEmbeddedChunks(baseIds: Set<String>, modelId: String, limit: Int): List<KnowledgeChunkSearchRow> {
+    suspend fun searchEmbeddedChunks(baseIds: Set<String>, modelId: String, limit: Int, afterId: String = ""): List<KnowledgeChunkSearchRow> {
         if (baseIds.isEmpty()) return emptyList()
-        return dao.getEmbeddedChunks(baseIds.toList(), modelId, limit)
+        return dao.getEmbeddedChunks(baseIds.toList(), modelId, limit, afterId)
     }
 
-    suspend fun searchChunks(baseIds: Set<String>, limit: Int): List<KnowledgeChunkSearchRow> {
+    suspend fun searchChunks(baseIds: Set<String>, limit: Int, afterId: String = ""): List<KnowledgeChunkSearchRow> {
         if (baseIds.isEmpty()) return emptyList()
-        return dao.getChunks(baseIds.toList(), limit)
+        return dao.getChunks(baseIds.toList(), limit, afterId)
     }
+
+    suspend fun getEmbeddingModels(baseIds: Set<String>) =
+        if (baseIds.isEmpty()) emptyList() else dao.getEmbeddingModels(baseIds.toList())
+
+    internal suspend fun searchLexicalChunks(baseIds: Set<String>, query: String, limit: Int) =
+        rankKnowledgePages(
+            limit = limit,
+            loadPage = { afterId, pageSize -> searchChunks(baseIds, pageSize, afterId) },
+            score = knowledgeLexicalScorer(query),
+        )
 
     suspend fun countChunks(baseId: String): Int = dao.countChunks(baseId)
 

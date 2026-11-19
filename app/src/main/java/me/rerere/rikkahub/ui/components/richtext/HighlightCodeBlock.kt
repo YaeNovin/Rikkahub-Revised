@@ -5,7 +5,6 @@ import android.net.Uri
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,8 +54,9 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.highlight.HighlightTextColorPalette
 import me.rerere.highlight.buildHighlightText
-import me.rerere.highlight.CodeHighlightText
 import me.rerere.highlight.CodeHighlighter
+import me.rerere.highlight.rememberHighlightedCode
+import me.rerere.highlight.highlightedLines
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
@@ -76,6 +76,7 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.ui.theme.AtomOneDarkPalette
 import me.rerere.rikkahub.ui.theme.AtomOneLightPalette
+import me.rerere.rikkahub.ui.theme.codeHighlightPalette
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.toDp
@@ -105,6 +106,8 @@ internal fun normalizeCodeFenceLanguage(language: String): String = language
     .let {
         when (it) {
             "application/json", "text/json" -> "json"
+            "application/xml", "text/xml" -> "xml"
+            "image/svg+xml" -> "svg"
             "application/geo+json", "application/vnd.geo+json", "geo-json" -> "geojson"
             else -> it
         }
@@ -159,17 +162,37 @@ fun HighlightCodeBlock(
         fontSize = 12.sp,
         lineHeight = 16.sp,
     ),
+    renderVisuals: Boolean = true,
+) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalChatProseDecorationsEnabled provides false) {
+        HighlightCodeBlockBody(code, language, modifier, completeCodeBlock, style, renderVisuals)
+    }
+}
+
+@Composable
+private fun HighlightCodeBlockBody(
+    code: String,
+    language: String,
+    modifier: Modifier,
+    completeCodeBlock: Boolean,
+    style: TextStyle?,
+    renderVisuals: Boolean,
 ) {
     val darkMode = LocalDarkMode.current
-    val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
+    val originalPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
     val scrollState = rememberScrollState()
     val clipboardManager = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val navController = LocalNavController.current
     val context = LocalContext.current
     val settings = LocalSettings.current
+    val exporting = me.rerere.rikkahub.ui.components.ui.LocalExportContext.current
     val richContent = richContentColors()
     val colorScheme = me.rerere.rikkahub.ui.theme.LocalBackgroundBaseColorScheme.current ?: MaterialTheme.colorScheme
+    val codeSurface = rememberReadableTextSurface(richContent.container, originalPalette.fallback)
+    val colorPalette = remember(darkMode, codeSurface.backgrounds) {
+        codeHighlightPalette(darkMode, codeSurface.backgrounds)
+    }
     val streaming = LocalRichTextStreaming.current
     val renderComplete = remember(language, code, completeCodeBlock, streaming) {
         completeCodeBlock || canRenderFinishedJsonFence(language, code, streaming)
@@ -177,16 +200,22 @@ fun HighlightCodeBlock(
     val normalizedLanguage = remember(language, code, renderComplete) {
         if (renderComplete) resolveDiagramLanguage(language, code) else normalizeCodeFenceLanguage(language)
     }
-    val canInlinePreview = renderComplete && normalizedLanguage in PREVIEWABLE_LANGUAGES
+    val canInlinePreview = renderComplete && normalizedLanguage in PREVIEWABLE_LANGUAGES && code.length <= MAX_STATIC_PREVIEW_CHARS
     val canRenderMermaid = renderComplete && normalizedLanguage == "mermaid"
-    val canRenderDiff = shouldRenderDiffCodeBlock(normalizedLanguage, code)
+    val canRenderDiff = renderVisuals && shouldRenderDiffCodeBlock(normalizedLanguage, code)
+    val canRenderTerminal = canRenderTerminalPreview(normalizedLanguage, code, renderComplete)
+    val geometry = geometryRenderer(normalizedLanguage, code)
+    val canRenderGeometry = canRenderGeometryPreview(normalizedLanguage, code, renderComplete)
     val interactiveRenderer = remember(normalizedLanguage) {
         InteractiveCodeRenderer.fromLanguage(normalizedLanguage)
     }
     val canRenderInteractive = renderComplete &&
         interactiveRenderer != null &&
         canRenderInteractiveCodeBlock(normalizedLanguage, code)
-    val canShowVisualPreview = canInlinePreview || canRenderMermaid || canRenderInteractive
+    val canShowVisualPreview = renderVisuals && (canInlinePreview || canRenderMermaid || canRenderInteractive || canRenderTerminal || canRenderGeometry)
+    val badgeDocument = rememberMarkdownFenceBadges(code, renderVisuals && renderComplete && isMarkdownBadgeFence(normalizedLanguage))
+    val canRenderBadges = badgeDocument?.badges?.isNotEmpty() == true
+    val canTogglePreview = canShowVisualPreview || canRenderBadges
     val renderErrorMessage = stringResource(R.string.error_message_rich_content_render)
     val fullScreenPreviewHtml = remember(
         code,
@@ -195,9 +224,12 @@ fun HighlightCodeBlock(
         canShowVisualPreview,
         colorScheme,
         renderErrorMessage,
+        darkMode,
     ) {
         when {
             !canShowVisualPreview -> null
+            canRenderGeometry -> buildGeometryPreviewHtml(requireNotNull(geometry), code, darkMode)
+            canRenderTerminal -> buildTerminalPreviewHtml(code, darkMode)
             normalizedLanguage in PREVIEWABLE_LANGUAGES -> buildCodePreviewHtml(
                 code = code,
                 language = normalizedLanguage,
@@ -216,17 +248,31 @@ fun HighlightCodeBlock(
             else -> null
         }
     }
-    var previewMode by androidx.compose.runtime.saveable.rememberSaveable(canShowVisualPreview, normalizedLanguage) {
-        mutableStateOf(canShowVisualPreview)
+    // HTML consent is per content and ephemeral: streaming edits/reopens cannot reuse it.
+    var previewMode by if (!codePreviewDefaultsToRendered(normalizedLanguage)) {
+        remember(canTogglePreview, code) { mutableStateOf(false) }
+    } else {
+        androidx.compose.runtime.saveable.rememberSaveable(canTogglePreview, normalizedLanguage) {
+            mutableStateOf(canTogglePreview)
+        }
     }
 
     var isExpanded by androidx.compose.runtime.saveable.rememberSaveable(settings.displaySetting.codeBlockAutoCollapse) {
-        mutableStateOf(!settings.displaySetting.codeBlockAutoCollapse)
+        mutableStateOf(exporting || !settings.displaySetting.codeBlockAutoCollapse)
     }
-    val autoWrap = settings.displaySetting.codeBlockAutoWrap
+    // The header is painted over the configured code surface, except decorative previews
+    // whose outer container is transparent. Contrast correction must never paint a backing.
+    val toolbarSurface = rememberReadableTextSurface(
+        richContent.toolbar,
+        MaterialTheme.colorScheme.onSurfaceVariant,
+        underlays = if (previewMode && canShowVisualPreview && canRenderGeometry) null else codeSurface.backgrounds,
+    )
+    val autoWrap = exporting || settings.displaySetting.codeBlockAutoWrap
     val showLineNumbers = settings.displaySetting.showLineNumbers
     val textStyle = LocalTextStyle.current.merge(style)
     val codeLines = remember(code) { code.lines() }
+    val sourceHighlightLanguage = remember(language, code) { rendererSourceHighlightLanguage(language, code) }
+    val sourceHighlightLimit = remember(language, code.length) { rendererSourceHighlightLimit(language, code.length) }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*")
@@ -247,9 +293,9 @@ fun HighlightCodeBlock(
     if (previewMode && canShowVisualPreview) {
         var previewView by remember { androidx.compose.runtime.mutableStateOf<android.webkit.WebView?>(null) }
         Column(modifier.fillMaxWidth()
-            .border(1.dp, richContent.border, MaterialTheme.shapes.large)
+            .then(if (canRenderGeometry) Modifier else Modifier.border(1.dp, richContent.border, MaterialTheme.shapes.large))
             .clip(MaterialTheme.shapes.large)
-            .background(richContent.container)) {
+            .background(if (canRenderGeometry) androidx.compose.ui.graphics.Color.Transparent else richContent.container)) {
             Box(Modifier.fillMaxWidth().background(richContent.toolbar).padding(horizontal = 12.dp, vertical = 8.dp)) {
                 HighlightCodeActions(
                     language = language, scope = scope, clipboardManager = clipboardManager,
@@ -257,19 +303,26 @@ fun HighlightCodeBlock(
                     completeCodeBlock = renderComplete, previewMode = true, canTogglePreview = true,
                     fullScreenPreviewHtml = null,
                     onTogglePreviewMode = { previewMode = false },
+                    contentColor = toolbarSurface.foreground,
                 )
             }
-            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Column(Modifier.fillMaxWidth().padding(if (canRenderGeometry) 0.dp else 12.dp)) {
                 when {
+                    canRenderGeometry -> GeometryCodePreview(fullScreenPreviewHtml.orEmpty(), onViewCreated = { previewView = it })
+                    canRenderTerminal -> TerminalCodePreview(fullScreenPreviewHtml.orEmpty(), onViewCreated = { previewView = it })
                     canRenderMermaid -> Mermaid(code, Modifier.fillMaxWidth(), showFullScreenAction = true)
                     canRenderInteractive -> InteractiveCodeBlock(requireNotNull(interactiveRenderer), code, onViewCreated = { previewView = it })
-                    else -> CodeBlockPreview(code, normalizedLanguage, Modifier.fillMaxWidth().height(200.dp), onViewCreated = { previewView = it })
+                    else -> CodeBlockPreview(code, normalizedLanguage, Modifier.fillMaxWidth(), onViewCreated = { previewView = it })
                 }
-                if (!canRenderMermaid) GraphPreviewActions(fullScreenPreviewHtml.orEmpty(), previewView)
+                if (!canRenderMermaid && !exporting) GraphPreviewActions(fullScreenPreviewHtml.orEmpty(), previewView)
             }
         }
         return
     }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalTextSurfaceBackgrounds provides codeSurface.backgrounds,
+        androidx.compose.material3.LocalContentColor provides codeSurface.foreground,
+    ) {
     Column(
         modifier = modifier
             .border(1.dp, richContent.border, MaterialTheme.shapes.large)
@@ -291,17 +344,28 @@ fun HighlightCodeBlock(
                 navController = navController,
                 completeCodeBlock = renderComplete,
                 previewMode = previewMode,
-                canTogglePreview = canShowVisualPreview,
+                canTogglePreview = canTogglePreview,
                 fullScreenPreviewHtml = fullScreenPreviewHtml,
                 onTogglePreviewMode = {
                     previewMode = !previewMode
                 },
+                contentColor = toolbarSurface.foreground,
             )
         }
         Column(
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
         ) {
             when {
+                previewMode && canRenderBadges -> {
+                    val highlighted = rememberHighlightedCode(code, sourceHighlightLanguage, colorPalette, sourceHighlightLimit)
+                    MarkdownBadgeCodeRows(requireNotNull(badgeDocument), highlighted,
+                        if (isExpanded || exporting) Int.MAX_VALUE else COLLAPSE_LINES,
+                        showLineNumbers, autoWrap, scrollState, textStyle, colorPalette)
+                    CodeBlockExpandControl(
+                        visible = !exporting && settings.displaySetting.codeBlockAutoCollapse && codeLines.size > COLLAPSE_LINES,
+                        expanded = isExpanded, textStyle = textStyle, onToggle = { isExpanded = !isExpanded },
+                    )
+                }
                 canRenderDiff -> {
                     DiffView(
                         diff = code,
@@ -330,8 +394,8 @@ fun HighlightCodeBlock(
                         code = code,
                         language = normalizedLanguage,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(previewHeight),
+                            .fillMaxWidth(),
+                        previewHeight = previewHeight,
                     )
                 }
                 previewMode && canRenderMermaid -> {
@@ -351,22 +415,32 @@ fun HighlightCodeBlock(
                     val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
                     val displayCode = if (isExpanded) code else collapsedCode
                     val displayLines = remember(displayCode) { displayCode.lines() }
+                    val highlighted = rememberHighlightedCode(code, sourceHighlightLanguage, colorPalette, sourceHighlightLimit)
+                    val highlightedRows = remember(highlighted, isExpanded) {
+                        highlighted.highlightedLines().let { if (isExpanded) it else it.take(COLLAPSE_LINES) }
+                    }
+                    val highlightedDisplay = remember(highlightedRows) {
+                        buildAnnotatedString {
+                            highlightedRows.forEachIndexed { index, row ->
+                                if (index > 0) append('\n')
+                                append(row)
+                            }
+                        }
+                    }
 
                     // 如果显示行号且自动换行，需要逐行渲染以保持对齐
                     when {
                         showLineNumbers && autoWrap -> {
                             CodeBlockWithLineNumbersWrapped(
-                                displayLines = displayLines,
-                                language = language,
+                                displayLines = highlightedRows,
                                 textStyle = textStyle,
                                 colorPalette = colorPalette,
                             )
                         }
                         else -> {
                             CodeBlockDefault(
-                                displayCode = displayCode,
+                                displayCode = highlightedDisplay,
                                 displayLines = displayLines,
-                                language = language,
                                 textStyle = textStyle,
                                 colorPalette = colorPalette,
                                 autoWrap = autoWrap,
@@ -386,6 +460,7 @@ fun HighlightCodeBlock(
                 }
             }
         }
+    }
     }
 }
 
@@ -413,7 +488,7 @@ private fun CodeBlockExpandControl(
             Icon(
                 imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                tint = androidx.compose.material3.LocalContentColor.current,
                 modifier = Modifier.size(textStyle.fontSize.toDp()),
             )
             Text(
@@ -431,8 +506,7 @@ private fun CodeBlockExpandControl(
 
 @Composable
 private fun CodeBlockWithLineNumbersWrapped(
-    displayLines: List<String>,
-    language: String,
+    displayLines: List<AnnotatedString>,
     textStyle: TextStyle,
     colorPalette: HighlightTextColorPalette,
 ) {
@@ -450,16 +524,15 @@ private fun CodeBlockWithLineNumbersWrapped(
                         fontSize = textStyle.fontSize,
                         lineHeight = textStyle.lineHeight,
                         fontFamily = JetbrainsMono,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        color = colorPalette.comment,
                         softWrap = false,
                         modifier = Modifier.padding(end = 8.dp)
                     )
-                    CodeHighlightText(
-                        code = line,
-                        language = language,
+                    Text(
+                        text = line,
                         fontSize = textStyle.fontSize,
                         lineHeight = textStyle.lineHeight,
-                        colors = colorPalette,
+                        color = colorPalette.fallback,
                         overflow = TextOverflow.Visible,
                         softWrap = true,
                         fontFamily = JetbrainsMono,
@@ -473,9 +546,8 @@ private fun CodeBlockWithLineNumbersWrapped(
 
 @Composable
 private fun CodeBlockDefault(
-    displayCode: String,
+    displayCode: AnnotatedString,
     displayLines: List<String>,
-    language: String,
     textStyle: TextStyle,
     colorPalette: HighlightTextColorPalette,
     autoWrap: Boolean,
@@ -496,31 +568,31 @@ private fun CodeBlockDefault(
             val lineNumberWidth = remember(displayLines.size) {
                 displayLines.size.toString().length
             }
-            Column(
-                modifier = Modifier.padding(end = 8.dp)
-            ) {
-                displayLines.forEachIndexed { index, _ ->
-                    Text(
-                        text = (index + 1).toString().padStart(lineNumberWidth, ' '),
-                        fontSize = textStyle.fontSize,
-                        lineHeight = textStyle.lineHeight,
-                        fontFamily = JetbrainsMono,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                        softWrap = false,
-                    )
-                }
+            val lineNumbers = remember(displayLines.size, lineNumberWidth) {
+                (1..displayLines.size).joinToString("\n") { it.toString().padStart(lineNumberWidth, ' ') }
+            }
+            // A single layout shares the exact line height with the code. One
+            // Text per number multiplies composition and measurement for long output.
+            androidx.compose.foundation.text.selection.DisableSelection {
+                Text(
+                    text = lineNumbers,
+                    modifier = Modifier.padding(end = 8.dp),
+                    fontSize = textStyle.fontSize,
+                    lineHeight = textStyle.lineHeight,
+                    fontFamily = JetbrainsMono,
+                    color = colorPalette.comment,
+                    softWrap = false,
+                )
             }
         }
 
         // 代码列
         SelectionContainer {
-            CodeHighlightText(
-                code = displayCode,
-                language = language,
-                modifier = Modifier.animateContentSize(),
+            Text(
+                text = displayCode,
                 fontSize = textStyle.fontSize,
                 lineHeight = textStyle.lineHeight,
-                colors = colorPalette,
+                color = colorPalette.fallback,
                 overflow = TextOverflow.Visible,
                 softWrap = autoWrap,
                 fontFamily = JetbrainsMono
@@ -542,20 +614,28 @@ private fun HighlightCodeActions(
     canTogglePreview: Boolean = false,
     fullScreenPreviewHtml: String? = null,
     onTogglePreviewMode: () -> Unit = {},
+    contentColor: androidx.compose.ui.graphics.Color = androidx.compose.material3.LocalContentColor.current,
 ) {
     val openPreview = me.rerere.rikkahub.ui.components.webview.rememberWebPreviewLauncher()
     val context = LocalContext.current
+    if (me.rerere.rikkahub.ui.components.ui.LocalExportContext.current) {
+        Text(language, fontSize = 12.sp, fontFamily = JetbrainsMono, color = contentColor)
+        return
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = language,
+            text = when {
+                isTerminalFence(language) -> "$language · 只读展示"
+                normalizeCodeFenceLanguage(language) == "html" -> "$language · 手动静态预览"
+                else -> language
+            },
             fontSize = 12.sp,
             lineHeight = 12.sp,
             fontFamily = JetbrainsMono,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-                .copy(alpha = 0.5f),
+            color = contentColor,
         )
         Spacer(Modifier.weight(1f))
         Row(
@@ -563,7 +643,7 @@ private fun HighlightCodeActions(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val iconSize = 16.dp
-            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            val iconTint = contentColor
 
             Icon(
                 imageVector = HugeIcons.Download04,
@@ -660,12 +740,15 @@ private fun CodeBlockPreview(
     language: String,
     modifier: Modifier = Modifier,
     onViewCreated: (android.webkit.WebView) -> Unit = {},
+    previewHeight: androidx.compose.ui.unit.Dp = 200.dp,
 ) {
     val state = rememberWebViewState(
         data = remember(code, language) { buildCodePreviewHtml(code = code, language = language) },
         baseUrl = "https://rikkahub.local",
         mimeType = "text/html",
         settings = {
+            blockNetworkLoads = true
+            domStorageEnabled = false
             builtInZoomControls = true
             displayZoomControls = false
             useWideViewPort = true
@@ -680,6 +763,7 @@ private fun CodeBlockPreview(
         preferParentVerticalScroll = true,
         transparentBackground = true,
         modifier = modifier.clip(RoundedCornerShape(4.dp)),
+        previewHeight = previewHeight,
     )
 }
 
@@ -700,106 +784,8 @@ internal fun extractSvgAspectRatio(code: String): Float? {
     return (width / height).takeIf { it.isFinite() && it > 0 }
 }
 
-internal fun buildCodePreviewHtml(code: String, language: String): String {
-    return if (language == "svg") {
-        """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes">
-                <style>
-                    html, body {
-                        width: 100%;
-                        min-height: 100%;
-                        margin: 0;
-                        overflow: auto;
-                        background: transparent;
-                    }
-                    body {
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                    }
-                    body > svg {
-                        display: block;
-                        max-width: 100%;
-                        height: auto;
-                        overflow: visible;
-                    }
-                </style>
-            </head>
-            <body>
-                $code
-                <script>
-                    (function() {
-                        const svg = document.querySelector('body > svg');
-                        if (!svg) return;
-                        window.__rikkaRenderStatus = 'loading';
-                        if (!svg.hasAttribute('preserveAspectRatio')) svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-                        requestAnimationFrame(function() {
-                            try {
-                                const current = svg.viewBox && svg.viewBox.baseVal;
-                                const hasViewBox = current && current.width > 0 && current.height > 0;
-                                // Preserve author coordinates, clipping and filter regions.
-                                // Nested SVG elements keep their own viewport entirely.
-                                if (!hasViewBox) {
-                                    const dimension = function(name) {
-                                        const value = (svg.getAttribute(name) || '').trim();
-                                        return /^(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$/i.test(value) ? parseFloat(value) : 0;
-                                    };
-                                    const width = dimension('width'), height = dimension('height');
-                                    if (width > 0 && height > 0) svg.setAttribute('viewBox', [0, 0, width, height].join(' '));
-                                    else {
-                                        const bounds = svg.getBBox();
-                                        if (!(bounds.width > 0 && bounds.height > 0)) { window.__rikkaRenderStatus = 'ready'; return; }
-                                        const padding = Math.max(2, Math.min(bounds.width, bounds.height) * .01);
-                                        svg.setAttribute('viewBox', [bounds.x - padding, bounds.y - padding, bounds.width + 2 * padding, bounds.height + 2 * padding].join(' '));
-                                    }
-                                }
-                                svg.removeAttribute('width');
-                                svg.removeAttribute('height');
-                                svg.style.width = '100%';
-                                svg.style.height = 'auto';
-                                window.__rikkaRenderStatus = 'ready';
-                            } catch (error) {
-                                console.warn('Unable to normalize SVG viewport', error);
-                                window.__rikkaRenderStatus = 'error';
-                            }
-                        });
-                    })();
-                </script>
-            </body>
-            </html>
-        """.trimIndent()
-    } else buildResponsiveHtmlPreview(code)
-}
-
-private fun buildResponsiveHtmlPreview(code: String): String {
-    val document = Jsoup.parse(code)
-    document.outputSettings().prettyPrint(false)
-    installHtmlPreviewDependencies(document)
-    if (document.head().selectFirst("meta[name=viewport]") == null) {
-        document.head().appendElement("meta")
-            .attr("name", "viewport")
-            .attr("content", "width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes")
-    }
-    document.head().appendElement("style")
-        .attr("id", "rikkahub-responsive-preview")
-        .append(
-            """
-                html, body { max-width: 100%; min-height: 100%; margin: 0; overflow: auto; background: transparent; }
-                img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow), :not(.leaflet-pane) > svg, video, canvas, iframe { max-width: 100%; box-sizing: border-box; }
-                img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow), :not(.leaflet-pane) > svg, video, canvas { display: block; margin-left: auto; margin-right: auto; }
-                img:not(.leaflet-tile):not(.leaflet-marker-icon):not(.leaflet-marker-shadow), :not(.leaflet-pane) > svg, video { height: auto; }
-                :not(.leaflet-pane) > svg { overflow: visible; }
-                /* Tile positioning and overlay viewports belong to Leaflet, not media fitting. */
-                .leaflet-container img.leaflet-tile { max-width: none !important; max-height: none !important; margin: 0; border-radius: 0; }
-                .leaflet-container .leaflet-overlay-pane svg { max-width: none !important; margin: 0; }
-            """.trimIndent(),
-        )
-    return document.outerHtml()
-}
+internal fun buildCodePreviewHtml(code: String, language: String): String =
+    buildStaticHtmlPreview(code, svgOnly = normalizeCodeFenceLanguage(language) == "svg")
 
 class HighlightCodeVisualTransformation(
     val language: String,

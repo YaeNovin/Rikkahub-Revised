@@ -407,15 +407,11 @@ class ConversationRepository(
         messageFtsManager.indexConversation(conversation)
     }
 
-    suspend fun deleteConversation(conversation: Conversation) {
-        // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
-        val fullConversation = if (conversation.messageNodes.isEmpty()) {
-            getConversationById(conversation.id) ?: conversation
-        } else {
-            conversation
-        }
-        messageFtsManager.deleteConversation(conversation.id.toString())
+    suspend fun deleteConversation(conversation: Conversation) = withContext(Dispatchers.IO) {
+        // Read the latest data after the undo window rather than a stale UI snapshot.
+        val fullConversation = getConversationById(conversation.id) ?: return@withContext
         database.withTransaction {
+            messageFtsManager.deleteConversationInTransaction(conversation.id.toString())
             // message_node 会通过 CASCADE 自动删除
             conversationDAO.delete(
                 conversationToConversationEntity(conversation)
@@ -427,7 +423,9 @@ class ConversationRepository(
     suspend fun searchMessages(
         keyword: String,
         sort: MessageSearchSort = MessageSearchSort.RELEVANCE,
-    ) = messageFtsManager.search(keyword, sort)
+        limit: Int = 50,
+        offset: Int = 0,
+    ) = messageFtsManager.search(keyword, sort, limit, offset)
 
     suspend fun rebuildAllIndexes(onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }) {
         messageFtsManager.deleteAll()

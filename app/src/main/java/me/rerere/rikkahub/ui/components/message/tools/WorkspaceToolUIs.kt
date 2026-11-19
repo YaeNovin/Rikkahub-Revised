@@ -325,7 +325,10 @@ object ShellToolUI : ToolUIRenderer {
                         .shimmer(isLoading = context.loading),
                 ) {
                     Text(
-                        text = combined.lineSequence().take(SUMMARY_MAX_LINES).joinToString("\n"),
+                        text = remember(combined) {
+                            me.rerere.rikkahub.ui.components.richtext.terminalDisplayText(combined, keepAnsi = false)
+                                .lineSequence().take(SUMMARY_MAX_LINES).joinToString("\n")
+                        },
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         fontSize = 11.sp,
                         lineHeight = 14.sp,
@@ -376,7 +379,8 @@ object ShellToolUI : ToolUIRenderer {
                 Text(text = "stdout", style = MaterialTheme.typography.labelMedium)
                 HighlightCodeBlock(
                     code = stdout,
-                    language = "plaintext",
+                    language = "terminal",
+                    completeCodeBlock = !context.loading,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -388,7 +392,8 @@ object ShellToolUI : ToolUIRenderer {
                 )
                 HighlightCodeBlock(
                     code = stderr,
-                    language = "plaintext",
+                    language = "terminal",
+                    completeCodeBlock = !context.loading,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

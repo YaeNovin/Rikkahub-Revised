@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.ui.theme.selectTheme
 import me.rerere.rikkahub.ui.theme.selectDynamicColors
 import me.rerere.rikkahub.ui.theme.selectBackgroundAccent
+import me.rerere.rikkahub.data.model.withMicaAcrylicAppearance
 
 class SettingVM(
     private val settingsStore: SettingsStore,
@@ -66,6 +67,10 @@ class SettingVM(
         viewModelScope.launch {
             saveAppearance { settingsStore.updateComposerMaterial(material) }
         }
+    }
+
+    internal fun useMicaAcrylicAppearance() {
+        viewModelScope.launch { saveAppearance { settingsStore.update { it.withMicaAcrylicAppearance() } } }
     }
 
     private suspend fun saveAppearance(action: suspend () -> Unit) {

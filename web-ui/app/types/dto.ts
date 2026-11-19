@@ -1,4 +1,5 @@
 import type { TokenUsage } from "./core";
+import type { WorkspaceFileOperationMode } from "./conversation";
 import type { UIMessageAnnotation } from "./annotations";
 import type { UIMessagePart } from "./parts";
 
@@ -91,6 +92,7 @@ export interface ConversationDto {
   modeInjectionIds?: string[];
   lorebookIds?: string[];
   workspaceCwd?: string | null;
+  workspaceFileOperationMode?: WorkspaceFileOperationMode;
   folderId?: string | null;
   createAt: number;
   updateAt: number;

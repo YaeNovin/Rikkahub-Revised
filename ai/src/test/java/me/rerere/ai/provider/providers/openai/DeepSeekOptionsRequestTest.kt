@@ -135,7 +135,7 @@ class DeepSeekOptionsRequestTest {
         assertFalse(body.containsKey("temperature"))
         assertEquals(0.95f, body["top_p"]?.jsonPrimitive?.float)
         val image = body["input"]?.jsonArray
-            ?.first()?.jsonObject
+            ?.last()?.jsonObject
             ?.get("content")?.jsonArray
             ?.last()?.jsonObject
         assertEquals("original", image?.get("detail")?.jsonPrimitive?.content)

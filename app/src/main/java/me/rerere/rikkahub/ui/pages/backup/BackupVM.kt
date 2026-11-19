@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
@@ -100,19 +102,21 @@ class BackupVM(
     suspend fun restoreFromChatBox(file: File): ChatboxRestoreResult {
         var importedConversations = 0
         var skippedExistingConversations = 0
-        val result = ChatboxImporter.importStreaming(
-            file = file,
-            assistantId = settings.value.assistantId,
-            providers = settings.value.providers,
-            onConversation = { conversation ->
-                if (conversationRepository.existsConversationById(conversation.id)) {
-                    skippedExistingConversations++
-                } else {
-                    conversationRepository.insertConversation(conversation)
-                    importedConversations++
+        val result = withContext(Dispatchers.IO) {
+            ChatboxImporter.importStreaming(
+                file = file,
+                assistantId = settings.value.assistantId,
+                providers = settings.value.providers,
+                onConversation = { conversation ->
+                    if (conversationRepository.existsConversationById(conversation.id)) {
+                        skippedExistingConversations++
+                    } else {
+                        conversationRepository.insertConversation(conversation)
+                        importedConversations++
+                    }
                 }
-            }
-        )
+            )
+        }
 
         val targetAssistantId = settings.value.assistantId
         settingsStore.update(
@@ -143,8 +147,10 @@ class BackupVM(
         )
     }
 
-    fun restoreFromCherryStudio(file: File) {
-        val importProviders = CherryStudioProviderImporter.importProviders(file)
+    suspend fun restoreFromCherryStudio(file: File) {
+        val importProviders = withContext(Dispatchers.IO) {
+            CherryStudioProviderImporter.importProviders(file)
+        }
 
         if (importProviders.isEmpty()) {
             throw IllegalArgumentException("No importable providers found in Cherry Studio backup")
@@ -152,7 +158,7 @@ class BackupVM(
 
         Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers: $importProviders")
 
-        updateSettings(
+        settingsStore.update(
             settings.value.copy(
                 providers = importProviders + settings.value.providers,
             )

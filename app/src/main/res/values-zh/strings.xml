@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+  <string name="setting_provider_page_decision_model">决策</string>
   <string name="setting_advanced_appearance_preview_background">全屏预览使用全局背景</string>
   <string name="setting_advanced_appearance_preview_background_desc">渲染图全屏预览跟随全局背景的不透明度、虚化和页面样式；页面样式为不透明时不显示背景。关闭后使用主题底色。预览内按钮与此设置同步。</string>
   <string name="webview_preview_background_enable">开启全局预览背景</string>
@@ -490,7 +491,10 @@
   <string name="chat_image_settings">图片生成参数</string>
   <string name="chat_send_to_chat_model">发送给聊天模型</string>
   <string name="chat_send_to_image_model">发送给图片模型</string>
-  <string name="chat_page_message_count">%d 条消息</string>
+  <plurals name="chat_page_message_count">
+    <item quantity="one">%d 条消息</item>
+    <item quantity="other">%d 条消息</item>
+  </plurals>
   <string name="chat_page_loading_conversation">正在加载对话…</string>
   <string name="chat_page_memory_count">最近 %1$d 条</string>
   <string name="chat_page_memory_status_ready">记忆功能正常运行</string>
@@ -536,7 +540,10 @@
   <string name="chat_page_yesterday">昨天</string>
   <string name="chat_size_dialog_content">当前消息数：%1$d。这可能导致应用崩溃或卡顿，甚至丢失本次对话数据。请尽快新建对话以继续聊天。</string>
   <string name="chat_size_dialog_title">此对话数据过大</string>
-  <string name="citations_count">%1$d 条引用</string>
+  <plurals name="citations_count">
+    <item quantity="one">%1$d 条引用</item>
+    <item quantity="other">%1$d 条引用</item>
+  </plurals>
   <string name="code_block_collapse">折叠</string>
   <string name="code_block_copy">复制代码</string>
   <string name="code_block_expand">展开</string>

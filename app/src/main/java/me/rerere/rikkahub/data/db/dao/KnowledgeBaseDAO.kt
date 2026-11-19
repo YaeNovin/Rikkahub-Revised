@@ -46,6 +46,24 @@ interface KnowledgeBaseDAO {
     @Query("SELECT * FROM knowledge_document WHERE knowledge_base_id = :baseId ORDER BY updated_at DESC")
     fun observeDocuments(baseId: String): Flow<List<KnowledgeDocumentEntity>>
 
+    @Query("SELECT * FROM knowledge_document WHERE id = :id")
+    suspend fun getDocument(id: String): KnowledgeDocumentEntity?
+
+    @Query("SELECT * FROM knowledge_document WHERE status IN ('queued', 'indexing')")
+    suspend fun getPendingImports(): List<KnowledgeDocumentEntity>
+
+    @Query("SELECT * FROM knowledge_document WHERE knowledge_base_id = :baseId")
+    suspend fun getDocuments(baseId: String): List<KnowledgeDocumentEntity>
+
+    @Query("SELECT * FROM knowledge_chunk WHERE document_id = :documentId ORDER BY ordinal")
+    suspend fun getDocumentChunks(documentId: String): List<KnowledgeChunkEntity>
+
+    @Update
+    suspend fun updateDocument(document: KnowledgeDocumentEntity)
+
+    @Query("UPDATE knowledge_document SET status = :status, error_message = :error, updated_at = :now WHERE id = :id AND status IN (:expected)")
+    suspend fun transitionImport(id: String, expected: List<String>, status: String, error: String?, now: Long): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocument(document: KnowledgeDocumentEntity)
 
@@ -89,25 +107,35 @@ interface KnowledgeBaseDAO {
             "AND d.status IN ('ready', 'ready_without_embedding') " +
             "AND c.embedding_model_id = :embeddingModelId " +
             "AND c.embedding IS NOT NULL " +
+            "AND c.id > :afterId ORDER BY c.id " +
             "LIMIT :limit"
     )
     suspend fun getEmbeddedChunks(
         baseIds: List<String>,
         embeddingModelId: String,
         limit: Int,
+        afterId: String = "",
     ): List<KnowledgeChunkSearchRow>
 
     @Query(
         "SELECT c.id, c.document_id, c.knowledge_base_id, c.ordinal, c.content, " +
             "c.page_start, c.page_end, c.section_path, c.char_start, c.char_end, " +
-            "c.embedding, c.embedding_model_id, c.embedding_dimension, " +
+            "NULL AS embedding, c.embedding_model_id, c.embedding_dimension, " +
             "d.title AS document_title, d.source_uri " +
             "FROM knowledge_chunk c INNER JOIN knowledge_document d ON d.id = c.document_id " +
             "WHERE c.knowledge_base_id IN (:baseIds) " +
             "AND d.status IN ('ready', 'ready_without_embedding') " +
-            "LIMIT :limit"
+            "AND c.id > :afterId ORDER BY c.id LIMIT :limit"
     )
-    suspend fun getChunks(baseIds: List<String>, limit: Int): List<KnowledgeChunkSearchRow>
+    suspend fun getChunks(baseIds: List<String>, limit: Int, afterId: String = ""): List<KnowledgeChunkSearchRow>
+
+    @Query(
+        "SELECT DISTINCT c.knowledge_base_id, c.embedding_model_id FROM knowledge_chunk c " +
+            "INNER JOIN knowledge_document d ON d.id = c.document_id " +
+            "WHERE c.knowledge_base_id IN (:baseIds) AND c.embedding_model_id IS NOT NULL " +
+            "AND c.embedding IS NOT NULL AND d.status IN ('ready', 'ready_without_embedding')"
+    )
+    suspend fun getEmbeddingModels(baseIds: List<String>): List<KnowledgeEmbeddingModelRow>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCitations(citations: List<KnowledgeCitationEntity>)
@@ -115,6 +143,11 @@ interface KnowledgeBaseDAO {
     @Query("DELETE FROM knowledge_citation WHERE conversation_id = :conversationId AND message_id = :messageId")
     suspend fun deleteCitations(conversationId: String, messageId: String)
 }
+
+data class KnowledgeEmbeddingModelRow(
+    @androidx.room.ColumnInfo(name = "knowledge_base_id") val knowledgeBaseId: String,
+    @androidx.room.ColumnInfo(name = "embedding_model_id") val embeddingModelId: String,
+)
 
 data class KnowledgeDocumentPreviewChunk(
     val ordinal: Int,

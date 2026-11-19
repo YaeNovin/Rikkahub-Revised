@@ -37,12 +37,13 @@ class RequestLoggingInterceptor(
             return chain.proceed(request)
         }
 
-        val startTime = System.currentTimeMillis()
+        val startedAt = java.time.Instant.now()
+        val startTime = startedAt.toEpochMilli()
         val startNanos = System.nanoTime()
         val requestHeaders = if (recordHttpRequest) request.headers.toSafeMap() else emptyMap()
         val secrets = request.headers.names().filter { it.lowercase() !in SAFE_HEADER_FIELDS }.flatMap { name ->
             request.headers.values(name).flatMap { listOf(it, it.removePrefix("Bearer ").removePrefix("Basic ")) }
-        } + request.url.queryParameterNames.filter { it.isSensitiveLogField() }.mapNotNull { request.url.queryParameter(it) }
+        } + request.url.queryParameterNames.mapNotNull { request.url.queryParameter(it) }
         val requestBody = if (recordHttpRequest) request.body.readDetailedBody(request.header("Content-Encoding"), secrets) else null
 
         val response: Response
@@ -58,6 +59,9 @@ class RequestLoggingInterceptor(
             buildUnifiedRequestLog(
                 diagnostics = diagnostics,
                 recordHttpRequest = recordHttpRequest,
+                startedAt = startedAt,
+                endpointOrigin = "${request.url.scheme}://${request.url.host}:${request.url.port}",
+                durationPhase = "failed",
                 url = request.url.toSafeLogUrl().takeIf { recordHttpRequest },
                 method = request.method.takeIf { recordHttpRequest },
                 requestHeaders = requestHeaders,
@@ -85,6 +89,9 @@ class RequestLoggingInterceptor(
         val entry = buildUnifiedRequestLog(
             diagnostics = diagnostics,
             recordHttpRequest = recordHttpRequest,
+            startedAt = startedAt,
+            endpointOrigin = "${request.url.scheme}://${request.url.host}:${request.url.port}",
+            durationPhase = "headers",
             url = request.url.toSafeLogUrl().takeIf { recordHttpRequest },
             method = request.method.takeIf { recordHttpRequest },
             requestHeaders = requestHeaders,
@@ -105,12 +112,16 @@ class RequestLoggingInterceptor(
         )
 
         val type = response.body.contentType()?.toString().orEmpty().lowercase()
-        if (recordHttpRequest && entry != null && (type.contains("json") || type.startsWith("text/") || type.contains("xml"))) {
-            return response.newBuilder().body(response.body.captureForLog(response.header("Content-Encoding")) { body ->
+        val captured = if (recordHttpRequest && entry != null && (type.contains("json") || type.startsWith("text/") || type.contains("xml"))) {
+            response.body.captureForLog(response.header("Content-Encoding")) { body ->
                 Logging.updateResponseBody(entry.id, detailedLogBody(body, secrets))
-            }).build()
-        }
-        return response
+            }
+        } else response.body
+        if (entry == null) return response
+        return response.newBuilder().body(captured.observeLogCompletion { phase, failure ->
+            Logging.updateRequestTiming(entry.id, (System.nanoTime() - startNanos).coerceAtLeast(0) / 1_000_000,
+                phase, failure?.let { sanitizeErrorMessage(it) })
+        }).build()
     }
 }
 
@@ -148,13 +159,20 @@ internal fun buildUnifiedRequestLog(
     responseHeaders: Map<String, String> = emptyMap(),
     durationMs: Long? = null,
     error: String? = null,
+    startedAt: java.time.Instant = java.time.Instant.now(),
+    durationPhase: String? = null,
+    endpointOrigin: String? = null,
 ): LogEntry? = when {
     diagnostics != null ->
             LogEntry.ProviderRequestLog(
+                timestamp = startedAt.toEpochMilli(),
+                preciseTimestamp = startedAt.toString(),
+                durationPhase = durationPhase,
                 provider = diagnostics.provider,
                 model = diagnostics.model,
                 channel = diagnostics.channel.name,
                 operation = diagnostics.operation.name,
+                endpointOrigin = endpointOrigin,
                 parameters = diagnostics.parameters.mapValues { (key, value) ->
                     if (key.isSensitiveLogField()) REDACTED else detailedLogBody(value)
                 } + actualRequestParameters(requestBody).takeIf { recordHttpRequest }.orEmpty() +
@@ -170,6 +188,9 @@ internal fun buildUnifiedRequestLog(
             )
 
     recordHttpRequest -> LogEntry.RequestLog(
+        timestamp = startedAt.toEpochMilli(),
+        preciseTimestamp = startedAt.toString(),
+        durationPhase = durationPhase,
         tag = "HTTP",
         url = requireNotNull(url),
         method = requireNotNull(method),
@@ -207,11 +228,9 @@ internal fun Headers.toSafeMap(): Map<String, String> = names().associateWith { 
 }
 
 internal fun HttpUrl.toSafeLogUrl(): String {
-    if (queryParameterNames.none(String::isSensitiveLogField)) return toString()
     return newBuilder().apply {
-        queryParameterNames
-            .filter(String::isSensitiveLogField)
-            .forEach { name -> setQueryParameter(name, REDACTED) }
+        username(""); password(""); fragment(null)
+        queryParameterNames.forEach { name -> setQueryParameter(name, REDACTED) }
     }.build().toString()
 }
 
@@ -283,34 +302,11 @@ private fun sanitizeJsonForLog(element: JsonElement, fieldName: String? = null):
     }
 }
 
-private fun String.isSensitiveLogField(): Boolean = lowercase()
-    .replace("-", "")
-    .replace("_", "") in SENSITIVE_FIELDS
+private fun String.isSensitiveLogField(): Boolean = me.rerere.common.android.DiagnosticSanitizer.sensitive(this)
 
-private fun sanitizeErrorMessage(message: String?): String? = message
-    ?.replace(
-        Regex("(?i)((?:[?&]|\\b)(?:key|api[_-]?key|access[_-]?token|token)=)[^&\\s]+"),
-        "$1$REDACTED",
-    )
-    ?.replace(Regex("(?i)(bearer\\s+)[a-z0-9._~+/-]+"), "$1$REDACTED")
-    ?.replace(
-        Regex("(?i)([\\\"']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token)[\\\"']?\\s*[:=]\\s*[\\\"'])[^\\\"']+"),
-        "$1$REDACTED",
-    )
-
-private val SENSITIVE_FIELDS = setOf(
-    "authorization",
-    "proxyauthorization",
-    "xgoogapikey",
-    "apikey",
-    "key",
-    "accesstoken",
-    "refreshtoken",
-    "token",
-    "cookie",
-    "setcookie",
-    "password", "secret", "secretkey", "accesskey", "signature", "xapikey",
-)
+private fun sanitizeErrorMessage(message: String?): String? = message?.let {
+    me.rerere.common.android.DiagnosticSanitizer.text(it, MAX_LOGGED_ERROR_REASON_CHARS)
+}
 private val TEXT_FIELDS = setOf("text", "prompt", "input", "instructions", "content")
 private val BINARY_FIELDS = setOf("data", "base64", "bytes")
 private val SEQUENCE_FIELDS = setOf("stopsequences", "stop_sequences")

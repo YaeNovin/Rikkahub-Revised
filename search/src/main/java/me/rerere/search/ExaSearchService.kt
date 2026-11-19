@@ -94,14 +94,14 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                 .addHeader("Authorization", "Bearer $apiKey")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
                 val bodyRaw = response.body.string()
                 val response = runCatching {
                     json.decodeFromString<ExaData>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
+                    // Failure propagates to the structured application diagnostics.
+                    // Raw network content is not written to stdout.
                     error("Failed to decode response: $bodyRaw")
                 }.getOrThrow()
 
@@ -118,7 +118,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                         images = response.results.mapNotNull { it.image?.takeIf { url -> url.isNotBlank() } },
                     ))
             } else {
-                println(response.body.string())
+                // Raw network content is not written to stdout.
                 error("response failed #${response.code}")
             }
         }
@@ -145,14 +145,14 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                 .addHeader("Authorization", "Bearer $apiKey")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
                 val bodyRaw = response.body.string()
                 val data = runCatching {
                     json.decodeFromString<ExaData>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
+                    // Failure propagates to the structured application diagnostics.
+                    // Raw network content is not written to stdout.
                     error("Failed to decode response: $bodyRaw")
                 }.getOrThrow()
 
@@ -170,7 +170,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                     )
                 )
             } else {
-                println(response.body.string())
+                // Raw network content is not written to stdout.
                 error("response failed #${response.code}")
             }
         }

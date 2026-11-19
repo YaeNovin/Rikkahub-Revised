@@ -9,7 +9,26 @@ sealed class UIMessageAnnotation {
     @SerialName("url_citation")
     data class UrlCitation(
         val title: String,
-        val url: String
+        val url: String,
+        val imageUrl: String? = null,
+        val retrievalStatus: String? = null,
+        val groundingSegments: List<GroundingSegment> = emptyList(),
+    ) : UIMessageAnnotation()
+
+    @Serializable
+    data class GroundingSegment(
+        val text: String = "",
+        val partIndex: Int? = null,
+        val startIndex: Int? = null,
+        val endIndex: Int? = null,
+    )
+
+    @Serializable
+    @SerialName("google_search_suggestions")
+    data class GoogleSearchSuggestions(
+        val html: String = "",
+        val webQueries: List<String> = emptyList(),
+        val imageQueries: List<String> = emptyList(),
     ) : UIMessageAnnotation()
 
     @Serializable

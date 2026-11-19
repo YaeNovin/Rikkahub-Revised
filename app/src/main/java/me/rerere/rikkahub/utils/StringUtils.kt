@@ -35,6 +35,14 @@ fun String.unescapeHtml(): String {
 
 fun Number.toFixed(digits: Int = 0) = "%.${digits}f".format(this)
 
+private fun promptVariablePattern(key: String): Regex = Regex(
+    "\\{\\{\\s*${Regex.escape(key)}\\s*\\}\\}|\\{\\s*${Regex.escape(key)}\\s*\\}",
+    RegexOption.IGNORE_CASE,
+)
+
+fun String.containsPromptVariable(key: String): Boolean =
+    key.isNotBlank() && promptVariablePattern(key.trim()).containsMatchIn(this)
+
 fun String.applyPlaceholders(
     vararg placeholders: Pair<String, String>,
 ): String {
@@ -50,10 +58,7 @@ fun String.applyPlaceholders(
     if (entries.isEmpty()) return this
 
     val patterns = entries.map { (key, _) ->
-        Regex(
-            "\\{\\{\\s*${Regex.escape(key)}\\s*\\}\\}|\\{\\s*${Regex.escape(key)}\\s*\\}",
-            setOf(RegexOption.IGNORE_CASE),
-        )
+        promptVariablePattern(key)
     }
     val combined = Regex(
         patterns.joinToString("|") { "(?:${it.pattern})" },

@@ -2,7 +2,8 @@ package me.rerere.search
 
 import android.content.Context
 import androidx.compose.runtime.Composable
-import kotlinx.coroutines.suspendCancellableCoroutine
+import me.rerere.common.http.awaitAndUse
+import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -10,13 +11,9 @@ import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.util.KeyRoulette
 import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Response
-import okhttp3.internal.closeQuietly
-import okio.IOException
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resumeWithException
 import kotlin.uuid.Uuid
 
 interface SearchService<T : SearchServiceOptions> {
@@ -63,7 +60,10 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.TinyfishOptions -> TinyfishSearchService
                 is SearchServiceOptions.SerperOptions -> SerperSearchService
                 is SearchServiceOptions.AnySearchOptions -> AnySearchService
+                is SearchServiceOptions.DeepSeekOptions -> DeepSeekSearchService
+                is SearchServiceOptions.VolcengineOptions -> VolcengineSearchService
                 is SearchServiceOptions.CustomJsOptions -> CustomJsSearchService
+                is SearchServiceOptions.CustomOptions -> CustomSearchService
             } as SearchService<T>
         }
 
@@ -164,6 +164,9 @@ sealed class SearchServiceOptions {
             TinyfishOptions::class to "Tinyfish",
             SerperOptions::class to "Serper",
             AnySearchOptions::class to "AnySearch",
+            DeepSeekOptions::class to "DeepSeek",
+            VolcengineOptions::class to "豆包 / 火山引擎",
+            CustomOptions::class to "自定义搜索服务",
             CustomJsOptions::class to "Custom JS",
         )
     }
@@ -311,6 +314,82 @@ sealed class SearchServiceOptions {
     ) : SearchServiceOptions()
 
     @Serializable
+    @SerialName("deepseek")
+    data class DeepSeekOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+        val needContent: Boolean = false,
+    ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("volcengine")
+    data class VolcengineOptions(
+        override val id: Uuid = Uuid.random(),
+        val apiKey: String = "",
+        // Null preserves keys saved before the editions had independent configuration.
+        val customApiKey: String? = null,
+        val globalApiKey: String? = null,
+        val global: Boolean = false,
+        val searchType: String = "web",
+        val enableWaiting: Boolean = false,
+        val maxWaitTime: Int = 5000,
+        val icpHostOnly: Boolean = false,
+        val needContent: Boolean = false,
+        val needUrl: Boolean = false,
+        val sites: String = "",
+        val blockHosts: String = "",
+        val authInfoLevel: Int = 0,
+        val timeRange: String = "",
+        val queryRewrite: Boolean = false,
+        val contentFormats: String = "text",
+        val industry: String = "",
+        val maxSnippetLength: Int = 500,
+        val maxImageCountPerDoc: Int = 3,
+        val imageWidthMin: Int? = null,
+        val imageHeightMin: Int? = null,
+        val imageWidthMax: Int? = null,
+        val imageHeightMax: Int? = null,
+        val imageShapes: List<String> = emptyList(),
+        val shortEdgePixelMin: Int? = null,
+        val shortEdgePixelMax: Int? = null,
+        val aspectRatioMin: Double? = null,
+        val aspectRatioMax: Double? = null,
+    ) : SearchServiceOptions() {
+        fun activeApiKey(): String = (if (global) globalApiKey else customApiKey) ?: apiKey
+
+        fun withActiveApiKey(value: String): VolcengineOptions =
+            if (global) copy(globalApiKey = value) else copy(customApiKey = value)
+    }
+
+    @Serializable
+    @SerialName("custom_http")
+    data class CustomOptions(
+        override val id: Uuid = Uuid.random(),
+        val name: String = "",
+        val kind: CustomSearchKind = CustomSearchKind.WEB,
+        val baseUrlEnabled: Boolean = true,
+        val baseUrl: String = "",
+        val endpoint: String = "/v1/web_search",
+        val apiKeyEnabled: Boolean = false,
+        val apiKey: String = "",
+        // Null identifies older configurations whose model may be an extra JSON parameter.
+        val model: OptionalSearchValue? = null,
+        val maxResults: OptionalSearchValue = OptionalSearchValue(value = "5"),
+        val allowedXHandles: OptionalSearchValue = OptionalSearchValue(),
+        val excludedXHandles: OptionalSearchValue = OptionalSearchValue(),
+        val fromDate: OptionalSearchValue = OptionalSearchValue(),
+        val toDate: OptionalSearchValue = OptionalSearchValue(),
+        val extraParameters: List<CustomSearchParameter> = emptyList(),
+        val timeoutSeconds: Int = 60,
+        val resultsPath: String = "results",
+        val titlePath: String = "title",
+        val urlPath: String = "url",
+        val snippetPath: String = "snippet",
+    ) : SearchServiceOptions() {
+        override val displayName: String get() = name.ifBlank { "自定义搜索服务" }
+    }
+
+    @Serializable
     @SerialName("custom_js")
     data class CustomJsOptions(
         override val id: Uuid = Uuid.random(),
@@ -356,20 +435,9 @@ function search(query, resultSize) {
     }
 }
 
-internal suspend fun Call.await(): Response {
-    return suspendCancellableCoroutine { continuation ->
-        enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) {
-                    continuation.resumeWithException(e)
-                }
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response) { cause, _, _ ->
-                    response.closeQuietly()
-                }
-            }
-        })
-    }
+/** Search APIs return complete JSON bodies. Keep cancellation attached until those bytes arrive. */
+internal suspend fun Call.await(): Response = awaitAndUse { response ->
+    val contentType = response.body.contentType()
+    val bytes = response.body.bytes()
+    response.newBuilder().body(bytes.toResponseBody(contentType)).build()
 }

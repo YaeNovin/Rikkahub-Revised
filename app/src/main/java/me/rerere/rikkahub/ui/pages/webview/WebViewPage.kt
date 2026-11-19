@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.union
@@ -52,6 +54,9 @@ import me.rerere.rikkahub.ui.components.ui.GlobalAppBackground
 import me.rerere.rikkahub.ui.components.ui.LocalGlassBackdrop
 import me.rerere.rikkahub.ui.components.ui.LocalAppearanceBackground
 import me.rerere.rikkahub.ui.components.ui.AppearanceBackgroundSpec
+import me.rerere.rikkahub.ui.components.ui.IsolatedAppearanceSurface
+import me.rerere.rikkahub.ui.components.richtext.previewBackgroundForeground
+import me.rerere.rikkahub.ui.components.richtext.previewBackgroundScript
 import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
 import me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -74,7 +79,6 @@ import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.View
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.richtext.installHtmlPreviewDependencies
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
@@ -85,15 +89,30 @@ import org.jsoup.Jsoup
 
 private const val FULLSCREEN_PREVIEW_STYLE_ID = "rikkahub-fullscreen-preview-style"
 private const val FULLSCREEN_PREVIEW_BODY_CLASS = "rikkahub-fullscreen-preview"
+private const val READONLY_TERMINAL_SELECTOR = "meta[name=rikkahub-preview][content=terminal-readonly]"
+
+internal fun isReadonlyTerminalPreview(content: String): Boolean =
+    content.contains("terminal-readonly") && Jsoup.parse(content).head().selectFirst(READONLY_TERMINAL_SELECTOR) != null
+
+internal fun previewSupportsGlobalBackground(content: String): Boolean =
+    !isReadonlyTerminalPreview(content) && (!me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(content) ||
+        me.rerere.rikkahub.ui.components.richtext.isDecorativeGeometryPreview(content))
 
 internal fun prepareFullscreenPreviewHtml(content: String, useGlobalBackground: Boolean = false): String {
     if (content.isBlank()) return content
     val document = Jsoup.parse(content)
-    document.outputSettings().prettyPrint(false)
-    // Also repair raw HTML already cached by older builds. Typed renderers retain their loaders.
-    if (document.getElementById("rikkahub-responsive-preview") != null) {
-        installHtmlPreviewDependencies(document)
+    // A read-only terminal fits its own viewport and allows only fixed local scripts.
+    // Diagram pan scripts and flex layouts would conflict with its scrolling text grid.
+    if (document.head().selectFirst(READONLY_TERMINAL_SELECTOR) != null) {
+        document.outputSettings().prettyPrint(false)
+        document.body().attr("data-embedded", "false")
+        return document.outerHtml()
     }
+    if (me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(content))
+        return me.rerere.rikkahub.ui.components.richtext.prepareGeometryFullscreenHtml(content, useGlobalBackground)
+    document.outputSettings().prettyPrint(false)
+    // Never infer executable dependencies from author HTML, including old markers.
+    // Pre-policy cache entries are rejected by the cache namespace migration.
     document.body().addClass(FULLSCREEN_PREVIEW_BODY_CLASS)
     document.select("html,body").forEach {
         if (useGlobalBackground) it.addClass("rikka-preview-global-background") else it.removeClass("rikka-preview-global-background")
@@ -143,25 +162,8 @@ internal fun prepareFullscreenPreviewHtml(content: String, useGlobalBackground: 
     document.select("#rikkahub-fullscreen-pan-script,#rikkahub-fullscreen-background-script").remove()
     document.body().appendElement("script").attr("id", "rikkahub-fullscreen-pan-script").attr("src",
         "https://rikkahub.local/assets/html/fullscreen-pan.js")
-    document.body().appendElement("script").attr("id", "rikkahub-fullscreen-background-script").append(
-        """
-        (function() {
-        const initial = document.body.classList.contains('rikka-preview-global-background');
-        document.documentElement.classList.remove('rikka-preview-global-background');
-        document.body.classList.remove('rikka-preview-global-background');
-        const container = document.getElementById('diagram-container') || document.getElementById('renderer');
-        if (container && !container.classList.contains('leaflet-container')) {
-          const paper = getComputedStyle(container).backgroundColor;
-          if (paper !== 'rgba(0, 0, 0, 0)' && paper !== 'transparent') document.body.style.setProperty('--rikka-preview-paper', paper);
-        }
-        window.rikkaSetPreviewBackground = function(enabled) {
-          document.documentElement.classList.toggle('rikka-preview-global-background', enabled);
-          document.body.classList.toggle('rikka-preview-global-background', enabled);
-        };
-        window.rikkaSetPreviewBackground(initial);
-        })();
-        """.trimIndent(),
-    )
+    document.body().appendElement("script").attr("id", "rikkahub-fullscreen-background-script")
+        .attr("src", "https://rikkahub.local/assets/html/fullscreen-background.js")
     document.head().appendElement("style").attr("id", "rikkahub-fullscreen-background-style").append(
         """
         html.rikka-preview-global-background, body.rikka-preview-global-background {
@@ -226,6 +228,21 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
         }
     }
     val preview = cached?.takeIf { it.first == contentId }?.second
+    val selfManagedPreview = remember(url, preview) {
+        url.isEmpty() && (isReadonlyTerminalPreview(preview?.getOrNull().orEmpty()) ||
+            me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(preview?.getOrNull().orEmpty()))
+    }
+    val geometryPreview = remember(url, preview) {
+        url.isEmpty() && me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(preview?.getOrNull().orEmpty())
+    }
+    val backgroundSupported = remember(url, preview) {
+        url.isEmpty() && preview?.isSuccess == true && previewSupportsGlobalBackground(preview.getOrThrow())
+    }
+    val staticHtmlPreview = remember(url, preview) {
+        url.isEmpty() && me.rerere.rikkahub.ui.components.richtext.isStaticHtmlPreview(preview?.getOrNull().orEmpty())
+    }
+    val decorativeChrome = geometryPreview && backgroundSupported && previewBackgroundEnabled
+    val chromeForeground = previewBackgroundForeground()
     val state = if (url.isNotEmpty()) {
         rememberWebViewState(
             url = url,
@@ -242,6 +259,8 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
             baseUrl = WEB_VIEW_BASE_URL,
             mimeType = "text/html",
             settings = {
+                blockNetworkLoads = selfManagedPreview || staticHtmlPreview
+                if (selfManagedPreview || staticHtmlPreview) domStorageEnabled = false
                 builtInZoomControls = true
                 displayZoomControls = false
                 useWideViewPort = true
@@ -256,9 +275,9 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
 
     // Update CSS after loading too: AndroidView.update can run before the page defines the function.
     // Do not reload/rebuild the document when toggling; preserve pan, zoom and renderer state.
-    LaunchedEffect(state.webView, state.loadGeneration, state.isLoading, previewBackgroundEnabled) {
-        if (url.isEmpty() && !state.isLoading) state.webView?.evaluateJavascript(
-            "window.rikkaSetPreviewBackground && window.rikkaSetPreviewBackground($previewBackgroundEnabled);", null)
+    LaunchedEffect(state.webView, state.loadGeneration, state.isLoading, previewBackgroundEnabled, backgroundSupported, chromeForeground) {
+        if (backgroundSupported && !state.isLoading) state.webView?.evaluateJavascript(
+            previewBackgroundScript(previewBackgroundEnabled, chromeForeground), null)
     }
 
     BackHandler(onClose != null) { onClose?.invoke() }
@@ -342,7 +361,7 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
         }
     ) {
         Box(Modifier.fillMaxSize().then(if (url.isEmpty()) Modifier.background(baseScheme.background.copy(alpha = 1f)) else Modifier)) {
-        if (previewBackgroundEnabled) {
+        if (previewBackgroundEnabled && backgroundSupported) {
             // The preview is its own window; never register it as the chat's backdrop source.
             CompositionLocalProvider(LocalGlassBackdrop provides null) {
                 MaterialTheme(colorScheme = baseScheme) { GlobalAppBackground(settings, Modifier.fillMaxSize()) }
@@ -356,59 +375,71 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
             WebView(
                 state = state,
                 transparentBackground = url.isEmpty(),
+                nativeZoomEnabled = !geometryPreview,
                 onUpdated = { view ->
-                    if (url.isEmpty()) view.evaluateJavascript(
-                        "window.rikkaSetPreviewBackground && window.rikkaSetPreviewBackground($previewBackgroundEnabled);",
+                    if (backgroundSupported) view.evaluateJavascript(
+                        previewBackgroundScript(previewBackgroundEnabled, chromeForeground),
                         null,
                     )
                 },
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(it),
+                    .padding(it)
+                    .then(if (geometryPreview) Modifier.windowInsetsPadding(
+                        WindowInsets.safeDrawing.union(WindowInsets.statusBarsIgnoringVisibility)
+                            .union(WindowInsets.navigationBarsIgnoringVisibility).union(WindowInsets.displayCutout)
+                    ).padding(bottom = 56.dp) else Modifier),
             )
         }
         if (url.isEmpty()) {
             val navigator = LocalNavController.current
-            Row(
-                Modifier.align(Alignment.BottomEnd)
+            PreviewControlsSurface(
+                inheritBackground = decorativeChrome,
+                modifier = Modifier.align(Alignment.BottomEnd)
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.union(WindowInsets.navigationBarsIgnoringVisibility)
                             .only(WindowInsetsSides.Bottom + WindowInsetsSides.End)
                     )
-                    .padding(12.dp)
-                    .background(baseScheme.surface.copy(alpha = .94f), MaterialTheme.shapes.large)
+                    .padding(12.dp),
             ) {
+            Row {
                 CompositionLocalProvider(
-                    androidx.compose.material3.LocalContentColor provides baseScheme.onSurface,
+                    androidx.compose.material3.LocalContentColor provides if (decorativeChrome)
+                        androidx.compose.material3.LocalContentColor.current else baseScheme.onSurface,
                     androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 40.dp,
                 ) {
                     IconButton(onClick = onClose ?: { navigator.popBackStack() }, modifier = Modifier.size(40.dp)) {
                         Icon(HugeIcons.ArrowLeft01, contentDescription = stringResource(R.string.back), modifier = Modifier.size(18.dp))
                     }
-                    IconButton(
-                        onClick = { state.webView?.evaluateJavascript("window.rikkaResetPan && window.rikkaResetPan();", null) },
-                        modifier = Modifier.size(40.dp),
-                    ) {
-                        Icon(HugeIcons.Refresh01, contentDescription = "重置视图", modifier = Modifier.size(18.dp))
+                    if (!selfManagedPreview) {
+                        IconButton(
+                            onClick = { state.webView?.evaluateJavascript("window.rikkaResetPan && window.rikkaResetPan();", null) },
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(HugeIcons.Refresh01, contentDescription = "重置视图", modifier = Modifier.size(18.dp))
+                        }
                     }
-                    androidx.compose.material3.IconToggleButton(
-                        checked = settings.advancedAppearanceSetting.applyGlobalBackgroundToFullscreenPreview,
-                        enabled = settings.isGlobalBackgroundActive(),
-                        modifier = Modifier.size(40.dp),
-                        onCheckedChange = { enabled -> scope.launch {
-                            try { settingsStore.updateAdvancedAppearance { it.copy(applyGlobalBackgroundToFullscreenPreview = enabled) } }
-                            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                            catch (_: Exception) { toaster.show("预览背景设置保存失败，请重试", type = com.dokar.sonner.ToastType.Error) }
-                        } },
-                    ) {
-                        Icon(HugeIcons.View, modifier = Modifier.size(18.dp),
-                            contentDescription = stringResource(if (settings.advancedAppearanceSetting.applyGlobalBackgroundToFullscreenPreview)
-                                R.string.webview_preview_background_disable else R.string.webview_preview_background_enable))
+                    if (backgroundSupported) {
+                        androidx.compose.material3.IconToggleButton(
+                            checked = settings.advancedAppearanceSetting.applyGlobalBackgroundToFullscreenPreview,
+                            enabled = settings.isGlobalBackgroundActive(),
+                            modifier = Modifier.size(40.dp),
+                            onCheckedChange = { enabled -> scope.launch {
+                                try { settingsStore.updateAdvancedAppearance { it.copy(applyGlobalBackgroundToFullscreenPreview = enabled) } }
+                                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (_: Exception) { toaster.show("预览背景设置保存失败，请重试", type = com.dokar.sonner.ToastType.Error) }
+                            } },
+                        ) {
+                            Icon(HugeIcons.View, modifier = Modifier.size(18.dp),
+                                contentDescription = stringResource(if (settings.advancedAppearanceSetting.applyGlobalBackgroundToFullscreenPreview)
+                                    R.string.webview_preview_background_disable else R.string.webview_preview_background_enable))
+                        }
                     }
                     IconButton(onClick = { showConsoleSheet = true }, modifier = Modifier.size(40.dp)) {
                         Icon(HugeIcons.Bug01, contentDescription = stringResource(R.string.webview_console_logs), modifier = Modifier.size(18.dp))
                     }
                 }
+            }
             }
         }
         }
@@ -461,5 +492,23 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PreviewControlsSurface(inheritBackground: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+    val appearance = LocalSettings.current.advancedAppearanceSetting
+    val baseScheme = LocalBackgroundBaseColorScheme.current ?: MaterialTheme.colorScheme
+    if (inheritBackground) {
+        // Reuse the existing surface tint/readability policy; no duplicate wallpaper.
+        IsolatedAppearanceSurface(
+            style = appearance.pageSurfaceStyle,
+            surfaceOpacity = appearance.pageSurfaceOpacity,
+            blurRadius = appearance.globalBackgroundBlurRadius,
+            modifier = modifier,
+            shape = MaterialTheme.shapes.large,
+        ) { content() }
+    } else {
+        Box(modifier.background(baseScheme.surface.copy(alpha = .94f), MaterialTheme.shapes.large)) { content() }
     }
 }

@@ -4,8 +4,11 @@ import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.GeminiImageGenerationOptions
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.GptImage26Options
+import me.rerere.ai.provider.forOutputFormat
 
 /** Shared parameter state used by the full image page and compact chat panel. */
+@kotlinx.serialization.Serializable
 data class ImageGenerationRequestState(
     val prompt: String = "",
     val size: String = "auto",
@@ -33,12 +36,16 @@ data class ImageGenerationRequestState(
     val sequentialMaxImages: Int = 15,
     val promptOptimizationMode: String? = null,
     val geminiOptions: GeminiImageGenerationOptions = GeminiImageGenerationOptions(),
+    val gptImage26Options: GptImage26Options = GptImage26Options(),
 ) {
     fun normalized() = copy(count = count.coerceAtLeast(1))
 }
 
 /** Remove options that the selected provider/model explicitly cannot accept. */
-fun ImageGenerationRequestState.constrained(constraints: ImageGenerationConstraints): ImageGenerationRequestState {
+fun ImageGenerationRequestState.constrained(constraints: ImageGenerationConstraints): ImageGenerationRequestState =
+    constrainedForOutput(constraints.forOutputFormat(outputFormat))
+
+private fun ImageGenerationRequestState.constrainedForOutput(constraints: ImageGenerationConstraints): ImageGenerationRequestState {
     val sizes = constraints.supportedSizes
     val normalizedSize = when {
         !constraints.supportsSize -> "auto"
@@ -51,6 +58,9 @@ fun ImageGenerationRequestState.constrained(constraints: ImageGenerationConstrai
         } else 1,
         size = normalizedSize,
         quality = quality.takeIf { it != null && it in constraints.supportedQualityValues },
+        gptImage26Options = if (constraints.supportsGptImage26Options) gptImage26Options.copy(
+            version = gptImage26Options.version?.takeIf { it in constraints.supportedGptImage26Versions },
+        ) else GptImage26Options(),
         outputFormat = outputFormat.takeIf { it != null && it in constraints.supportedOutputFormats },
         background = background.takeIf { it != null && it in constraints.supportedBackgroundValues },
         outputCompression = outputCompression.coerceIn(0, 100).takeIf { constraints.supportsOutputCompression } ?: 100,
@@ -110,6 +120,7 @@ fun ImageGenerationRequestState.toParams(model: Model): ImageGenerationParams {
         sequentialMaxImages = state.sequentialMaxImages,
         promptOptimizationMode = state.promptOptimizationMode,
         geminiOptions = state.geminiOptions,
+        gptImage26Options = state.gptImage26Options,
         customHeaders = model.customHeaders,
         customBody = model.customBodies,
     )
@@ -146,6 +157,7 @@ fun ImageGenerationRequestState.toEditParams(model: Model, images: List<String>)
         sequentialMaxImages = state.sequentialMaxImages,
         promptOptimizationMode = state.promptOptimizationMode,
         geminiOptions = state.geminiOptions,
+        gptImage26Options = state.gptImage26Options,
         customHeaders = model.customHeaders,
         customBody = model.customBodies,
     )

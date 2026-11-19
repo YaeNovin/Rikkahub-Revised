@@ -36,6 +36,7 @@ import me.rerere.ai.provider.ProviderCapability
 import me.rerere.ai.provider.ProviderRequestDiagnostics
 import me.rerere.ai.provider.ProviderRequestOperation
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.openAIAuthentication
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.VideoGenerationConstraints
@@ -44,7 +45,9 @@ import me.rerere.ai.provider.VideoGenerationTaskSnapshot
 import me.rerere.ai.provider.VideoReferenceImage
 import me.rerere.ai.provider.constrained
 import me.rerere.ai.provider.contextWindowTokensOrNull
+import me.rerere.ai.provider.forOutputFormat
 import me.rerere.ai.provider.inferModelTypeFromId
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.providerRequestFailure
 import me.rerere.ai.provider.usesVolcengineMultimodalEmbeddingApi
 import me.rerere.ai.provider.supportsVolcengineMultimodalDimensions
@@ -108,7 +111,7 @@ class OpenAIProvider(
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models")
-                .addHeader("Authorization", "Bearer $key")
+                .openAIAuthentication(providerSetting.baseUrl, key)
                 .get()
                 .build()
 
@@ -172,7 +175,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<StreamChunk> = if (providerSetting.useResponseApi) {
+    ): Flow<StreamChunk> = if (providerSetting.shouldUseResponsesApi(params)) {
         responseAPI.streamText(
             providerSetting = providerSetting,
             messages = messages,
@@ -190,7 +193,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult = if (providerSetting.useResponseApi) {
+    ): TextGenerationResult = if (providerSetting.shouldUseResponsesApi(params)) {
         responseAPI.generateText(
             providerSetting = providerSetting,
             messages = messages,
@@ -510,25 +513,35 @@ class OpenAIProvider(
         }
         cleanupStaleTemporaryImages()
 
-        val constraints = imageGenerationConstraints(providerSetting, params.model)
+        val baseConstraints = imageGenerationConstraints(providerSetting, params.model)
+        val constraints = baseConstraints.forOutputFormat(params.requestedImageFileFormat(baseConstraints))
         val outputCount = params.numOfImages.coerceIn(1, constraints.maxOutputImages)
 
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
 
         val requestBody = json.encodeToString(
-            buildOpenAIImageGenerationRequestBody(params, constraints)
+            if (isMediaImagePath(providerSetting.imageApiPath(params.model))) buildLingkeImageRequest(params, constraints = constraints)
+            else buildOpenAIImageGenerationRequestBody(params, constraints)
         )
 
         Log.d(TAG, "generateImage: model=${params.model.modelId}, count=$outputCount")
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/generations")
+            .url(imageApiUrl(providerSetting.baseUrl, providerSetting.imageApiPath(params.model)))
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
+
+        if (isMediaImagePath(providerSetting.imageApiPath(params.model))) {
+            LingkeMediaImageAPI(client).generate(request, providerSetting.baseUrl).forEach { url ->
+                val item = downloadImageToTemporaryFile(url)
+                try { emit(item) } catch (e: Throwable) { item.temporaryFilePath?.let(::File)?.delete(); throw e }
+            }
+            return@flow
+        }
 
         client.newCall(request).awaitAndUse { response ->
             if (!response.isSuccessful) {
@@ -559,7 +572,8 @@ class OpenAIProvider(
         }
         cleanupStaleTemporaryImages()
 
-        val constraints = imageGenerationConstraints(providerSetting, params.model)
+        val baseConstraints = imageGenerationConstraints(providerSetting, params.model)
+        val constraints = baseConstraints.forOutputFormat(params.requestedImageFileFormat(baseConstraints))
         val sourceImages = params.images.take(constraints.maxReferenceImages)
         val outputCount = params.numOfImages.coerceIn(1, constraints.maxOutputImages)
 
@@ -572,8 +586,29 @@ class OpenAIProvider(
                 }
             }
         }
-        validateEditImageFiles(params.model.modelId, constraints, imageFiles)
+        val imagePath = providerSetting.imageApiPath(params.model, edit = true,
+            generationEndpointForEdit = constraints.usesGenerationEndpointForEdit)
+        if (isMediaImagePath(imagePath)) {
+            val mediaParams = ImageGenerationParams(model = params.model, prompt = params.prompt,
+                numOfImages = params.numOfImages, size = params.size, quality = params.quality,
+                outputFormat = params.outputFormat, background = params.background, resolution = params.resolution,
+                outputCompression = params.outputCompression, moderation = params.moderation,
+                gptImage26Options = params.gptImage26Options, customBody = params.customBody)
+            val body = buildLingkeImageRequest(mediaParams, imageFiles, constraints)
+            val request = Request.Builder().url(imageApiUrl(providerSetting.baseUrl, imagePath))
+                .headers(params.customHeaders.toHeaders()).header("Authorization", "Bearer $key")
+                .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+            LingkeMediaImageAPI(client).generate(request, providerSetting.baseUrl).forEach { url ->
+                val item = downloadImageToTemporaryFile(url)
+                try { emit(item) } catch (e: Throwable) { item.temporaryFilePath?.let(::File)?.delete(); throw e }
+            }
+            return@flow
+        }
+        validateEditImageFiles(params.model.parameterModelId(), constraints, imageFiles)
         val requestBody = when {
+            constraints.supportsGptImage26Options -> buildGptImage26EditRequestBody(
+                params, constraints, imageFiles.map { it to it.imageMediaType() },
+            )
             constraints.usesGenerationEndpointForEdit -> buildSeedreamImageEditRequestBody(
                 params = params,
                 constraints = constraints,
@@ -634,13 +669,7 @@ class OpenAIProvider(
         }
 
         val request = Request.Builder()
-            .url(
-                "${providerSetting.baseUrl}" + if (constraints.usesGenerationEndpointForEdit) {
-                    "/images/generations"
-                } else {
-                    "/images/edits"
-                }
-            )
+            .url(imageApiUrl(providerSetting.baseUrl, imagePath))
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .post(requestBody)
@@ -816,16 +845,19 @@ class OpenAIProvider(
         providerSetting: ProviderSetting,
         model: Model,
     ): ImageGenerationConstraints {
-        val normalizedModel = model.modelId.lowercase()
+        val normalizedModel = model.parameterModelId().lowercase()
+        val usesLingkeMedia = providerSetting is ProviderSetting.OpenAI &&
+            isMediaImagePath(providerSetting.imageApiPath(model))
         val isXaiProvider = providerSetting is ProviderSetting.OpenAI &&
             providerSetting.baseUrl.contains("x.ai", ignoreCase = true)
         val isXaiImage = (isXaiProvider && normalizedModel.contains("image")) ||
             XAI_IMAGE_MODEL_MARKERS.any(normalizedModel::contains)
         val isXaiImagineImage = normalizedModel.contains("grok-imagine-image")
         val isXaiImage2 = isXaiImagineImage && normalizedModel.contains("grok-imagine-image-2")
-        val isGptImage2 = GPT_IMAGE_2_MODEL_PATTERN.containsMatchIn(normalizedModel)
+        val isGptImage26 = isGptImage26(normalizedModel)
+        val isGptImage2 = isGptImage26 || GPT_IMAGE_2_MODEL_PATTERN.containsMatchIn(normalizedModel)
         val isGptImage25 = GPT_IMAGE_25_MODEL_PATTERN.containsMatchIn(normalizedModel)
-        val isGptImage = GPT_IMAGE_MODEL_PATTERN.containsMatchIn(normalizedModel)
+        val isGptImage = isGptImage26 || GPT_IMAGE_MODEL_PATTERN.containsMatchIn(normalizedModel)
         val isDallE3 = normalizedModel.contains("dall-e-3")
         val isDallE2 = normalizedModel.contains("dall-e-2")
         val isSeedream = normalizedModel.contains("seedream")
@@ -855,6 +887,7 @@ class OpenAIProvider(
         val supportedSizes = when {
             isXaiImage -> XAI_IMAGE_ASPECT_RATIOS
             isSeedream -> SEEDREAM_IMAGE_SIZES
+            isGptImage26 -> GPT_IMAGE_25_PRESET_SIZES + "512x512"
             isGptImage25 -> GPT_IMAGE_25_PRESET_SIZES
             isGptImage2 -> GPT_IMAGE_2_PRESET_SIZES
             isGptImage -> GPT_IMAGE_SIZES
@@ -876,6 +909,7 @@ class OpenAIProvider(
             supportsOutputCount = !isSeedream,
             maxReferenceImages = when {
                 !supportsEdit -> 0
+                isGptImage26 -> 16
                 isGptImage25 -> 10
                 isGptImage -> 16
                 isEditableSeedream -> 10
@@ -897,7 +931,7 @@ class OpenAIProvider(
                 isSeedream -> 4_096
                 else -> null
             },
-            customSizeMinPixels = if (isGptImage2 && !isGptImage25) GPT_IMAGE_2_MIN_PIXELS else null,
+            customSizeMinPixels = if (isGptImage2 && !isGptImage25 && !isGptImage26) GPT_IMAGE_2_MIN_PIXELS else null,
             customSizeMaxPixels = when {
                 isGptImage25 -> GPT_IMAGE_25_MAX_PIXELS
                 isGptImage2 -> GPT_IMAGE_2_MAX_PIXELS
@@ -912,19 +946,21 @@ class OpenAIProvider(
             sizeRequestField = if (isXaiImage) "aspect_ratio" else "size",
             supportedQualityValues = when {
                 isXaiImage2 -> XAI_IMAGE_2_QUALITY
-                isGptImage25 -> GPT_IMAGE_25_QUALITY
+                isGptImage25 || isGptImage26 -> GPT_IMAGE_25_QUALITY
                 isGptImage -> GPT_IMAGE_QUALITY
                 isDallE3 -> DALL_E_3_QUALITY
                 isDallE2 -> DALL_E_2_QUALITY
                 else -> emptySet()
             },
             supportedOutputFormats = when {
+                isGptImage26 -> GPT_IMAGE_OUTPUT_FORMATS + setOf("gif", "svg")
                 isGptImage -> GPT_IMAGE_OUTPUT_FORMATS
                 isFlux || isStableDiffusion -> STABLE_IMAGE_OUTPUT_FORMATS
                 isXaiImage || isSeedream || isDallE2 || isDallE3 -> URL_OR_BASE64_FORMATS
                 else -> emptySet()
             },
             supportedBackgroundValues = when {
+                isGptImage26 -> GPT_IMAGE_25_BACKGROUNDS
                 isGptImage25 -> GPT_IMAGE_25_BACKGROUNDS
                 isGptImage2 -> GPT_IMAGE_2_BACKGROUNDS
                 isGptImage -> GPT_IMAGE_BACKGROUNDS
@@ -1012,9 +1048,10 @@ class OpenAIProvider(
                 )
                 else -> emptySet()
             },
-            usesJsonImageEdit = isXaiImage || isEditableSeedream,
+            usesJsonImageEdit = isXaiImage || isEditableSeedream || isGptImage26,
             usesGenerationEndpointForEdit = isEditableSeedream,
-        )
+            supportsGptImage26Options = isGptImage26,
+        ).let { if (usesLingkeMedia) it.withLingkeMediaTransport() else it }
     }
 
     companion object {
@@ -1167,6 +1204,11 @@ internal fun openAIImageRequestFailure(operation: String, response: Response): T
 internal fun buildOpenAIImageGenerationRequestBody(
     params: ImageGenerationParams,
     constraints: ImageGenerationConstraints,
+): JsonObject = buildOpenAIImageRequestBody(params, constraints.forOutputFormat(params.requestedImageFileFormat(constraints)))
+
+private fun buildOpenAIImageRequestBody(
+    params: ImageGenerationParams,
+    constraints: ImageGenerationConstraints,
 ): JsonObject {
     val outputCount = params.numOfImages.coerceIn(1, constraints.maxOutputImages)
     val explicitOptions = params.explicitImageOptions(constraints)
@@ -1181,7 +1223,7 @@ internal fun buildOpenAIImageGenerationRequestBody(
                 constraints.acceptsImageOption(CustomBody(key, value))
         }
 
-    return buildJsonObject {
+    val body = buildJsonObject {
         customFields.forEach { (key, value) -> put(key, value) }
         put("model", params.model.modelId)
         put("prompt", params.prompt)
@@ -1192,9 +1234,22 @@ internal fun buildOpenAIImageGenerationRequestBody(
         }
         advancedOptions.forEach { (key, value) -> put(key, value) }
     }
+    return if (constraints.supportsGptImage26Options) normalizeGptImage26Request(body) else body
 }
 
 internal fun buildXaiImageEditRequestBody(
+    params: ImageEditParams,
+    constraints: ImageGenerationConstraints,
+    images: List<Pair<File, String>>,
+): RequestBody = buildJsonImageEditRequestBody(params, constraints, images)
+
+internal fun buildGptImage26EditRequestBody(
+    params: ImageEditParams,
+    constraints: ImageGenerationConstraints,
+    images: List<Pair<File, String>>,
+): RequestBody = buildJsonImageEditRequestBody(params, constraints.forOutputFormat(params.requestedImageFileFormat(constraints)), images)
+
+private fun buildJsonImageEditRequestBody(
     params: ImageEditParams,
     constraints: ImageGenerationConstraints,
     images: List<Pair<File, String>>,
@@ -1226,7 +1281,10 @@ internal fun buildXaiImageEditRequestBody(
         }
         advancedOptions.forEach { (key, value) -> put(key, value) }
     }
-    return XaiImageEditRequestBody(metadata, images)
+    return XaiImageEditRequestBody(
+        if (constraints.supportsGptImage26Options) normalizeGptImage26Request(metadata) else metadata,
+        images, openAIStyle = constraints.supportsGptImage26Options,
+    )
 }
 
 internal fun buildSeedreamImageEditRequestBody(
@@ -1368,7 +1426,7 @@ private fun ImageGenerationParams.advancedImageOptions(
     sequentialImageGeneration = sequentialImageGeneration,
     sequentialMaxImages = sequentialMaxImages,
     promptOptimizationMode = promptOptimizationMode,
-)
+) + gptImage26Options.requestFields(constraints, requestedImageFileFormat(constraints))
 
 private fun ImageEditParams.advancedImageOptions(
     constraints: ImageGenerationConstraints,
@@ -1391,7 +1449,7 @@ private fun ImageEditParams.advancedImageOptions(
     sequentialImageGeneration = sequentialImageGeneration,
     sequentialMaxImages = sequentialMaxImages,
     promptOptimizationMode = promptOptimizationMode,
-)
+) + gptImage26Options.requestFields(constraints, requestedImageFileFormat(constraints))
 
 private fun buildAdvancedImageOptions(
     constraints: ImageGenerationConstraints,
@@ -1480,14 +1538,14 @@ private fun ImageGenerationConstraints.outputFormatRequestField(): String =
     if (supportedOutputFormats.any { it in IMAGE_FILE_FORMATS }) "output_format" else "response_format"
 
 private fun ImageGenerationParams.requestedImageFileFormat(constraints: ImageGenerationConstraints): String =
-    outputFormat?.takeIf { it in IMAGE_FILE_FORMATS }
+    outputFormat?.takeIf { it in IMAGE_FILE_FORMATS && it in constraints.supportedOutputFormats }
         ?: customBody.lastValidImageFileFormat(constraints)
-        ?: if (constraints.usesJsonImageEdit) "jpeg" else "png"
+        ?: if (constraints.usesJsonImageEdit && !constraints.supportsGptImage26Options) "jpeg" else "png"
 
 private fun ImageEditParams.requestedImageFileFormat(constraints: ImageGenerationConstraints): String =
-    outputFormat?.takeIf { it in IMAGE_FILE_FORMATS }
+    outputFormat?.takeIf { it in IMAGE_FILE_FORMATS && it in constraints.supportedOutputFormats }
         ?: customBody.lastValidImageFileFormat(constraints)
-        ?: if (constraints.usesJsonImageEdit) "jpeg" else "png"
+        ?: if (constraints.usesJsonImageEdit && !constraints.supportsGptImage26Options) "jpeg" else "png"
 
 private fun List<CustomBody>.lastValidImageFileFormat(constraints: ImageGenerationConstraints): String? =
     lastOrNull { it.key.trim().equals("output_format", ignoreCase = true) && constraints.acceptsImageOption(it) }
@@ -1498,6 +1556,7 @@ private fun List<CustomBody>.lastValidImageFileFormat(constraints: ImageGenerati
 private class XaiImageEditRequestBody(
     private val metadata: JsonObject,
     private val images: List<Pair<File, String>>,
+    private val openAIStyle: Boolean = false,
 ) : RequestBody() {
     override fun contentType() = "application/json".toMediaType()
 
@@ -1510,7 +1569,7 @@ private class XaiImageEditRequestBody(
             sink.writeUtf8(value.toString())
         }
         if (metadata.isNotEmpty()) sink.writeUtf8(",")
-        if (images.size == 1) {
+        if (images.size == 1 && !openAIStyle) {
             sink.writeUtf8("\"image\":")
             writeImage(sink, images.single())
         } else {
@@ -1525,9 +1584,9 @@ private class XaiImageEditRequestBody(
     }
 
     private fun writeImage(sink: BufferedSink, image: Pair<File, String>) {
-        sink.writeUtf8("{\"url\":")
+        sink.writeUtf8(if (openAIStyle) "{\"image_url\":" else "{\"url\":")
         writeImageDataUri(sink, image)
-        sink.writeUtf8(",\"type\":\"image_url\"}")
+        sink.writeUtf8(if (openAIStyle) "}" else ",\"type\":\"image_url\"}")
     }
 }
 
@@ -1570,9 +1629,9 @@ private fun writeImageDataUri(sink: BufferedSink, image: Pair<File, String>) {
 }
 
 private val CUSTOM_IMAGE_SIZE_REGEX = Regex("^(\\d+)x(\\d+)$")
-private val IMAGE_FILE_FORMATS = setOf("png", "jpeg", "webp")
+private val IMAGE_FILE_FORMATS = setOf("png", "jpeg", "webp", "gif", "svg")
 private val COMPRESSIBLE_IMAGE_FORMATS = setOf("jpeg", "webp")
-private val TRANSPARENCY_IMAGE_FORMATS = setOf(null, "png", "webp")
+private val TRANSPARENCY_IMAGE_FORMATS = setOf(null, "png", "webp", "svg")
 private val URL_OR_BASE64_FORMATS = setOf("url", "b64_json")
 private val RESERVED_XAI_EDIT_FIELDS =
     setOf("model", "prompt", "n", "image", "images", "image[]", "size", "aspect_ratio")

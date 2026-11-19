@@ -234,7 +234,7 @@
 
         // Configure markdown-it
         const md = new MarkdownIt({
-            html: true,         // Enable HTML tags in source
+            html: false,        // Author HTML remains escaped source, never live elements.
             xhtmlOut: false,    // Use '/' to close single tags (<br />)
             breaks: false,      // Convert '\n' in paragraphs into <br>
             langPrefix: 'language-',  // CSS language prefix for fenced blocks
@@ -286,7 +286,8 @@
         mermaid.initialize({
             startOnLoad: false,
             theme: prefersDark ? 'dark' : 'default',
-            securityLevel: 'loose',
+            securityLevel: 'strict',
+            flowchart: { htmlLabels: false },
             fontFamily: 'inherit'
         });
 
@@ -329,7 +330,7 @@
                         katex.render(el.textContent, el, {
                             throwOnError: false,
                             errorColor: '#cc0000',
-                            trust: true
+                            trust: false
                         });
                     } catch (e) {
                         console.warn('KaTeX inline render error:', e);
@@ -342,7 +343,7 @@
                             displayMode: true,
                             throwOnError: false,
                             errorColor: '#cc0000',
-                            trust: true
+                            trust: false
                         });
                     } catch (e) {
                         console.warn('KaTeX block render error:', e);

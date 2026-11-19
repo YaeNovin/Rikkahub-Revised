@@ -22,7 +22,8 @@ private enum class HtmlPreviewLibrary(
 
     // Inspect executable script text only, never prose, code examples or JSON data blocks.
     val reference = Regex("(?<![A-Za-z0-9_$])${Regex.escape(global)}(?![A-Za-z0-9_$])")
-    val fileAliases: Set<String> = setOf(fileName, "$packageName.js", "$packageName.min.js", "graphviz.min.js")
+    val fileAliases: Set<String> = setOf(fileName, "$packageName.js", "$packageName.min.js") +
+        if (packageName == "@hpcc-js/wasm-graphviz") setOf("graphviz.min.js", "index.min.js", "index.umd.js", "index.umd.cjs") else emptySet()
 }
 
 private val SCRIPT_TYPES = setOf("", "text/javascript", "application/javascript", "text/ecmascript", "application/ecmascript")
@@ -37,7 +38,10 @@ private fun localPreviewLibrary(source: String): HtmlPreviewLibrary? {
     val uri = runCatching { URI(source.trim()) }.getOrNull() ?: return null
     val path = uri.path?.lowercase(Locale.ROOT) ?: return null
     val host = uri.host?.lowercase(Locale.ROOT)
-    val library = HtmlPreviewLibrary.entries.firstOrNull { path.substringAfterLast('/') in it.fileAliases }
+    // Generic index bundles are meaningful only inside a known CDN package, never by basename.
+    val library = HtmlPreviewLibrary.entries.firstOrNull {
+        path.substringAfterLast('/') in it.fileAliases && !path.substringAfterLast('/').startsWith("index.")
+    }
     if (host == "rikkahub.local" || (host == null && uri.scheme == null && uri.rawAuthority == null)) {
         // Known app asset paths and bare filenames often appear in model-written HTML.
         return library?.takeIf {
@@ -52,12 +56,17 @@ private fun localPreviewLibrary(source: String): HtmlPreviewLibrary? {
         "unpkg.com" -> 0
         else -> if (segments.firstOrNull() == "npm") 1 else return null
     }
-    val packageName = segments.getOrNull(packageIndex)?.substringBefore('@') ?: return null
+    val firstSegment = segments.getOrNull(packageIndex) ?: return null
+    val scoped = firstSegment.startsWith('@')
+    val packageName = if (scoped) {
+        val name = segments.getOrNull(packageIndex + 1)?.substringBefore('@') ?: return null
+        "$firstSegment/$name"
+    } else firstSegment.substringBefore('@')
     val candidate = HtmlPreviewLibrary.entries.firstOrNull {
         it.packageName == packageName || (it == HtmlPreviewLibrary.SMILES && packageName == "smilesdrawer")
     } ?: if (packageName in setOf("@hpcc-js/wasm-graphviz", "@hpcc-js/wasm-graphviz-next")) HtmlPreviewLibrary.GRAPHVIZ else return null
     // Only browser bundles/package roots, not ES modules, plugins or arbitrary same-name files.
-    val suffix = segments.drop(packageIndex + 1)
+    val suffix = segments.drop(packageIndex + if (scoped) 2 else 1)
     return candidate.takeIf {
         suffix.isEmpty() ||
             (host == "cdnjs.cloudflare.com" && suffix.size == 2 && suffix.last() in it.fileAliases) ||

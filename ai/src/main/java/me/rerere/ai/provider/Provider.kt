@@ -157,6 +157,8 @@ data class ImageGenerationConstraints(
     val blockedImageOptionKeys: Set<String> = emptySet(),
     val usesJsonImageEdit: Boolean = false,
     val usesGenerationEndpointForEdit: Boolean = false,
+    val supportsGptImage26Options: Boolean = false,
+    val supportedGptImage26Versions: Set<String> = emptySet(),
 )
 
 enum class ProviderRequestChannel {
@@ -212,6 +214,7 @@ data class TextGenerationParams(
     val deepSeekOptions: DeepSeekGenerationOptions = DeepSeekGenerationOptions(),
     val geminiOptions: GeminiGenerationOptions = GeminiGenerationOptions(),
     val claudeOptions: ClaudeGenerationOptions = ClaudeGenerationOptions(),
+    val miniMaxOptions: MiniMaxGenerationOptions = MiniMaxGenerationOptions(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
     val requestId: String? = null,
@@ -326,6 +329,7 @@ data class QwenGenerationOptions(
     val topK: Int? = null,
     val repetitionPenalty: Float? = null,
     val presencePenalty: Float? = null,
+    val frequencyPenalty: Float? = null,
     val seed: Long? = null,
     val stopSequences: List<String> = emptyList(),
     val preserveThinking: QwenOptionalToggle = QwenOptionalToggle.DEFAULT,
@@ -334,6 +338,9 @@ data class QwenGenerationOptions(
     val responseFormat: QwenResponseFormat = QwenResponseFormat.AUTO,
     val responseSchemaName: String = "response",
     val responseJsonSchema: String = "",
+    val enableSearch: QwenOptionalToggle = QwenOptionalToggle.DEFAULT,
+    val imageDetail: String? = null,
+    val imageMaxPixels: Int? = null,
 )
 
 @Serializable
@@ -410,7 +417,21 @@ data class OpenAIGenerationOptions(
     val reasoningContext: OpenAIReasoningContext = OpenAIReasoningContext.AUTO,
     val reasoningMode: OpenAIReasoningMode = OpenAIReasoningMode.STANDARD,
     val maxToolCalls: Int? = null,
+    val promptCacheTtl: OpenAIPromptCacheTtl = OpenAIPromptCacheTtl.AUTO,
+    val responseFormat: OpenAIResponseFormat = OpenAIResponseFormat.AUTO,
+    val responseJsonSchema: String = "",
+    val responseSchemaName: String = "response",
+    val presencePenalty: Float? = null,
+    val frequencyPenalty: Float? = null,
+    val seed: Long? = null,
+    val stopSequences: List<String> = emptyList(),
 )
+
+@Serializable
+enum class OpenAIResponseFormat(val apiValue: String?) { AUTO(null), TEXT("text"), JSON_OBJECT("json_object"), JSON_SCHEMA("json_schema") }
+
+@Serializable
+enum class OpenAIPromptCacheTtl(val apiValue: String?) { AUTO(null), THIRTY_MINUTES("30m"), TWELVE_HOURS("12h") }
 
 @Serializable
 enum class OpenAITextVerbosity(val apiValue: String?) {
@@ -467,7 +488,11 @@ enum class OpenAIReasoningMode(val apiValue: String?) {
 
 @Serializable
 data class GeminiGenerationOptions(
+    val search: GeminiSearchOptions = GeminiSearchOptions(),
     val includeThoughts: Boolean = true,
+    val codeExecution: Boolean = false,
+    val toolChoice: GeminiToolChoice = GeminiToolChoice.AUTO,
+    val topK: Int? = null,
     val mediaResolution: GeminiMediaResolution = GeminiMediaResolution.AUTO,
     val seed: Int? = null,
     val stopSequences: List<String> = emptyList(),
@@ -477,6 +502,21 @@ data class GeminiGenerationOptions(
     val frequencyPenalty: Float? = null,
     val safetySettings: GeminiSafetySettings = GeminiSafetySettings(),
 )
+
+@Serializable
+enum class GeminiToolChoice { AUTO, ANY, NONE, VALIDATED }
+
+@Serializable
+data class GeminiSearchOptions(
+    // Null preserves the model's existing built-in tool switches.
+    val enabled: Boolean? = null,
+    val urlContext: Boolean? = null,
+    val webSearch: Boolean = true,
+    val imageSearch: Boolean = false,
+    val startTime: String = "",
+    val endTime: String = "",
+)
+
 
 @Serializable
 enum class GeminiMediaResolution(val apiValue: String?) {
@@ -555,6 +595,7 @@ data class ImageGenerationParams(
     val sequentialMaxImages: Int = 15,
     val promptOptimizationMode: String? = null,
     val geminiOptions: GeminiImageGenerationOptions = GeminiImageGenerationOptions(),
+    val gptImage26Options: GptImage26Options = GptImage26Options(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )
@@ -590,6 +631,7 @@ data class ImageEditParams(
     val sequentialMaxImages: Int = 15,
     val promptOptimizationMode: String? = null,
     val geminiOptions: GeminiImageGenerationOptions = GeminiImageGenerationOptions(),
+    val gptImage26Options: GptImage26Options = GptImage26Options(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
 )

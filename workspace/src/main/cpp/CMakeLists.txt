@@ -32,6 +32,10 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
 add_library(termux SHARED
         termux_pty.cpp)
 
+# The app uses this JNI implementation instead of terminal-emulator's bundled library.
+# Keep PT_LOAD alignment explicit even when changing the NDK or target ABI.
+target_link_options(termux PRIVATE "-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
+
 # Specifies libraries CMake should link to your target library. You
 # can link libraries from various origins, such as libraries defined in this
 # build script, prebuilt third-party libraries, or Android system libraries.

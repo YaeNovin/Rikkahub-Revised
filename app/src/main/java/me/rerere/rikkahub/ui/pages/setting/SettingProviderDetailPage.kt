@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
@@ -96,8 +98,11 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.providers.google.isGeminiModel
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.withDisplayName
+import me.rerere.ai.provider.withDetectedCapabilities
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
@@ -152,6 +157,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val appResources by rememberAppResources()
 
     val onEdit = { newProvider: ProviderSetting ->
         val newSettings = settings.copy(
@@ -244,7 +250,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         onEdit = {
                             onEdit(it)
                             toaster.show(
-                                context.getString(R.string.setting_provider_page_save_success),
+                                appResources.getString(R.string.setting_provider_page_save_success),
                                 type = ToastType.Success
                             )
                         },
@@ -524,7 +530,7 @@ private fun ModelList(
 }
 
 @Composable
-private fun ModelSettingsForm(
+internal fun ModelSettingsForm(
     model: Model,
     onModelChange: (Model) -> Unit,
     isEdit: Boolean,
@@ -534,21 +540,8 @@ private fun ModelSettingsForm(
     val scope = rememberCoroutineScope()
 
     fun setModelId(id: String) {
-        val modelType = ModelRegistry.MODEL_TYPE.getData(id)
-        val inputModality = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id)
-        val outputModality = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id)
-        val abilities = ModelRegistry.MODEL_ABILITIES.getData(id)
-        onModelChange(
-            model.copy(
-                modelId = id,
-                displayName = id,
-                type = modelType,
-                inputModalities = inputModality,
-                outputModalities = outputModality,
-                abilities = abilities,
-                contextWindowTokens = inferContextWindowTokens(id),
-            )
-        )
+        val name = if (model.displayName.isBlank() || model.displayName == model.modelId) id else model.displayName
+        onModelChange(model.copy(modelId = id, displayName = name).withDetectedCapabilities())
     }
 
     Column {
@@ -619,9 +612,10 @@ private fun ModelSettingsForm(
                         OutlinedTextField(
                             value = model.displayName,
                             onValueChange = {
-                                onModelChange(model.copy(displayName = it.trim()))
+                                onModelChange(model.withDisplayName(it.trim()))
                             },
                             label = { Text(stringResource(if (isEdit) R.string.setting_provider_page_model_name else R.string.setting_provider_page_model_display_name)) },
+                            supportingText = { Text("可根据模型名称识别能力、参数与图标；名称无法识别时使用模型 ID。") },
                             modifier = Modifier.fillMaxWidth(),
                             placeholder = {
                                 if (!isEdit) {
@@ -697,6 +691,25 @@ private fun ModelSettingsForm(
                             parentProvider = parentProvider
                         )
 
+                        if (model.type == ModelType.IMAGE && parentProvider is ProviderSetting.OpenAI) {
+                            Text("图像 API 路径", style = MaterialTheme.typography.titleSmall)
+                            Text("留空自动适配。相对于供应商基础地址填写：/images/generations 保留原生成接口，/images/edits 保留原编辑接口；/media/generate 使用优客异步媒体协议。", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(
+                                value = model.imageGenerationPath.orEmpty(),
+                                onValueChange = { onModelChange(model.copy(imageGenerationPath = it.trim().ifBlank { null })) },
+                                label = { Text("生成路径（自动）") },
+                                isError = !me.rerere.ai.provider.providers.openai.validImageApiPath(model.imageGenerationPath.orEmpty()),
+                                singleLine = true, modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = model.imageEditPath.orEmpty(),
+                                onValueChange = { onModelChange(model.copy(imageEditPath = it.trim().ifBlank { null })) },
+                                label = { Text("编辑路径（自动）") },
+                                isError = !me.rerere.ai.provider.providers.openai.validImageApiPath(model.imageEditPath.orEmpty()),
+                                singleLine = true, modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+
                         CustomHeaders(
                             headers = model.customHeaders,
                             onUpdate = { headers ->
@@ -717,6 +730,7 @@ private fun ModelSettingsForm(
                     // 内置工具页面
                     BuiltInToolsSettings(
                         tools = model.tools,
+                        searchManagedByAssistant = model.isGeminiModel(),
                         onUpdateTools = { tools ->
                             onModelChange(model.copy(tools = tools))
                         }
@@ -748,9 +762,9 @@ private fun AddModelButton(
             models = models,
             selectedModels = selectedModels,
             onModelSelected = { model ->
-                val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId)
-                val outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId)
-                val abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
+                val inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model)
+                val outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model)
+                val abilities = ModelRegistry.MODEL_ABILITIES.getData(model)
                 onAddModel(
                     model.copy(
                         inputModalities = inputModalities,
@@ -769,9 +783,9 @@ private fun AddModelButton(
                             parentProvider.models.none { existing -> existing.modelId == model.modelId }
                         }.map { model ->
                             model.copy(
-                                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId),
-                                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model.modelId),
-                                abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
+                                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model),
+                                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(model),
+                                abilities = ModelRegistry.MODEL_ABILITIES.getData(model)
                             )
                         }
                     )
@@ -983,7 +997,7 @@ private fun ModelPicker(
                                     .padding(8.dp),
                             ) {
                                 AutoAIIcon(
-                                    it.modelId,
+                                    it,
                                     Modifier.size(32.dp)
                                 )
                                 Column(
@@ -1003,9 +1017,9 @@ private fun ModelPicker(
                                     ) {
                                         val modelMeta = remember(it) {
                                             it.copy(
-                                                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it.modelId),
-                                                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it.modelId),
-                                                abilities = ModelRegistry.MODEL_ABILITIES.getData(it.modelId),
+                                                inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(it),
+                                                outputModalities = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(it),
+                                                abilities = ModelRegistry.MODEL_ABILITIES.getData(it),
                                             )
                                         }
                                         ModelModalityTag(
@@ -1093,6 +1107,7 @@ private fun ModelTypeSelector(
                                 ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
                                 ModelType.IMAGE -> R.string.setting_provider_page_image_model
                                 ModelType.VIDEO -> R.string.setting_provider_page_video_model
+                                ModelType.DECISION -> R.string.setting_provider_page_decision_model
                             }
                         )
                     )
@@ -1344,7 +1359,7 @@ private fun ModelCard(
                     shape = MaterialTheme.shapes.small,
                 ) {
                     AutoAIIcon(
-                        name = model.modelId,
+                        model = model,
                         modifier = Modifier.size(36.dp),
                     )
                 }
@@ -1392,6 +1407,7 @@ private fun ModelCard(
 @Composable
 private fun BuiltInToolsSettings(
     tools: Set<BuiltInTools>,
+    searchManagedByAssistant: Boolean = false,
     onUpdateTools: (Set<BuiltInTools>) -> Unit
 ) {
     Column(
@@ -1412,6 +1428,9 @@ private fun BuiltInToolsSettings(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        if (searchManagedByAssistant) {
+            Text("Google 搜索与 URL 上下文已移至「助手设置 → Gemini 内置工具」。聊天搜索按钮也只修改当前助手；旧模型配置仍兼容读取。")
+        }
         val availableTools = listOf(
             BuiltInTools.Search to Pair(
                 stringResource(R.string.setting_page_built_in_tools_search),
@@ -1427,7 +1446,7 @@ private fun BuiltInToolsSettings(
             )
         )
 
-        availableTools.forEach { (tool, info) ->
+        availableTools.filterNot { (tool, _) -> searchManagedByAssistant && tool in setOf(BuiltInTools.Search, BuiltInTools.UrlContext) }.forEach { (tool, info) ->
             val (title, description) = info
             Card(
                 modifier = Modifier.fillMaxWidth()

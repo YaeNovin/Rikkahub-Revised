@@ -5,11 +5,21 @@
 -->
 <data-extraction-rules>
   <cloud-backup>
+    <exclude domain="file" path="logs/" />
+    <exclude domain="file" path="log-analyses/" />
+    <exclude domain="sharedpref" path="crash_handler.xml" />
+    <exclude domain="sharedpref" path="process-exit-history.xml" />
     <!-- TODO: Use <include> and <exclude> to control what is backed up.
     <include .../>
     <exclude .../>
     -->
   </cloud-backup>
+  <device-transfer>
+    <exclude domain="file" path="logs/" />
+    <exclude domain="file" path="log-analyses/" />
+    <exclude domain="sharedpref" path="crash_handler.xml" />
+    <exclude domain="sharedpref" path="process-exit-history.xml" />
+  </device-transfer>
   <!--
   <device-transfer>
       <include .../>

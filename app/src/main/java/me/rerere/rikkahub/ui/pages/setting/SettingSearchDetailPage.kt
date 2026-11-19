@@ -224,8 +224,17 @@ private fun SearchServiceOptionsEditor(
         is SearchServiceOptions.AnySearchOptions -> {
             AnySearchOptions(options) { onUpdateOptions(it) }
         }
+        is SearchServiceOptions.DeepSeekOptions -> {
+            DeepSeekOptions(options) { onUpdateOptions(it) }
+        }
+        is SearchServiceOptions.VolcengineOptions -> {
+            VolcengineSearchOptionsEditor(options) { onUpdateOptions(it) }
+        }
         is SearchServiceOptions.CustomJsOptions -> {
             CustomJsOptions(options) { onUpdateOptions(it) }
+        }
+        is SearchServiceOptions.CustomOptions -> {
+            CustomSearchOptionsEditor(options) { onUpdateOptions(it) }
         }
     }
 }
@@ -236,9 +245,13 @@ private fun SearchTestSection(
     commonOptions: SearchCommonOptions
 ) {
     var query by remember { mutableStateOf("") }
+    var imageUrl by remember { mutableStateOf("") }
+    val visualSearch = options is SearchServiceOptions.VolcengineOptions && options.global && options.searchType == "visual"
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Result<SearchResult>?>(null) }
     val scope = rememberCoroutineScope()
+    val validConfiguration = options !is SearchServiceOptions.CustomOptions ||
+        me.rerere.search.customSearchConfigurationError(options) == null
 
     Card(
         colors = CardDefaults.cardColors(
@@ -271,20 +284,23 @@ private fun SearchTestSection(
 
                 IconButton(
                     onClick = {
-                        if (query.isNotBlank() && !testing) {
+                        if ((if (visualSearch) imageUrl.isNotBlank() else query.isNotBlank()) && !testing && validConfiguration) {
                             testing = true
                             result = null
                             scope.launch {
                                 val service = SearchService.getService(options)
                                 val params = JsonObject(
-                                    mapOf("query" to JsonPrimitive(query))
+                                    buildMap {
+                                        put("query", JsonPrimitive(query))
+                                        if (visualSearch) put("image_url", JsonPrimitive(imageUrl))
+                                    }
                                 )
-                                result = service.search(params, commonOptions, options)
-                                testing = false
+                                try { result = service.search(params, commonOptions, options) }
+                                finally { testing = false }
                             }
                         }
                     },
-                    enabled = query.isNotBlank() && !testing
+                    enabled = (if (visualSearch) imageUrl.isNotBlank() else query.isNotBlank()) && !testing && validConfiguration
                 ) {
                     if (testing) {
                         CircularProgressIndicator(
@@ -300,6 +316,10 @@ private fun SearchTestSection(
                 }
             }
 
+            if (visualSearch) {
+                OutlinedTextField(imageUrl, { imageUrl = it }, label = { Text("图片 HTTP(S) URL") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+            }
             result?.let { res ->
                 res.onSuccess { searchResult ->
                     searchResult.answer?.let { answer ->
@@ -590,6 +610,32 @@ internal fun SerperOptions(
                 onUpdateOptions(options.copy(apiKey = it))
             },
             modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+internal fun DeepSeekOptions(
+    options: SearchServiceOptions.DeepSeekOptions,
+    onUpdateOptions: (SearchServiceOptions.DeepSeekOptions) -> Unit
+) {
+    FormItem(
+        label = { Text(stringResource(R.string.search_detail_api_key)) },
+        description = { Text("使用 DeepSeek 平台的 API Key，支持搜索与网页抓取。") }
+    ) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = { onUpdateOptions(options.copy(apiKey = it)) },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+    FormItem(
+        label = { Text("返回网页正文") },
+        description = { Text("搜索时同时获取正文；正文不可用时使用摘要。") }
+    ) {
+        Switch(
+            checked = options.needContent,
+            onCheckedChange = { onUpdateOptions(options.copy(needContent = it)) }
         )
     }
 }

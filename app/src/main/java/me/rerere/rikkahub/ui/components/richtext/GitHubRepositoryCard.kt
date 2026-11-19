@@ -71,8 +71,7 @@ internal fun GitHubRepositoryCard(url: String, modifier: Modifier = Modifier, li
     }
     val colors = richContentColors()
     Surface(
-        onClick = { uriHandler.openUri(GitHubRepositoryUrl.url(result?.data?.fullName ?: fullName)) },
-        modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
+        modifier = modifier.fillMaxWidth().linkActions(GitHubRepositoryUrl.url(result?.data?.fullName ?: fullName), fullName).onGloballyPositioned { coordinates ->
             val bounds = coordinates.boundsInWindow()
             visible = bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.top < view.height
         },

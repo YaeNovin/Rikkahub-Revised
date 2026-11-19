@@ -71,6 +71,13 @@ internal fun customRequestPresets(
             }
         }
 
+        route.protocol == ParameterWireProtocol.GOOGLE_INTERACTIONS -> listOf(
+            CustomRequestPreset(id = CustomRequestPresetId.GEMINI_JSON_OUTPUT,
+                bodies = listOf(CustomBody("response_format", buildJsonObject {
+                    put("type", "text"); put("mime_type", "application/json")
+                }, enabled = false))),
+        )
+
         route.protocol == ParameterWireProtocol.GOOGLE_GENERATE_CONTENT -> listOf(
             CustomRequestPreset(
                 id = CustomRequestPresetId.GEMINI_JSON_OUTPUT,
@@ -243,10 +250,12 @@ private fun ParameterRequestRoute.appManagedBodyKeys(): Set<String> = when (prot
     ParameterWireProtocol.GOOGLE_GENERATE_CONTENT -> setOf(
         "contents", "systemInstruction", "tools", "toolConfig"
     )
+    ParameterWireProtocol.GOOGLE_INTERACTIONS -> setOf("model", "input", "system_instruction", "tools", "stream", "store", "background", "previous_interaction_id", "continuation_token")
     ParameterWireProtocol.ANTHROPIC_MESSAGES -> setOf("model", "messages", "system", "tools", "stream")
 }
 
 private fun String.isCompatibleWith(protocol: ParameterWireProtocol): Boolean = when {
+    protocol == ParameterWireProtocol.GOOGLE_INTERACTIONS -> this !in GOOGLE_BODY_KEYS && this !in setOf("contents", "systemInstruction", "toolConfig", "messages", "instructions", "thinking_budget", "enable_thinking")
     this in GOOGLE_BODY_KEYS -> protocol == ParameterWireProtocol.GOOGLE_GENERATE_CONTENT
     this in RESPONSES_BODY_KEYS -> protocol == ParameterWireProtocol.OPENAI_RESPONSES
     this in ANTHROPIC_BODY_KEYS -> protocol == ParameterWireProtocol.ANTHROPIC_MESSAGES

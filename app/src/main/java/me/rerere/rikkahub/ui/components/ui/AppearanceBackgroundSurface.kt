@@ -91,8 +91,20 @@ fun IsolatedAppearanceSurface(
     modifier: Modifier = Modifier,
     shape: Shape = MaterialTheme.shapes.extraSmall,
     backgroundRendering: IsolatedBackgroundRendering = IsolatedBackgroundRendering.SHARED_PAGE,
+    effectsEnabled: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (style == BackgroundSurfaceStyle.MICA) {
+        MicaMaterialSurface(modifier, shape, foundation = true, opacity = surfaceOpacity,
+            backgroundRendering = backgroundRendering, content = content)
+        return
+    }
+    if (style == BackgroundSurfaceStyle.ACRYLIC) {
+        AcrylicSurface(opacity = surfaceOpacity, blurRadius = blurRadius,
+            effectsEnabled = effectsEnabled,
+            modifier = modifier, shape = shape, snapshotOverlay = true, content = content)
+        return
+    }
     val backgroundSpec = LocalAppearanceBackground.current
     val capabilities = LocalAdvancedAppearanceCapabilities.current
     val supportedStyle = capabilities.effectiveSurfaceStyle(style)
@@ -103,7 +115,7 @@ fun IsolatedAppearanceSurface(
     val canRenderBackground = supportedStyle != BackgroundSurfaceStyle.OPAQUE &&
         backgroundSpec != null &&
         (!backgroundSpec.background.isNullOrBlank() || backgroundSpec.useGradientBackground)
-    val effectiveStyle = if (canRenderBackground) supportedStyle else BackgroundSurfaceStyle.OPAQUE
+    val effectiveStyle = supportedStyle
     val baseScheme = if (backgroundRendering == IsolatedBackgroundRendering.INDEPENDENT) originalScheme else resolveIsolatedSurfaceColorScheme(
         style = effectiveStyle,
         renderedScheme = renderedScheme,
@@ -164,11 +176,13 @@ fun IsolatedAppearanceSurface(
                 .matchParentSize()
                 .background(backingColor),
         )
-        if (effectiveStyle != BackgroundSurfaceStyle.OPAQUE && backgroundSpec != null) {
-            val effectiveBlur = when (effectiveStyle) {
+        if (canRenderBackground) {
+            val requestedBlur = when (effectiveStyle) {
                 BackgroundSurfaceStyle.OPAQUE,
+                BackgroundSurfaceStyle.MICA,
                 BackgroundSurfaceStyle.TRANSLUCENT -> 0f
-                BackgroundSurfaceStyle.FROSTED -> capabilities.limitLiveBlur(
+                BackgroundSurfaceStyle.FROSTED,
+                BackgroundSurfaceStyle.ACRYLIC -> capabilities.limitLiveBlur(
                     blurRadius.coerceIn(
                         MIN_NAVIGATION_GLASS_BLUR_RADIUS,
                         MAX_NAVIGATION_GLASS_BLUR_RADIUS,
@@ -178,12 +192,13 @@ fun IsolatedAppearanceSurface(
                     liquidGlassBlurRadius(blurRadius)
                 )
             }
+            val effectiveBlur = if (effectsEnabled) requestedBlur else 0f
             val tintAlpha = safeOpacity
             if (!independentBackground) {
                 InlineBackdropBlur(
                     blurRadius = effectiveBlur,
                     shape = shape,
-                    glass = effectiveStyle == BackgroundSurfaceStyle.LIQUID_GLASS,
+                    glass = effectsEnabled && effectiveStyle == BackgroundSurfaceStyle.LIQUID_GLASS,
                     modifier = Modifier.matchParentSize(),
                 )
                 Box(Modifier.matchParentSize().background(baseScheme.background.copy(alpha = tintAlpha)))
@@ -239,7 +254,10 @@ fun IsolatedAppearanceSurface(
                 )
             }
         }
-        if (effectiveStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
+        if (!canRenderBackground && effectiveStyle != BackgroundSurfaceStyle.OPAQUE) {
+            Box(Modifier.matchParentSize().background(baseScheme.background.copy(alpha = safeOpacity)))
+        }
+        if (effectsEnabled && effectiveStyle == BackgroundSurfaceStyle.LIQUID_GLASS) {
             LiquidGlassSurfaceLayers(
                 modifier = Modifier.matchParentSize(),
                 strength = 0.92f,
@@ -259,7 +277,7 @@ fun IsolatedAppearanceSurface(
                 CompositionLocalProvider(
                     androidx.compose.material3.LocalContentColor provides contentColor,
                     LocalInsideGlassSurface provides true,
-                    me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive provides (effectiveStyle != BackgroundSurfaceStyle.OPAQUE),
+                    me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive provides (canRenderBackground),
                     me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle provides effectiveStyle,
                     LocalGlassBackdrop provides LocalGlassBackdrop.current.takeIf { !independentBackground && effectiveStyle != BackgroundSurfaceStyle.OPAQUE },
                     LocalGlobalBackgroundHazeState provides LocalGlobalBackgroundHazeState.current.takeUnless { independentBackground },
@@ -303,10 +321,11 @@ fun IsolatedOverlaySurface(
         blurRadius = when (appearance.overlaySurfaceStyle) {
             BackgroundSurfaceStyle.LIQUID_GLASS -> appearance.overlayLiquidGlassBlurRadius
             else -> appearance.overlaySurfaceBlurRadius
-        },
+        }.takeIf { appearance.enableOverlayPerformanceEffects } ?: 0f,
         modifier = modifier,
         shape = shape,
         backgroundRendering = IsolatedBackgroundRendering.INDEPENDENT,
+        effectsEnabled = appearance.enableOverlayPerformanceEffects,
         content = content,
     )
 }

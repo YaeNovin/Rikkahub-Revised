@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -402,9 +404,11 @@ private fun ActualPromptPreviewCard(
     workspace: me.rerere.rikkahub.data.db.entity.WorkspaceEntity?,
 ) {
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val transformer = koinInject<TemplateTransformer>()
     val defaultInput = stringResource(R.string.assistant_prompt_preview_default_input)
-    var sampleInput by remember(assistant.id, defaultInput) { mutableStateOf(defaultInput) }
+    var editedInput by remember(assistant.id) { mutableStateOf<String?>(null) }
+    val sampleInput = editedInput ?: defaultInput
     val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val preview by produceState<UiState<AssistantPromptPreview>>(
         initialValue = UiState.Loading,
@@ -416,7 +420,7 @@ private fun ActualPromptPreviewCard(
     ) {
         delay(200)
         value = if (model == null) {
-            UiState.Error(IllegalStateException(context.getString(R.string.assistant_prompt_preview_no_model)))
+            UiState.Error(IllegalStateException(appResources.getString(R.string.assistant_prompt_preview_no_model)))
         } else {
             runCatching {
                 buildAssistantPromptPreview(
@@ -446,7 +450,7 @@ private fun ActualPromptPreviewCard(
             )
             OutlinedTextField(
                 value = sampleInput,
-                onValueChange = { sampleInput = it },
+                onValueChange = { editedInput = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.assistant_prompt_preview_input)) },
                 minLines = 2,
@@ -463,7 +467,8 @@ private fun ActualPromptPreviewCard(
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
             }.onError { error ->
                 Text(
-                    text = context.formatUserFacingError(error),
+                    text = if (model == null) stringResource(R.string.assistant_prompt_preview_no_model)
+                        else context.formatUserFacingError(error),
                     color = MaterialTheme.colorScheme.error,
                 )
             }.onSuccess { result ->

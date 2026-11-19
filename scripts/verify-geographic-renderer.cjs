@@ -112,18 +112,12 @@ async function main() {
       tileUrl: 'https://tiles.test/{z}/{x}/{y}.png', tileOptions: { pane: {}, tileSize: 0, opacity: 'bad' }, geoJson: point,
     }, async page => { await page.locator('img.leaflet-tile-loaded').first().waitFor({ state: 'visible' }); });
     for (const fullscreen of [false, true]) {
-      await scenario('HTML basemap tiles keep dimensions and vector alignment ' + fullscreen, {}, async page => {
-        await page.locator('img.leaflet-tile-loaded').first().waitFor({ state: 'visible' });
-        const tile = await page.locator('img.leaflet-tile-loaded').first().boundingBox();
-        assert.equal(tile.width, 256);
-        assert.equal(tile.height, 256);
-        const svg = await page.locator('.leaflet-overlay-pane > svg').evaluate(svg => ({
-          width: Number(svg.getAttribute('width')), height: Number(svg.getAttribute('height')),
-          actualWidth: svg.getBoundingClientRect().width, actualHeight: svg.getBoundingClientRect().height,
-        }));
-        assert.equal(svg.actualWidth, svg.width);
-        assert.equal(svg.actualHeight, svg.height);
-        await page.screenshot({ path: path.join(outputDirectory, 'html-basemap-' + fullscreen + '.png') });
+      await scenario('Raw HTML map scripts remain disabled ' + fullscreen, {}, async (page, requests, tiles) => {
+        await page.waitForFunction(() => window.__rikkaRenderStatus === 'ready');
+        assert.equal(await page.locator('img.leaflet-tile-loaded,.leaflet-container').count(), 0);
+        assert.equal(tiles.length, 0);
+        assert.equal(await page.evaluate(() => typeof window.L), 'undefined');
+        assert.equal(await page.locator('#map').count(), 1, 'Static author layout is kept');
       }, { rawHtml: true, fullscreen });
     }
     await scenario('GeoJSON points use visible local markers', point, async (page, requests) => {

@@ -136,11 +136,11 @@ fun Mermaid(
             transparentBackground = true,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(4.dp))
-                .height(previewHeight),
+                .clip(RoundedCornerShape(4.dp)),
+            previewHeight = previewHeight,
         )
 
-        if (activity != null) {
+        if (activity != null && !LocalExportContext.current) {
             Row(
                 modifier = Modifier
                     .align(Alignment.End)

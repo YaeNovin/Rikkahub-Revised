@@ -186,21 +186,21 @@ object CustomColors {
     val scaffoldContainerColor: Color
         @Composable get() = resolveScaffoldContainerColor(
             backgroundActive = LocalGlobalBackgroundActive.current,
-            defaultColor = topBarColors.containerColor,
+            // The optional top-bar cover must never change the page foundation.
+            defaultColor = colorScheme.surfaceContainer.copy(alpha = 1f),
         )
 
     val topBarColors: TopAppBarColors
         @Composable get() {
+            if (!LocalSettings.current.displaySetting.showTopBarBackground) {
+                return TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                    navigationIconContentColor = colorScheme.onSurface,
+                    titleContentColor = colorScheme.onSurface, actionIconContentColor = colorScheme.onSurface)
+            }
             if (LocalGlobalBackgroundActive.current) {
-                val effectsEnabled = LocalSettings.current
-                    .advancedAppearanceSetting.enableTopBarPerformanceEffects
                 val translucentContainer = colorScheme.surfaceContainer.copy(
-                    alpha = if (effectsEnabled) {
-                        LocalAppearanceSurfaceOpacityPolicy.current
-                            .forRole(AppearanceSurfaceRole.TOP_BAR)
-                    } else {
-                        1f
-                    }
+                    alpha = LocalAppearanceSurfaceOpacityPolicy.current.forRole(AppearanceSurfaceRole.TOP_BAR)
                 )
                 val foreground = me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
                     translucentContainer, translucentContainer.alpha, colorScheme.onSurface,
@@ -223,7 +223,7 @@ object CustomColors {
 
     @Composable
     private fun surfaceColor(color: Color): Color {
-        return color.copy(alpha = if (LocalGlobalBackgroundActive.current) LocalAppearanceSurfaceOpacityPolicy.current.forRole(AppearanceSurfaceRole.CARD) else 1f)
+        return color.copy(alpha = LocalAppearanceSurfaceOpacityPolicy.current.forRole(AppearanceSurfaceRole.CARD))
     }
 
     @Composable

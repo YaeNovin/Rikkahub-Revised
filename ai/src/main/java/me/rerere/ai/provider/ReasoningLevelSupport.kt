@@ -8,6 +8,9 @@ import me.rerere.ai.provider.providers.openai.XAI_API_HOST
 import me.rerere.ai.provider.providers.openai.isAlibabaModelStudioHost
 import me.rerere.ai.provider.providers.openai.resolveGrokModelParameterSupport
 import me.rerere.ai.provider.providers.openai.resolveOpenAIReasoningLevels
+import me.rerere.ai.provider.providers.openai.isOfficialOpenAIHost
+import me.rerere.ai.provider.providers.google.isGeminiHydrogen
+import me.rerere.ai.provider.providers.google.isGemini4Model
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class ReasoningLevelSupport(
@@ -49,6 +52,24 @@ fun resolveReasoningLevelSupport(
     model: Model,
     provider: ProviderSetting?,
 ): ReasoningLevelSupport {
+    if (provider is ProviderSetting.OpenAI && provider.useResponseApi &&
+        officialChatVendor(provider.baseUrl) == OfficialChatVendor.GLM)
+        return ReasoningLevelSupport(listOf(ReasoningLevel.OFF, ReasoningLevel.AUTO, ReasoningLevel.HIGH, ReasoningLevel.MAX),
+            modelSpecific = true, compatibleEndpoint = false)
+    if (model.isMiMo26()) return ReasoningLevelSupport(
+        levels = listOf(ReasoningLevel.OFF, ReasoningLevel.AUTO), modelSpecific = true,
+        compatibleEndpoint = provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude,
+    )
+    if (provider is ProviderSetting.OpenAI && !provider.useResponseApi && model.isGemini4Model())
+        return resolveGoogleReasoningLevelSupport(model).copy(compatibleEndpoint = true)
+    if (provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude) {
+        model.modernVendorReasoningLevels()?.let { levels ->
+            return ReasoningLevelSupport(
+                levels = if (provider is ProviderSetting.Claude && model.modernVendorModel() != ModernVendorModel.MINIMAX_M31)
+                    listOf(ReasoningLevel.AUTO) else levels,
+                modelSpecific = true, compatibleEndpoint = true)
+        }
+    }
     if (!model.supportsReasoningCapability()) return ReasoningLevelSupport.ALL
     return when (provider) {
         is ProviderSetting.Google -> resolveGoogleReasoningLevelSupport(model)
@@ -61,7 +82,9 @@ fun resolveReasoningLevelSupport(
 private fun resolveGoogleReasoningLevelSupport(model: Model): ReasoningLevelSupport {
     val id = model.normalizedReasoningModelId()
     val levels = when {
-        id.startsWith("gemini-3-7-flash") || id.startsWith("gemini-3-8-flash") -> listOf(
+        model.isGeminiHydrogen() -> listOf(ReasoningLevel.AUTO, ReasoningLevel.LOW,
+            ReasoningLevel.MEDIUM, ReasoningLevel.HIGH, ReasoningLevel.XHIGH)
+        id.startsWith("gemini-4-") || id.startsWith("gemini-3-7-flash") || id.startsWith("gemini-3-8-flash") -> listOf(
             ReasoningLevel.AUTO,
             ReasoningLevel.LOW,
             ReasoningLevel.MEDIUM,
@@ -170,7 +193,7 @@ private fun resolveOpenAIChannelReasoningLevelSupport(
     }
 
     return when {
-        host == OPENAI_API_HOST -> ReasoningLevelSupport(
+        isOfficialOpenAIHost(host) -> ReasoningLevelSupport(
             levels = resolveOpenAIReasoningLevels(model.parameterModelId()),
             modelSpecific = true,
             compatibleEndpoint = false,
@@ -211,6 +234,11 @@ private fun resolveOpenAIChannelReasoningLevelSupport(
 }
 
 private fun resolveAlibabaReasoningLevelSupport(normalized: String): ReasoningLevelSupport = when {
+    me.rerere.ai.provider.providers.openai.isQwen4Max(normalized) -> ReasoningLevelSupport(
+        levels = resolveQwenModelReasoningLevels(normalized),
+        modelSpecific = true,
+        compatibleEndpoint = false,
+    )
     normalized.startsWith("qwen3-8") -> ReasoningLevelSupport(
         levels = listOf(
             ReasoningLevel.OFF,
@@ -313,6 +341,7 @@ private fun resolveCompatibleReasoningLevelSupport(model: Model): ReasoningLevel
         ModelParameterFamily.QWEN -> resolveQwenModelReasoningLevels(normalized)
         ModelParameterFamily.DEEPSEEK -> resolveDeepSeekModelReasoningLevels(normalized)
         ModelParameterFamily.GROK -> enabledEffortLevels(ReasoningLevel.HIGH)
+        ModelParameterFamily.MINIMAX -> model.modernVendorReasoningLevels() ?: listOf(ReasoningLevel.AUTO, ReasoningLevel.OFF)
         null -> enabledEffortLevels(ReasoningLevel.HIGH)
     }
     return ReasoningLevelSupport(
@@ -323,6 +352,10 @@ private fun resolveCompatibleReasoningLevelSupport(model: Model): ReasoningLevel
 }
 
 private fun resolveQwenModelReasoningLevels(normalized: String): List<ReasoningLevel> = when {
+    me.rerere.ai.provider.providers.openai.isQwen4Max(normalized) -> listOf(
+        ReasoningLevel.OFF, ReasoningLevel.AUTO, ReasoningLevel.LOW,
+        ReasoningLevel.HIGH, ReasoningLevel.XHIGH,
+    )
     normalized.startsWith("qwen3-8") -> listOf(
         ReasoningLevel.OFF,
         ReasoningLevel.AUTO,

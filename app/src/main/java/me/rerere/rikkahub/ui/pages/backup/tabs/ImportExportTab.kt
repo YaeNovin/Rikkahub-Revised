@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.backup.tabs
 
+import android.content.Context
+import android.net.Uri
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File01
 import me.rerere.hugeicons.stroke.FileImport
@@ -24,7 +28,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -32,8 +40,6 @@ import me.rerere.rikkahub.ui.components.ui.StickyHeader
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -45,6 +51,7 @@ fun ImportExportTab(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     var isExporting by remember { mutableStateOf(false) }
     var isRestoring by remember { mutableStateOf(false) }
 
@@ -58,32 +65,38 @@ fun ImportExportTab(
         uri?.let { targetUri ->
             scope.launch {
                 isExporting = true
-                runCatching {
-                    // 导出文件
-                    val exportFile = vm.exportToFile()
-
-                    // 复制到用户选择的位置
-                    context.contentResolver.openOutputStream(targetUri)?.use { outputStream ->
-                        FileInputStream(exportFile).use { inputStream ->
-                            inputStream.copyTo(outputStream)
+                var exportFile: File? = null
+                try {
+                    exportFile = vm.exportToFile()
+                    withContext(Dispatchers.IO) {
+                        val outputStream = requireNotNull(
+                            context.contentResolver.openOutputStream(targetUri)
+                        ) { "Unable to open backup destination" }
+                        outputStream.use { output ->
+                            exportFile.inputStream().use { input ->
+                                input.copyTo(output)
+                            }
                         }
                     }
 
-                    // 清理临时文件
-                    exportFile.delete()
-
                     toaster.show(
-                        context.getString(R.string.backup_page_backup_success),
+                        appResources.getString(R.string.backup_page_backup_success),
                         type = ToastType.Success
                     )
-                }.onFailure { e ->
-                    e.printStackTrace()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    error.printStackTrace()
                     toaster.show(
-                        context.formatUserFacingError(e),
+                        context.formatUserFacingError(error),
                         type = ToastType.Error
                     )
+                } finally {
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        exportFile?.delete()
+                    }
+                    isExporting = false
                 }
-                isExporting = false
             }
         }
     }
@@ -93,78 +106,42 @@ fun ImportExportTab(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { sourceUri ->
+            val selectedImportType = importType
             scope.launch {
                 isRestoring = true
-                runCatching {
-                    when (importType) {
-                        "local" -> {
-                            // 本地备份导入：处理zip文件
-                            val tempFile =
-                                File(context.cacheDir, "temp_restore_${System.currentTimeMillis()}.zip")
-
-                            context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                                FileOutputStream(tempFile).use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-
-                            // 从临时文件恢复
-                            vm.restoreFromLocalFile(tempFile)
-
-                            // 清理临时文件
-                            tempFile.delete()
-                        }
-
-                        "chatbox" -> {
-                            // Chatbox导入：处理json文件
-                            val tempFile =
-                                File(context.cacheDir, "temp_chatbox_${System.currentTimeMillis()}.json")
-
-                            context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                                FileOutputStream(tempFile).use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-
-                            // 从Chatbox文件恢复
-                            vm.restoreFromChatBox(tempFile)
-
-                            // 清理临时文件
-                            tempFile.delete()
-                        }
-
-                        "cherry" -> {
-                            // Cherry Studio导入：处理zip文件
-                            val tempFile =
-                                File(context.cacheDir, "temp_cherry_${System.currentTimeMillis()}.zip")
-
-                            context.contentResolver.openInputStream(sourceUri)?.use { inputStream ->
-                                FileOutputStream(tempFile).use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            }
-
-                            // 从Cherry Studio备份恢复
-                            vm.restoreFromCherryStudio(tempFile)
-
-                            // 清理临时文件
-                            tempFile.delete()
-                        }
+                val extension = if (selectedImportType == "chatbox") "json" else "zip"
+                val tempFile = File(
+                    context.cacheDir,
+                    "temp_import_${System.currentTimeMillis()}.$extension"
+                )
+                try {
+                    copyContentUriToFile(context, sourceUri, tempFile)
+                    when (selectedImportType) {
+                        "local" -> vm.restoreFromLocalFile(tempFile)
+                        "chatbox" -> vm.restoreFromChatBox(tempFile)
+                        "cherry" -> vm.restoreFromCherryStudio(tempFile)
+                        else -> error("Unsupported import type: $selectedImportType")
                     }
 
                     toaster.show(
-                        context.getString(R.string.backup_page_restore_success),
+                        appResources.getString(R.string.backup_page_restore_success),
                         type = ToastType.Success
                     )
                     onShowRestartDialog()
-                }.onFailure { e ->
-                    e.printStackTrace()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    error.printStackTrace()
                     toaster.show(
-                        context.formatUserFacingError(e),
+                        context.formatUserFacingError(error),
                         type = ToastType.Error
                     )
+                } finally {
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        tempFile.delete()
+                    }
+                    isRestoring = false
                 }
-                isRestoring = false
             }
         }
     }
@@ -280,6 +257,19 @@ fun ImportExportTab(
                         }
                     },
                 )
+            }
+        }
+    }
+}
+
+private suspend fun copyContentUriToFile(context: Context, source: Uri, destination: File) {
+    withContext(Dispatchers.IO) {
+        val inputStream = requireNotNull(context.contentResolver.openInputStream(source)) {
+            "Unable to open selected backup"
+        }
+        inputStream.use { input ->
+            destination.outputStream().use { output ->
+                input.copyTo(output)
             }
         }
     }

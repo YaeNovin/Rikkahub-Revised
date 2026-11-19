@@ -5,7 +5,11 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 internal object WebViewContentCache {
-    private const val DIRECTORY_NAME = "webview_content"
+    // Older previews could contain executable author HTML. Do not replay them
+    // after upgrade; reopening from the conversation regenerates a safe preview.
+    // Template/runtime dependencies must advance together. Older geometry HTML
+    // lacks the effects/gesture helpers and renderer-kind marker. Reopen source.
+    internal const val DIRECTORY_NAME = "webview_content_safe_v5"
     private const val HASH_LENGTH = 64
     private val maxAgeMillis = TimeUnit.DAYS.toMillis(7)
     private val hexDigits = "0123456789abcdef".toCharArray()

@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.pages.stats
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+import me.rerere.rikkahub.ui.hooks.rememberAppDateTimeFormatter
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,8 +88,6 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val REQUEST_TIME_FORMATTER = DateTimeFormatter.ofPattern("MM-dd\nHH:mm", Locale.getDefault())
-private val COMPLETION_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd\nHH:mm:ss", Locale.getDefault())
 private const val TABLE_ROW_COUNT = 7
 private val TABLE_HEADER_HEIGHT = 56.dp
 private val TABLE_ROW_HEIGHT = 48.dp
@@ -98,6 +99,7 @@ internal fun StatsDetailPage(
 ) {
     val state by vm.detailState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var pendingCsv by remember { mutableStateOf("") }
@@ -116,12 +118,12 @@ internal fun StatsDetailPage(
                 }
             }.onSuccess {
                 toaster.show(
-                    context.getString(R.string.stats_detail_export_success),
+                    appResources.getString(R.string.stats_detail_export_success),
                     type = ToastType.Success,
                 )
             }.onFailure {
                 toaster.show(
-                    context.getString(R.string.stats_detail_export_failed),
+                    appResources.getString(R.string.stats_detail_export_failed),
                     type = ToastType.Error,
                 )
             }
@@ -599,15 +601,17 @@ private fun RequestTableColumn(
     index: Int,
     request: RequestStatEntity,
 ) {
-    val dateTime = remember(request.timestamp) {
+    val requestFormatter = rememberAppDateTimeFormatter("MM-dd\nHH:mm")
+    val completionFormatter = rememberAppDateTimeFormatter("yyyy-MM-dd\nHH:mm:ss")
+    val dateTime = remember(request.timestamp, requestFormatter) {
         Instant.ofEpochMilli(request.timestamp)
             .atZone(ZoneId.systemDefault())
-            .format(REQUEST_TIME_FORMATTER)
+            .format(requestFormatter)
     }
-    val completedTime = remember(request.completedAt, request.timestamp) {
+    val completedTime = remember(request.completedAt, request.timestamp, completionFormatter) {
         Instant.ofEpochMilli(request.completedAt ?: request.timestamp)
             .atZone(ZoneId.systemDefault())
-            .format(COMPLETION_TIME_FORMATTER)
+            .format(completionFormatter)
     }
     Column(modifier = Modifier.width(132.dp)) {
         TableCell(

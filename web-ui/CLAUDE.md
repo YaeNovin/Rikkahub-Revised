@@ -37,7 +37,7 @@ pnpm run fmt
 pnpm run fmt:check
 
 # 生产服务器 (运行 build/server/index.js)
-pnpm run start
+pnpm run start  # Vite SPA preview + configured API proxy
 ```
 
 ## Architecture
@@ -343,7 +343,7 @@ react-router build
 ### 2. Copy to Backend
 
 ```bash
-pnpm run copy.ts
+pnpm exec tsx copy.ts
 # 将 build/client/ 复制到 ../web/src/main/resources/static/
 # Kotlin 后端的 Ktor 服务器从该目录提供静态文件服务
 ```
@@ -623,7 +623,7 @@ pnpm run dev
 确保 Kotlin 后端在 8080 端口运行：
 ```bash
 # 在 Kotlin 项目目录
-./gradlew :web:run
+adb forward tcp:8080 tcp:8080  # Start Web service in the Android app first
 ```
 
 ### 类型错误

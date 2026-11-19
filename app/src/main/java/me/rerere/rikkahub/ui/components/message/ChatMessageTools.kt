@@ -192,6 +192,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     onToolCancel: ((toolCallId: String, reason: String) -> Unit)? = null,
 ) {
     // ask_user 是交互式问答流程, 不走注册式渲染框架
+    if (tool.toolName == me.rerere.rikkahub.data.ai.tools.CHAT_IMAGE_TOOL_NAME &&
+        tool.metadata?.containsKey(me.rerere.rikkahub.data.ai.tools.CHAT_IMAGE_TOOL_TASK_KEY) == true) {
+        ChatImageToolStep(tool, loading, onToolCancel)
+        return
+    }
     if (tool.toolName == ASK_USER_TOOL_NAME) {
         AskUserToolStep(
             tool = tool,

@@ -1,9 +1,9 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import android.content.Context
+import me.rerere.ai.provider.Model
 import android.graphics.Bitmap
 import android.net.Uri
-import android.widget.Toast
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Book04
@@ -68,7 +68,7 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.request.crossfade
 import com.dokar.sonner.ToastType
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,6 +89,7 @@ import me.rerere.rikkahub.ui.components.message.MessagePartBlock
 import me.rerere.rikkahub.ui.components.message.ThinkingStep
 import me.rerere.rikkahub.ui.components.message.ChatMessageServerToolStep
 import me.rerere.rikkahub.ui.components.message.groupMessageParts
+import me.rerere.rikkahub.ui.components.message.tools.RenderingToolContent
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.AppearanceOptionSurface
@@ -123,6 +124,7 @@ fun ChatExportSheet(
     val density = LocalDensity.current
     val settings = LocalSettings.current
     var imageExportOptions by remember { mutableStateOf(ImageExportOptions()) }
+    var isExporting by remember { mutableStateOf(false) }
 
     if (visible) {
         ModalBottomSheet(
@@ -142,12 +144,28 @@ fun ChatExportSheet(
                     stringResource(id = R.string.chat_page_export_success, "Markdown")
                 AppearanceOptionSurface(
                     onClick = {
-                        exportToMarkdown(context, conversation, selectedMessages)
-                        toaster.show(
-                            markdownSuccessMessage,
-                            type = ToastType.Success
-                        )
-                        onDismissRequest()
+                        if (isExporting) return@AppearanceOptionSurface
+                        scope.launch {
+                            isExporting = true
+                            try {
+                                exportToMarkdown(context, conversation, selectedMessages)
+                                toaster.show(
+                                    markdownSuccessMessage,
+                                    type = ToastType.Success
+                                )
+                                onDismissRequest()
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                error.printStackTrace()
+                                toaster.show(
+                                    message = context.formatUserFacingError(error),
+                                    type = ToastType.Error
+                                )
+                            } finally {
+                                isExporting = false
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -176,7 +194,7 @@ fun ChatExportSheet(
                                 Text(stringResource(id = R.string.chat_page_export_image))
                             },
                             supportingContent = {
-                                Text(stringResource(id = R.string.chat_page_export_image_desc))
+                                Text(stringResource(id = R.string.chat_page_export_image_desc) + "\n长对话自动分为多张图片；无法绘制的内容会保留错误提示。")
                             },
                             leadingContent = {
                                 Icon(HugeIcons.Image02, contentDescription = null)
@@ -206,31 +224,37 @@ fun ChatExportSheet(
                             horizontalArrangement = Arrangement.End
                         ) {
                             Button(
+                                enabled = !isExporting,
                                 onClick = {
                                     scope.launch {
-                                        runCatching {
-                                            exportToImage(
+                                        isExporting = true
+                                        try {
+                                            val result = exportToImage(
                                                 context = context,
-                                                scope = scope,
                                                 density = density,
                                                 conversation = conversation,
                                                 messages = selectedMessages,
                                                 settings = settings,
                                                 options = imageExportOptions
                                             )
-                                        }.onFailure {
-                                            it.printStackTrace()
                                             toaster.show(
-                                                message = context.formatUserFacingError(it),
+                                                imageSuccessMessage + "（${result.first} 张）" +
+                                                    if (result.second > 0) "；${result.second} 类图形未完成，已在图片中标注" else "",
+                                                type = ToastType.Success
+                                            )
+                                            onDismissRequest()
+                                        } catch (error: CancellationException) {
+                                            throw error
+                                        } catch (error: Exception) {
+                                            error.printStackTrace()
+                                            toaster.show(
+                                                message = context.formatUserFacingError(error),
                                                 type = ToastType.Error
                                             )
+                                        } finally {
+                                            isExporting = false
                                         }
                                     }
-                                    toaster.show(
-                                        imageSuccessMessage,
-                                        type = ToastType.Success
-                                    )
-                                    onDismissRequest()
                                 }
                             ) {
                                 Text(stringResource(R.string.mermaid_export))
@@ -252,172 +276,164 @@ private fun chatExportListItemColors() = ListItemDefaults.colors(
     trailingIconColor = MaterialTheme.colorScheme.onSurface,
 )
 
-private fun exportToMarkdown(
+private suspend fun exportToMarkdown(
     context: Context,
     conversation: Conversation,
     messages: List<UIMessage>
 ) {
     val filename = "chat-export-${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))}.md"
+    val file = withContext(Dispatchers.IO) {
+        val sb = buildAnnotatedString {
+            append("# ${conversation.title}\n\n")
+            append("*Exported on ${LocalDateTime.now().toLocalString()}*\n\n")
 
-    val sb = buildAnnotatedString {
-        append("# ${conversation.title}\n\n")
-        append("*Exported on ${LocalDateTime.now().toLocalString()}*\n\n")
-
-        messages.forEach { message ->
-            val role = if (message.role == MessageRole.USER) "**User**" else "**Assistant**"
-            append("$role:\n\n")
-            message.parts.forEach { part ->
-                when (part) {
-                    is UIMessagePart.Text -> {
-                        append(part.text)
-                        appendLine()
-                    }
-
-                    is UIMessagePart.Image -> {
-                        append("![Image](${part.encodeBase64().getOrNull()?.base64})")
-                        appendLine()
-                    }
-
-                    is UIMessagePart.Reasoning -> {
-                        part.reasoning.lines()
-                            .filter { it.isNotBlank() }
-                            .map { "> $it" }
-                            .forEach {
-                                append(it)
-                            }
-                        appendLine()
-                        appendLine()
-                    }
-
-                    is UIMessagePart.Tool -> {
-                        append("**Tool**: `${part.toolName}`")
-                        appendLine()
-                        if (part.toolCallId.isNotBlank()) {
-                            append("- Call ID: `${part.toolCallId}`")
+            messages.forEach { message ->
+                val role = if (message.role == MessageRole.USER) "**User**" else "**Assistant**"
+                append("$role:\n\n")
+                message.parts.forEach { part ->
+                    when (part) {
+                        is UIMessagePart.Text -> {
+                            append(part.text)
                             appendLine()
                         }
 
-                        append("Input:")
-                        appendLine()
-                        append("```json")
-                        appendLine()
-                        append(JsonInstantPretty.encodeToString(part.inputAsJson()))
-                        appendLine()
-                        append("```")
-                        appendLine()
-
-                        if (part.output.isNotEmpty()) {
-                            append("Output:")
+                        is UIMessagePart.Image -> {
+                            append("![Image](${part.encodeBase64().getOrNull()?.base64})")
                             appendLine()
-                            part.output.forEach { outputPart ->
-                                when (outputPart) {
-                                    is UIMessagePart.Text -> {
-                                        append("```text")
-                                        appendLine()
-                                        append(outputPart.text)
-                                        appendLine()
-                                        append("```")
-                                        appendLine()
-                                    }
+                        }
 
-                                    is UIMessagePart.Reasoning -> {
-                                        outputPart.reasoning.lines()
-                                            .filter { it.isNotBlank() }
-                                            .forEach {
-                                                append("> $it")
-                                                appendLine()
-                                            }
-                                    }
+                        is UIMessagePart.Reasoning -> {
+                            part.reasoning.lines()
+                                .filter { it.isNotBlank() }
+                                .map { "> $it" }
+                                .forEach {
+                                    append(it)
+                                }
+                            appendLine()
+                            appendLine()
+                        }
 
-                                    is UIMessagePart.Image -> {
-                                        append("![Tool Image](${outputPart.encodeBase64().getOrNull()?.base64})")
-                                        appendLine()
-                                    }
+                        is UIMessagePart.Tool -> {
+                            append("**Tool**: `${part.toolName}`")
+                            appendLine()
+                            if (part.toolCallId.isNotBlank()) {
+                                append("- Call ID: `${part.toolCallId}`")
+                                appendLine()
+                            }
 
-                                    is UIMessagePart.Document -> {
-                                        append("[Document: ${outputPart.fileName}](${outputPart.url})")
-                                        appendLine()
-                                    }
+                            append("Input:")
+                            appendLine()
+                            append("```json")
+                            appendLine()
+                            append(JsonInstantPretty.encodeToString(part.inputAsJson()))
+                            appendLine()
+                            append("```")
+                            appendLine()
 
-                                    is UIMessagePart.Video -> {
-                                        append("[Video](${outputPart.url})")
-                                        appendLine()
-                                    }
+                            if (part.output.isNotEmpty()) {
+                                append("Output:")
+                                appendLine()
+                                part.output.forEach { outputPart ->
+                                    when (outputPart) {
+                                        is UIMessagePart.Text -> {
+                                            append("```text")
+                                            appendLine()
+                                            append(outputPart.text)
+                                            appendLine()
+                                            append("```")
+                                            appendLine()
+                                        }
 
-                                    is UIMessagePart.Audio -> {
-                                        append("[Audio](${outputPart.url})")
-                                        appendLine()
-                                    }
+                                        is UIMessagePart.Reasoning -> {
+                                            outputPart.reasoning.lines()
+                                                .filter { it.isNotBlank() }
+                                                .forEach {
+                                                    append("> $it")
+                                                    appendLine()
+                                                }
+                                        }
 
-                                    else -> {}
+                                        is UIMessagePart.Image -> {
+                                            append("![Tool Image](${outputPart.encodeBase64().getOrNull()?.base64})")
+                                            appendLine()
+                                        }
+
+                                        is UIMessagePart.Document -> {
+                                            append("[Document: ${outputPart.fileName}](${outputPart.url})")
+                                            appendLine()
+                                        }
+
+                                        is UIMessagePart.Video -> {
+                                            append("[Video](${outputPart.url})")
+                                            appendLine()
+                                        }
+
+                                        is UIMessagePart.Audio -> {
+                                            append("[Audio](${outputPart.url})")
+                                            appendLine()
+                                        }
+
+                                        else -> {}
+                                    }
                                 }
                             }
+                            appendLine()
                         }
-                        appendLine()
+
+                        else -> {}
                     }
-
-                    else -> {}
                 }
+                appendLine()
+                append("---")
+                appendLine()
             }
-            appendLine()
-            append("---")
-            appendLine()
         }
-    }
-
-    try {
         val dir = context.appTempFolder
         val file = dir.resolve(filename)
-        if (!file.exists()) {
-            file.createNewFile()
-        } else {
-            file.delete()
-            file.createNewFile()
-        }
         FileOutputStream(file).use {
             it.write(sb.toString().toByteArray())
         }
-
-        // Share the file
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file
-        )
-        shareFile(context, uri, "text/markdown")
-
-    } catch (e: Exception) {
-        e.printStackTrace()
+        file
     }
+
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file
+    )
+    shareFile(context, uri, "text/markdown")
 }
 
 private suspend fun exportToImage(
     context: Context,
-    scope: CoroutineScope,
     density: Density,
     conversation: Conversation,
     messages: List<UIMessage>,
     settings: Settings,
     options: ImageExportOptions = ImageExportOptions()
-) {
+) : Pair<Int, Int> {
     val filename = "chat-export-${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))}.png"
     val composer = BitmapComposer()
-    val activity = context.getActivity()
-    if (activity == null) {
-        withContext(Dispatchers.Main) {
-            Toast.makeText(
-                context,
-                context.formatUserFacingError("Activity unavailable for image export"),
-                Toast.LENGTH_SHORT,
-            ).show()
-        }
-        return
-    }
+    val activity = requireNotNull(context.getActivity()) { "Activity unavailable for image export" }
 
-    val bitmap = try { composer.composableToBitmap(
+    val files = mutableListOf<java.io.File>()
+    val warnings = composer.composableToImages(
         activity = activity,
         width = 540.dp,
-        screenDensity = density,
+        // Stable 1080px export width, independent of a high-density phone.
+        screenDensity = Density(2f, density.fontScale),
+        onPage = { bitmap, index, count ->
+            val pageName = if (count == 1) filename else filename.removeSuffix(".png") + "-${(index + 1).toString().padStart(3, '0')}.png"
+            val file = withContext(Dispatchers.IO) {
+                context.appTempFolder.resolve(pageName).also { outputFile ->
+                    FileOutputStream(outputFile).use { output ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Failed to encode exported image" }
+                    }
+                }
+            }
+            context.exportImage(activity, bitmap, pageName)
+            files.add(file)
+        },
         content = {
             CompositionLocalProvider(LocalSettings provides settings) {
                 ExportedChatImage(
@@ -427,46 +443,21 @@ private suspend fun exportToImage(
                 )
             }
         }
-    ) } catch (error: Exception) {
-        if (error is kotlinx.coroutines.CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, context.formatUserFacingError(error), Toast.LENGTH_LONG).show()
+    )
+
+    val uris = ArrayList(files.map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) })
+    if (uris.size == 1) shareFile(context, uris.single(), "image/png") else {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "image/png"
+            putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+            clipData = android.content.ClipData.newUri(context.contentResolver, "Chat images", uris.first()).also { clip ->
+                uris.drop(1).forEach { clip.addItem(android.content.ClipData.Item(it)) }
+            }
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        return
+        context.startActivity(android.content.Intent.createChooser(intent, context.getString(R.string.chat_page_export_share_via)))
     }
-
-    try {
-        val dir = context.appTempFolder
-        val file = dir.resolve(filename)
-        if (!file.exists()) {
-            file.createNewFile()
-        } else {
-            file.delete()
-            file.createNewFile()
-        }
-
-        FileOutputStream(file).use { fos ->
-            bitmap.compress(Bitmap.CompressFormat.PNG, 90, fos)
-        }
-
-        // Save to gallery
-        context.exportImage(activity, bitmap, filename)
-
-        // Share the file
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file
-        )
-        shareFile(context, uri, "image/png")
-    } catch (e: Exception) {
-        e.printStackTrace()
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, context.formatUserFacingError(e), Toast.LENGTH_SHORT).show()
-        }
-    } finally {
-        bitmap.recycle()
-    }
+    return files.size to warnings.size
 }
 
 data class ImageExportOptions(val expandReasoning: Boolean = false)
@@ -522,11 +513,11 @@ private fun ExportedChatImage(
                     }
 
                     // Messages
-                    messages.forEach { message ->
+                    messages.forEachIndexed { index, message ->
                         ExportedChatMessage(
                             message = message,
                             options = options,
-                            prevMessage = messages.getOrNull(messages.indexOf(message) - 1)
+                            prevMessage = messages.getOrNull(index - 1)
                         )
                     }
 
@@ -558,8 +549,8 @@ private fun ExportedChatMessage(
     // Always show model icon for assistant messages in exported images
     val showModelIcon = message.role == MessageRole.ASSISTANT && prevMessage?.role == MessageRole.USER
     val iconLabel = when {
-        model?.modelId?.isNotBlank() == true -> model.modelId
         model?.displayName?.isNotBlank() == true -> model.displayName
+        model?.modelId?.isNotBlank() == true -> model.modelId
         else -> "AI"
     }
     val groupedParts = remember(message.parts) { message.parts.groupMessageParts() }
@@ -640,8 +631,9 @@ private fun ExportedChatMessage(
 
                             is UIMessagePart.Image -> {
                                 var imageLoading by remember(part.url) { mutableStateOf(true) }
-                                me.rerere.rikkahub.ui.components.ui.AwaitExportRender(imageLoading)
-                                AsyncImage(
+                                var imageFailed by remember(part.url) { mutableStateOf(false) }
+                                me.rerere.rikkahub.ui.components.ui.AwaitExportRender(imageLoading, if (imageFailed) "图片附件加载失败" else null)
+                                if (imageFailed) Text("图片附件加载失败，原附件仍保留在对话中") else AsyncImage(
                                     model = ImageRequest.Builder(context)
                                         .data(part.url)
                                         .allowHardware(false)
@@ -649,7 +641,7 @@ private fun ExportedChatMessage(
                                         .build(),
                                     contentDescription = "Image",
                                     onSuccess = { imageLoading = false },
-                                    onError = { imageLoading = false },
+                                    onError = { imageLoading = false; imageFailed = true },
                                     modifier = Modifier
                                         .sizeIn(maxHeight = 300.dp)
                                         .clip(RoundedCornerShape(12.dp)),
@@ -657,9 +649,18 @@ private fun ExportedChatMessage(
                             }
 
                             else -> {
-                                // Other parts are not rendered in image export for now
+                                when (part) {
+                                    is UIMessagePart.Document -> Text("附件：${part.fileName}")
+                                    is UIMessagePart.Video -> Text("视频附件：${part.url}")
+                                    is UIMessagePart.Audio -> Text("音频附件：${part.url}")
+                                    else -> Unit
+                                }
                             }
                         }
+                    }
+
+                    is MessagePartBlock.RenderedContentBlock -> {
+                        RenderingToolContent(block.tool)
                     }
                 }
             }
@@ -673,7 +674,7 @@ private fun ExportedChatMessage(
             modifier = Modifier.padding(top = 8.dp)
         ) {
             AutoAIIcon(
-                name = iconLabel,
+                model = model ?: Model(displayName = iconLabel),
                 modifier = Modifier
                     .padding(top = 8.dp)
                     .size(36.dp)
@@ -793,8 +794,21 @@ private fun ChainOfThoughtScope.ExportedToolStep(
                 overflow = TextOverflow.Ellipsis,
             )
         },
-        contentVisible = false,
-        content = null,
+        contentVisible = tool.output.any { it is UIMessagePart.Image } || tool.toolName == "render_content",
+        content = {
+            if (tool.toolName == "render_content") RenderingToolContent(tool)
+            tool.output.filterIsInstance<UIMessagePart.Image>().forEach { image ->
+                var pending by remember(image.url) { mutableStateOf(true) }
+                var failed by remember(image.url) { mutableStateOf(false) }
+                me.rerere.rikkahub.ui.components.ui.AwaitExportRender(pending, if (failed) "工具图片附件加载失败" else null)
+                if (failed) Text("图片附件加载失败") else AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current).data(image.url).allowHardware(false).crossfade(false).build(),
+                    contentDescription = "Tool image",
+                    modifier = Modifier.fillMaxWidth(),
+                    onSuccess = { pending = false }, onError = { pending = false; failed = true },
+                )
+            }
+        },
     )
 }
 

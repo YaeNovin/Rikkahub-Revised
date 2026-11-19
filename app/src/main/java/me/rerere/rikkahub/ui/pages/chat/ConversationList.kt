@@ -7,7 +7,6 @@ import me.rerere.hugeicons.stroke.Pin
 import me.rerere.hugeicons.stroke.PinOff
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Delete01
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -275,26 +274,7 @@ private fun ConversationItem(
             )
             Spacer(Modifier.weight(1f))
 
-            // 置顶图标
-            AnimatedVisibility(conversation.isPinned) {
-                Icon(
-                    imageVector = HugeIcons.Pin,
-                    contentDescription = "Pinned",
-                    modifier = Modifier.size(12.dp),
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            AnimatedVisibility(loading) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.extendColors.green6)
-                        .size(4.dp)
-                        .semantics {
-                            contentDescription = "Loading"
-                        }
-                )
-            }
+            ConversationStatusBadges(pinned = conversation.isPinned, loading = loading)
             DropdownMenu(
                 expanded = showDropdownMenu,
                 onDismissRequest = { showDropdownMenu = false },
@@ -370,5 +350,27 @@ private fun ConversationItem(
                 )
             }
         }
+    }
+}
+
+/** Send/stop updates must not create exiting lookahead nodes inside a lazy row. */
+@Composable
+internal fun ConversationStatusBadges(pinned: Boolean, loading: Boolean) {
+    if (pinned) {
+        Icon(
+            imageVector = HugeIcons.Pin,
+            contentDescription = "Pinned",
+            modifier = Modifier.size(12.dp),
+            tint = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+    if (loading) {
+        Box(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.extendColors.green6)
+                .size(4.dp)
+                .semantics { contentDescription = "Loading" },
+        )
     }
 }

@@ -1,5 +1,7 @@
 import type { UIMessage } from "./message";
 
+export type WorkspaceFileOperationMode = "TOOLS" | "COMMANDS";
+
 /**
  * Message node - container for message branching
  * @see app/src/main/java/me/rerere/rikkahub/data/model/Conversation.kt - MessageNode
@@ -26,6 +28,7 @@ export interface Conversation {
   lorebookIds?: string[];
   /** Absolute path inside the workspace rootfs */
   workspaceCwd?: string | null;
+  workspaceFileOperationMode?: WorkspaceFileOperationMode;
   /** 所属文件夹（助手内分组），null 表示未归入任何文件夹 */
   folderId?: string | null;
   createAt: number;

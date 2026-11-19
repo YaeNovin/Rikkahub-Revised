@@ -90,7 +90,7 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
                 put("store", JsonPrimitive(false))
             }
 
-            Log.i(TAG, "search: $query")
+            // Network content is captured only by the private, opt-in diagnostic interceptor.
 
             val request = Request.Builder()
                 .url(serviceOptions.customUrl)

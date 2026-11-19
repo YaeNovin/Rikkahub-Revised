@@ -157,6 +157,10 @@ fun ChatInput(
     val containerShape = MaterialTheme.shapes.largeIncreased
 
     fun sendMessage() {
+        if (loading) {
+            onCancelClick()
+            return
+        }
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
         when {
@@ -454,7 +458,7 @@ fun ChatInput(
                                 enabled = chatModel != null,
                                 leadingIcon = {
                                     AutoAIIcon(
-                                        name = chatModel?.modelId ?: "chat",
+                                        model = chatModel ?: Model(displayName = "chat"),
                                         modifier = Modifier.size(24.dp),
                                     )
                                 },
@@ -480,7 +484,7 @@ fun ChatInput(
                                     enabled = !imageGenerationLoading,
                                     leadingIcon = {
                                         AutoAIIcon(
-                                            name = model.modelId,
+                                            model = model,
                                             modifier = Modifier.size(24.dp),
                                             loading = imageGenerationLoading,
                                         )

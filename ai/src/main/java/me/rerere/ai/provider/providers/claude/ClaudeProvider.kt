@@ -37,6 +37,15 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.withModernVendorOptions
+import me.rerere.ai.provider.messagesAuthentication
+import me.rerere.ai.provider.officialChatVendor
+import me.rerere.ai.provider.OfficialChatVendor
+import me.rerere.ai.provider.isMiniMaxM3
+import me.rerere.ai.provider.wireParameters
+import me.rerere.ai.provider.withMiniMaxOptions
+import me.rerere.ai.provider.supportsFunctionCalling
+import me.rerere.ai.provider.supportsNativeWebSearch
 import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
@@ -75,6 +84,7 @@ import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -89,6 +99,13 @@ import kotlin.time.Clock
 private const val TAG = "ClaudeProvider"
 private const val MAX_PROVIDER_ERROR_BODY_BYTES = 64L * 1024L
 private const val ANTHROPIC_VERSION = "2023-06-01"
+
+internal fun ProviderSetting.Claude.resolvedAnthropicVersion(): String {
+    if (runCatching { java.net.URI(baseUrl).host }.getOrNull() != "api.anthropic.com") return ANTHROPIC_VERSION
+    val version = apiVersion.trim().ifBlank { ANTHROPIC_VERSION }
+    require(Regex("\\d{4}-\\d{2}-\\d{2}").matches(version)) { "Anthropic API 版本需为 YYYY-MM-DD。" }
+    return version
+}
 private const val CLAUDE_PAUSE_TURN = "pause_turn"
 private const val MAX_PAUSE_TURN_CONTINUATIONS = 5
 
@@ -257,8 +274,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models?limit=1000")
-                .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
-                .addHeader("anthropic-version", ANTHROPIC_VERSION)
+                .messagesAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+                .header("anthropic-version", providerSetting.resolvedAnthropicVersion())
                 .get()
                 .build()
 
@@ -327,26 +344,26 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
-            .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .messagesAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            .header("anthropic-version", providerSetting.resolvedAnthropicVersion())
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
         Log.d(TAG, "generateText: model=${params.model.modelId}, messages=${messages.size}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            val body = runCatching {
-                response.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES).string()
-            }.getOrNull()
-            throw providerRequestFailure(
-                response = response,
-                cause = null,
-                detail = "Failed to get response: ${response.code} $body",
-            )
+        val bodyStr = client.newCall(request).awaitAndUse { response ->
+            if (!response.isSuccessful) {
+                val body = runCatching {
+                    response.peekBody(MAX_PROVIDER_ERROR_BODY_BYTES).string()
+                }.getOrNull()
+                throw providerRequestFailure(
+                    response = response,
+                    cause = null,
+                    detail = "Failed to get response: ${response.code} $body",
+                )
+            }
+            response.body?.string() ?: ""
         }
-
-        val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         // 从 JsonObject 中提取必要的信息
@@ -392,8 +409,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
-            .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .messagesAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            .header("anthropic-version", providerSetting.resolvedAnthropicVersion())
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
@@ -405,7 +422,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.javaClass?.simpleName ?: "unknown"})")
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
                 }
             }
         }
@@ -417,7 +434,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, dataLength=${data.length}")
+                // Network content is captured only by the private, opt-in diagnostic interceptor.
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -444,7 +461,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         detail = bodyElement.parseErrorDetail().message ?: bodyRaw
                     }
                 } catch (_: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse error response (${bodyRaw?.length ?: 0} chars)")
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
                 } finally {
                     close(providerRequestFailure(response, t, detail ?: bodyRaw))
                 }
@@ -498,7 +515,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             put("model", params.model.modelId)
             put(
                 "messages",
-                buildMessages(messages, providerSetting.promptCaching, providerSetting.promptCacheTtl)
+                buildMessages(messages, providerSetting.promptCaching, providerSetting.promptCacheTtl,
+                    officialChatVendor(providerSetting.baseUrl) == OfficialChatVendor.MINIMAX && params.model.isMiniMaxM3())
             )
             put("max_tokens", maxTokens)
 
@@ -602,7 +620,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
             // 处理工具
             val useFunctionTools =
-                (params.model.abilities.contains(ModelAbility.TOOL) || deepSeekSupport.available) &&
+                (params.model.supportsFunctionCalling() || deepSeekSupport.available) &&
                     params.tools.isNotEmpty()
             val toolDefinitions = buildList {
                 if (useFunctionTools) {
@@ -610,11 +628,11 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         add(buildJsonObject {
                             put("name", tool.name)
                             put("description", tool.description)
-                            put("input_schema", json.encodeToJsonElement(tool.parameters()))
+                            put("input_schema", tool.wireParameters())
                         })
                     }
                 }
-                params.model.tools.forEach { builtInTool ->
+                params.model.tools.filter { it != BuiltInTools.Search || params.model.supportsNativeWebSearch(providerSetting) }.forEach { builtInTool ->
                     when (builtInTool) {
                         BuiltInTools.Search -> add(buildJsonObject {
                             put("type", "web_search_20250305")
@@ -654,7 +672,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 support = deepSeekSupport,
                 hasTools = toolDefinitions.isNotEmpty(),
             )
-        }.mergeCustomBody(params.customBody)
+        }.mergeCustomBody(params.customBody).withModernVendorOptions(params, "anthropic").withMiniMaxOptions(params, "anthropic")
+            .withOfficialMessagesContract(providerSetting, params)
     }
 
     private fun cacheControlEphemeral(promptCacheTtl: ClaudePromptCacheTtl) = buildJsonObject {
@@ -666,6 +685,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         promptCaching: Boolean,
         promptCacheTtl: ClaudePromptCacheTtl
+    ) = buildMessages(messages, promptCaching, promptCacheTtl, false)
+
+    private fun buildMessages(
+        messages: List<UIMessage>,
+        promptCaching: Boolean,
+        promptCacheTtl: ClaudePromptCacheTtl,
+        miniMaxVideo: Boolean,
     ) = buildJsonArray {
         messages
             .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
@@ -673,7 +699,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 if (message.role == MessageRole.ASSISTANT) {
                     addAssistantMessage(message)
                 } else {
-                    addUserMessage(message)
+                    addUserMessage(message, miniMaxVideo)
                 }
             }
     }.let { messagesArray ->
@@ -763,17 +789,28 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun JsonArrayBuilder.addUserMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addUserMessage(message: UIMessage, miniMaxVideo: Boolean) {
         add(buildJsonObject {
             put("role", message.role.name.lowercase())
             putJsonArray("content") {
-                message.parts.flatMap { it.toContentBlocks() }.forEach { add(it) }
+                message.parts.flatMap { it.toContentBlocks(miniMaxVideo) }.forEach { add(it) }
             }
         })
     }
 
-    private fun UIMessagePart.toContentBlocks(): List<JsonObject> = when (this) {
+    private fun UIMessagePart.toContentBlocks(miniMaxVideo: Boolean = false): List<JsonObject> = when (this) {
         is UIMessagePart.ServerTool -> serverToolContentBlocks()
+        is UIMessagePart.Video -> if (miniMaxVideo) listOf(buildJsonObject {
+            put("type", "video")
+            put("source", if (url.startsWith("https://") || url.startsWith("http://") || url.startsWith("mm_file://")) {
+                buildJsonObject { put("type", "url"); put("url", url) }
+            } else {
+                val encoded = if (url.startsWith("data:")) {
+                    me.rerere.ai.util.EncodedVideo(url.substringAfter(','), url.substringAfter("data:").substringBefore(';'))
+                } else encodeBase64(false).getOrThrow()
+                buildJsonObject { put("type", "base64"); put("media_type", encoded.mimeType); put("data", encoded.base64) }
+            })
+        }) else emptyList()
         else -> listOfNotNull(toContentBlock())
     }
 
@@ -847,18 +884,17 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
 
         is UIMessagePart.Image -> buildJsonObject {
-            encodeBase64(withPrefix = false).onSuccess { encoded ->
-                put("type", "image")
-                put("source", buildJsonObject {
+            put("type", "image")
+            put("source", if (url.startsWith("http://") || url.startsWith("https://")) {
+                buildJsonObject { put("type", "url"); put("url", url) }
+            } else {
+                val encoded = encodeBase64(withPrefix = false).getOrThrow()
+                buildJsonObject {
                     put("type", "base64")
                     put("media_type", encoded.mimeType)
                     put("data", encoded.base64)
-                })
-            }.onFailure {
-                Log.w(TAG, "encode image failed: ${it.javaClass.simpleName}")
-                put("type", "text")
-                put("text", "")
-            }
+                }
+            })
         }
 
         is UIMessagePart.Reasoning -> buildJsonObject {

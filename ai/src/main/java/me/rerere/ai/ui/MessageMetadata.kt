@@ -21,6 +21,13 @@ import me.rerere.ai.util.json
  */
 sealed interface PartMetadata
 
+/** Stateless Interactions replay uses a separate schema from GenerateContent signatures. */
+@Serializable
+data class GoogleInteractionMetadata(
+    @SerialName("google_interaction_step") val step: JsonObject? = null,
+    @SerialName("google_interaction_step_key") val stepKey: String? = null,
+) : PartMetadata
+
 /**
  * Claude thinking block 的元数据, 回传时需要携带 signature
  */

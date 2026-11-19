@@ -21,7 +21,7 @@ class GoogleServerToolProtocolTest {
         val mixed = obj("""{"tools":[{"functionDeclarations":[{"name":"ask_user"}]},{"googleSearch":{}}],"tool_config":{"include_server_side_tool_invocations":false,"functionCallingConfig":{"mode":"AUTO"}}}""")
         val config = mixed.withGoogleToolContextCirculation().getValue("toolConfig").jsonObject
         assertEquals(JsonPrimitive(true), config["includeServerSideToolInvocations"])
-        assertEquals("AUTO", config.getValue("functionCallingConfig").jsonObject.getValue("mode").jsonPrimitive.content)
+        assertEquals("VALIDATED", config.getValue("functionCallingConfig").jsonObject.getValue("mode").jsonPrimitive.content)
         assertFalse(config.containsKey("include_server_side_tool_invocations"))
         listOf("""{"tools":[{"googleSearch":{}}]}""", """{"tools":[{"functionDeclarations":[{"name":"ask_user"}]}]}""").forEach {
             val body = obj(it)
@@ -55,6 +55,80 @@ class GoogleServerToolProtocolTest {
         // Serialization/restart does not remove opaque protocol context.
         val restored = Json.decodeFromString<UIMessage>(Json.encodeToString(UIMessage.serializer(), message))
         assertEquals(replay(message), replay(restored))
+    }
+
+    @Test fun `mixed tool config keeps both custom roots and forces one canonical true flag`() {
+        val body = obj("""{
+            "tools":[{"functionDeclarations":[{"name":"ask_user"}]},{"googleSearch":{}}],
+            "tool_config":{"include_server_side_tool_invocations":false,"retrievalConfig":{"latLng":{"latitude":1}},"functionCallingConfig":{"mode":"AUTO"}},
+            "toolConfig":{"includeServerSideToolInvocations":false,"functionCallingConfig":{"allowedFunctionNames":["ask_user"]}}
+        }""")
+        val normalized = body.withGoogleToolContextCirculation()
+        val config = normalized.getValue("toolConfig").jsonObject
+        assertFalse("tool_config" in normalized)
+        assertFalse("include_server_side_tool_invocations" in config)
+        assertEquals(JsonPrimitive(true), config["includeServerSideToolInvocations"])
+        assertEquals("VALIDATED", config.getValue("functionCallingConfig").jsonObject.getValue("mode").jsonPrimitive.content)
+        assertEquals(JsonArray(listOf(JsonPrimitive("ask_user"))), config.getValue("functionCallingConfig").jsonObject["allowedFunctionNames"])
+        assertEquals(body.getValue("tool_config").jsonObject["retrievalConfig"], config["retrievalConfig"])
+        assertEquals(normalized, normalized.withGoogleToolContextCirculation())
+    }
+
+    @Test fun `null config and empty declaration aliases cannot hide mixed tools`() {
+        val body = obj("""{"tools":[{"functionDeclarations":[],"function_declarations":[{"name":"generate_image"}]},{"google_search":{}}],"toolConfig":null,"tool_config":{"functionCallingConfig":{"mode":"AUTO"}}}""")
+        val config = body.withGoogleToolContextCirculation().getValue("toolConfig").jsonObject
+        assertEquals(JsonPrimitive(true), config["includeServerSideToolInvocations"])
+        assertEquals("VALIDATED", config.getValue("functionCallingConfig").jsonObject.getValue("mode").jsonPrimitive.content)
+    }
+
+    @Test fun `builtin aliases enable circulation only with nonempty function declarations`() {
+        for (builtin in listOf("googleSearch", "google_search", "urlContext", "url_context", "codeExecution", "code_execution", "googleMaps", "google_maps", "fileSearch", "file_search")) {
+            val mixed = obj("""{"tools":[{"function_declarations":[{"name":"get_session_capabilities"}]},{"$builtin":{}}]}""")
+            assertEquals(JsonPrimitive(true), mixed.withGoogleToolContextCirculation().getValue("toolConfig").jsonObject["includeServerSideToolInvocations"])
+            val onlyBuiltin = obj("""{"tools":[{"functionDeclarations":[]},{"$builtin":{}}]}""")
+            assertEquals(onlyBuiltin, onlyBuiltin.withGoogleToolContextCirculation())
+        }
+    }
+
+    @Test fun `tool combination defaults to validated without relaxing explicit modes`() {
+        for (mode in listOf(null, "AUTO", "ANY", "NONE", "VALIDATED")) {
+            val body = buildJsonObject {
+                put("tools", obj("""{"tools":[{"googleSearch":{}},{"functionDeclarations":[{"name":"ask_user"}]}]}""").getValue("tools"))
+                put("toolConfig", buildJsonObject { put("functionCallingConfig", buildJsonObject {
+                    mode?.let { put("mode", it) }
+                    put("allowedFunctionNames", JsonArray(listOf(JsonPrimitive("ask_user"))))
+                }) })
+            }
+            val config = body.withGoogleToolContextCirculation().getValue("toolConfig").jsonObject.getValue("functionCallingConfig").jsonObject
+            assertEquals(mode.takeUnless { it == "AUTO" } ?: "VALIDATED", config.getValue("mode").jsonPrimitive.content)
+            assertEquals(JsonArray(listOf(JsonPrimitive("ask_user"))), config["allowedFunctionNames"])
+        }
+    }
+
+    @Test fun `snake case function config is normalized while preserving overlay priority`() {
+        val body = obj("""{
+            "tools":[{"googleSearch":{}},{"functionDeclarations":[{"name":"ask_user"}]}],
+            "tool_config":{"functionCallingConfig":{"mode":"AUTO","allowed_function_names":["ask_user"]}},
+            "toolConfig":{"function_calling_config":{"mode":"NONE"}}
+        }""")
+        val config = body.withGoogleToolContextCirculation().getValue("toolConfig").jsonObject
+        assertFalse("function_calling_config" in config)
+        val functions = config.getValue("functionCallingConfig").jsonObject
+        assertEquals("NONE", functions.getValue("mode").jsonPrimitive.content)
+        assertEquals(JsonArray(listOf(JsonPrimitive("ask_user"))), functions["allowedFunctionNames"])
+        assertFalse("allowed_function_names" in functions)
+    }
+
+    @Test fun `explicit circulation also disallows auto with builtins alone`() {
+        val body = obj("""{"tools":[{"googleSearch":{}}],"tool_config":{"include_server_side_tool_invocations":true,"function_calling_config":{"mode":"AUTO"}}}""")
+        val normalized = body.withGoogleToolContextCirculation()
+        assertEquals("VALIDATED", normalized.getValue("toolConfig").jsonObject.getValue("functionCallingConfig").jsonObject.getValue("mode").jsonPrimitive.content)
+        assertEquals(normalized, normalized.withGoogleToolContextCirculation())
+    }
+
+    @Test fun `ordinary function auto mode is not changed when circulation is off`() {
+        val body = obj("""{"tools":[{"functionDeclarations":[{"name":"ask_user"}]}],"tool_config":{"include_server_side_tool_invocations":false,"function_calling_config":{"mode":"AUTO"}}}""")
+        assertEquals(body, body.withGoogleToolContextCirculation())
     }
 
     @Test fun `nonstream parts preserve server context without becoming executable functions`() {

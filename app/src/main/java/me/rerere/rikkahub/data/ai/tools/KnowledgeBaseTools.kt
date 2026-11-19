@@ -14,7 +14,6 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.dao.KnowledgeChunkSearchRow
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
 
-private const val SEARCH_CANDIDATE_LIMIT = 2_000
 private const val DEFAULT_RESULT_LIMIT = 4
 private const val MAX_RESULT_LIMIT = 6
 private const val MAX_QUERY_CHARS = 1_200
@@ -39,10 +38,8 @@ fun createKnowledgeSearchTool(
     knowledgeBaseIds: Set<String>,
     repository: KnowledgeBaseRepository,
 ): Tool = createKnowledgeSearchTool { query, limit ->
-    rankChunks(
-        rows = repository.searchChunks(knowledgeBaseIds, SEARCH_CANDIDATE_LIMIT),
-        query = query,
-    ).take(limit)
+    val enabledIds = repository.getEnabledBaseIds(knowledgeBaseIds)
+    repository.searchLexicalChunks(enabledIds, query, limit).map { it.first }
 }
 
 internal fun createKnowledgeSearchTool(
@@ -136,30 +133,3 @@ private fun createKnowledgeListTool(
         )
     },
 )
-
-private fun rankChunks(
-    rows: List<KnowledgeChunkSearchRow>,
-    query: String,
-): List<KnowledgeChunkSearchRow> {
-    val normalizedQuery = query.lowercase()
-    val terms = normalizedQuery
-        .split(Regex("[\\s\\p{Punct}]+"))
-        .filter { it.length >= 2 }
-    val cjkTerms = normalizedQuery
-        .filter(Char::isCjk)
-        .windowed(size = 2, step = 1, partialWindows = false)
-    val searchTerms = (terms + cjkTerms).distinct()
-    return rows.mapNotNull { row ->
-        val content = row.content.lowercase()
-        val score = if (searchTerms.isEmpty()) {
-            if (content.contains(normalizedQuery)) 1f else 0f
-        } else {
-            searchTerms.count(content::contains).toFloat() / searchTerms.size
-        }
-        row.takeIf { score > 0f }?.let { it to score }
-    }.sortedByDescending { it.second }.map { it.first }
-}
-
-private fun Char.isCjk(): Boolean = this in '\u3040'..'\u30ff' ||
-    this in '\u3400'..'\u4dbf' ||
-    this in '\u4e00'..'\u9fff'

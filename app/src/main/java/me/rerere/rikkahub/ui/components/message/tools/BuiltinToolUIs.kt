@@ -73,6 +73,7 @@ import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.utils.openUrl
+import me.rerere.rikkahub.ui.components.richtext.linkActions
 import org.koin.compose.koinInject
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -774,7 +775,7 @@ private fun SearchWebPreview(
                                 .height(120.dp)
                                 .width(160.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { context.openUrl(imageUrl) },
+                                .linkActions(imageUrl),
                         )
                     }
                 }
@@ -788,7 +789,7 @@ private fun SearchWebPreview(
                 val text = item.getStringContent("text") ?: return@items
 
                 Card(
-                    onClick = { context.openUrl(url) },
+                    modifier = Modifier.linkActions(url, title),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     )

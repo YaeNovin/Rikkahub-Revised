@@ -34,6 +34,12 @@ import me.rerere.ai.provider.OpenAIReasoningSummary
 import me.rerere.ai.provider.OpenAIServiceTier
 import me.rerere.ai.provider.OpenAITextVerbosity
 import me.rerere.ai.provider.OpenAIToolChoice
+import me.rerere.ai.provider.OpenAIResponseFormat
+import me.rerere.ai.provider.isMiMo26
+import me.rerere.ai.provider.officialChatVendor
+import me.rerere.ai.provider.OfficialChatVendor
+import me.rerere.ai.provider.providers.openai.supportedOpenAIResponseFormats
+import me.rerere.ai.provider.providers.openai.supportsOpenAIUltrafastEndpoint
 import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.providers.openai.resolveOpenAIModelParameterSupport
@@ -62,8 +68,8 @@ fun AssistantOpenAIPage(id: String) {
     val enabled = model != null && provider != null &&
         model.resolveParameterFamily(provider) == ModelParameterFamily.OPENAI &&
         !support.retired
-    val isResponses = provider?.useResponseApi == true
-    val route = provider?.parameterRequestRoute()
+    val route = provider?.parameterRequestRouteForModel(model?.parameterModelId().orEmpty())
+    val isResponses = route?.protocol == ParameterWireProtocol.OPENAI_RESPONSES
     val isOfficial = route?.endpoint == ParameterEndpoint.OPENAI
     val supportsToolCalling = !(
         isOfficial && !isResponses && support.requiresResponsesForToolCalling
@@ -105,11 +111,18 @@ fun AssistantOpenAIPage(id: String) {
             supportsReasoningOptions = support.supportsReasoningOptions,
             supportsReasoningContext = support.supportsReasoningContext,
             supportsReasoningMode = support.supportsReasoningMode,
-            supportsUltrafast = support.supportsUltrafast && isOfficial,
+            supportsUltrafast = support.supportsUltrafast && isOfficial && provider?.baseUrl?.let(::supportsOpenAIUltrafastEndpoint) == true,
             supportsToolCalling = supportsToolCalling,
             route = route,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
+            responseFormats = if (provider != null && model != null) supportedOpenAIResponseFormats(provider, model) else listOf(OpenAIResponseFormat.AUTO),
+            mimo = model?.isMiMo26() == true && provider?.baseUrl?.let(::officialChatVendor) == OfficialChatVendor.MIMO,
+            supportsServiceTier = route?.endpoint in setOf(ParameterEndpoint.OPENAI, ParameterEndpoint.THIRD_PARTY),
+            supportsParallelTools = route?.endpoint != ParameterEndpoint.MIMO &&
+                !(isResponses && route?.endpoint in setOf(ParameterEndpoint.KIMI, ParameterEndpoint.GLM)),
+            supportsRequiredTools = route?.endpoint != ParameterEndpoint.MIMO &&
+                !(isResponses && route?.endpoint == ParameterEndpoint.GLM),
         )
     }
 }
@@ -130,6 +143,11 @@ private fun AssistantOpenAIContent(
     route: ParameterRequestRoute?,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
+    responseFormats: List<OpenAIResponseFormat>,
+    mimo: Boolean,
+    supportsServiceTier: Boolean,
+    supportsParallelTools: Boolean,
+    supportsRequiredTools: Boolean,
 ) {
     val options = assistant.openAIOptions
     val advancedEnabled = enabled && isResponses
@@ -176,6 +194,8 @@ private fun AssistantOpenAIContent(
             modifier = Modifier.alpha(if (enabled) 1f else 0.45f),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            OpenAIOutputSettings(options = options, formats = responseFormats, enabled = enabled,
+                mimo = mimo, chat = !isResponses, update = ::update)
             Card(colors = CustomColors.cardColorsOnSurfaceContainer) {
                 OpenAISelectItem(
                     title = stringResource(R.string.assistant_openai_verbosity),
@@ -198,7 +218,7 @@ private fun AssistantOpenAIContent(
                     selected = options.serviceTier.takeIf {
                         it != OpenAIServiceTier.ULTRAFAST || supportsUltrafast
                     } ?: OpenAIServiceTier.AUTO,
-                    enabled = enabled,
+                    enabled = enabled && supportsServiceTier,
                     label = { it.displayName() },
                     onSelected = { value -> update { it.copy(serviceTier = value) } },
                 )
@@ -217,7 +237,7 @@ private fun AssistantOpenAIContent(
                     ),
                     options = OpenAIParallelToolCalls.entries,
                     selected = options.parallelToolCalls,
-                    enabled = enabled && supportsToolCalling,
+                    enabled = enabled && supportsToolCalling && supportsParallelTools,
                     label = { it.displayName() },
                     onSelected = { value -> update { it.copy(parallelToolCalls = value) } },
                 )
@@ -232,8 +252,8 @@ private fun AssistantOpenAIContent(
                             R.string.assistant_openai_astra_tools_require_responses
                         }
                     ),
-                    options = OpenAIToolChoice.entries,
-                    selected = options.toolChoice,
+                    options = OpenAIToolChoice.entries.filter { supportsRequiredTools || it != OpenAIToolChoice.REQUIRED },
+                    selected = options.toolChoice.takeUnless { !supportsRequiredTools && it == OpenAIToolChoice.REQUIRED } ?: OpenAIToolChoice.AUTO,
                     enabled = enabled && supportsToolCalling,
                     label = { it.displayName() },
                     onSelected = { value -> update { it.copy(toolChoice = value) } },
@@ -292,6 +312,14 @@ private fun AssistantOpenAIContent(
                     value = options.maxToolCalls,
                     enabled = advancedEnabled,
                     onValueChange = { value -> update { it.copy(maxToolCalls = value) } },
+                )
+                if (isOfficial && supportsReasoningContext) OpenAISelectItem(
+                    title = "前缀缓存有效期", description = "GPT-5.6 及更新模型使用 prompt_cache_options.ttl。",
+                    warning = "30 分钟和 12 小时的缓存写入价格不同，按供应商计费。",
+                    options = me.rerere.ai.provider.OpenAIPromptCacheTtl.entries, selected = options.promptCacheTtl,
+                    enabled = advancedEnabled,
+                    label = { it.apiValue ?: "默认" },
+                    onSelected = { value -> update { it.copy(promptCacheTtl = value) } },
                 )
             }
         }

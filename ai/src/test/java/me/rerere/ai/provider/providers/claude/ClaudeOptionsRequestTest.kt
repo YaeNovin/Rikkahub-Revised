@@ -96,7 +96,7 @@ class ClaudeOptionsRequestTest {
         assertEquals("auto", body["service_tier"]?.jsonPrimitive?.content)
         assertEquals("us", body["inference_geo"]?.jsonPrimitive?.content)
         assertEquals(2, body["stop_sequences"]?.jsonArray?.size)
-        assertEquals("any", body["tool_choice"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+        assertEquals("auto", body["tool_choice"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
         assertEquals(
             true,
             body["tool_choice"]?.jsonObject?.get("disable_parallel_tool_use")?.jsonPrimitive?.boolean,
@@ -156,7 +156,7 @@ class ClaudeOptionsRequestTest {
     }
 
     @Test
-    fun `Fable 5 keeps forced tool use available`() {
+    fun `Fable 5 required adaptive thinking takes precedence over forced tool use`() {
         val support = resolveClaudeModelParameterSupport("claude-fable-5")
         val body = buildRequest(
             model = Model(
@@ -168,7 +168,8 @@ class ClaudeOptionsRequestTest {
         )
 
         assertTrue(support.supportsForcedToolChoice)
-        assertEquals("any", body["tool_choice"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+        assertEquals("adaptive", body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
+        assertEquals("auto", body["tool_choice"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
     }
 
     @Test

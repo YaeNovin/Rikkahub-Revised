@@ -1,6 +1,7 @@
 package me.rerere.rikkahub
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -21,7 +22,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
+import coil3.gif.AnimatedImageDecoder
+import coil3.gif.GifDecoder
+import coil3.network.cachecontrol.CacheControlCacheStrategy
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.crossfade
+import coil3.svg.SvgDecoder
+import okhttp3.OkHttpClient
 import me.rerere.common.android.appTempFolder
 import me.rerere.common.android.Logging
 import com.whl.quickjs.android.QuickJSLoader
@@ -34,7 +46,7 @@ import me.rerere.rikkahub.data.video.VideoGenerationCoordinator
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
-import me.rerere.rikkahub.utils.DatabaseUtil
+import me.rerere.rikkahub.utils.ProcessExitReporter
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceManager
 import org.koin.android.ext.android.get
@@ -49,10 +61,33 @@ const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 
-class RikkaHubApp : Application() {
+class RikkaHubApp : Application(), SingletonImageLoader.Factory {
+    internal val startupAppearance by lazy {
+        get<AppScope>().async(Dispatchers.IO) {
+            runCatching {
+                val settings = get<SettingsStore>().settingsFlow.first { !it.init }
+                me.rerere.rikkahub.ui.theme.prepareStartupAppearance(this@RikkaHubApp, settings)
+            }.onFailure { Log.w(TAG, "Initial palette preparation failed", it) }
+            Unit
+        }
+    }
+    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
+    override fun newImageLoader(context: Context): ImageLoader {
+        val client = get<OkHttpClient>()
+        return ImageLoader.Builder(context.applicationContext)
+            .memoryCache { MemoryCache.Builder().maxSizeBytes(32L * 1024 * 1024).build() }
+            .crossfade(true)
+            .components {
+                add(OkHttpNetworkFetcherFactory(callFactory = { client }, cacheStrategy = { CacheControlCacheStrategy() }))
+                if (Build.VERSION.SDK_INT >= 28) add(AnimatedImageDecoder.Factory()) else add(GifDecoder.Factory())
+                add(SvgDecoder.Factory(scaleToDensity = true))
+            }.build()
+    }
+
     override fun onCreate() {
         super.onCreate()
-        Logging.initialize(this)
+        CrashHandler.install(this)
+        Logging.initialize(this, me.rerere.rikkahub.utils.diagnosticClientInfo(this))
         startKoin {
             androidLogger()
             androidContext(this@RikkaHubApp)
@@ -61,11 +96,12 @@ class RikkaHubApp : Application() {
         }
         this.createNotificationChannel()
 
-        // set cursor window size to 32MB
-        DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)
-
         // install crash handler
-        CrashHandler.install(this)
+        get<AppScope>().launch(Dispatchers.IO) {
+            CrashHandler.importPreviousCrash(this@RikkaHubApp)
+            runCatching { ProcessExitReporter.importHistory(this@RikkaHubApp) }
+                .onFailure { Log.w(TAG, "Unable to read historical process exits", it) }
+        }
 
         // Init QuickJS native library
         QuickJSLoader.init()
@@ -88,22 +124,29 @@ class RikkaHubApp : Application() {
         // Resume asynchronous video tasks after process death or app updates.
         recoverVideoGenerationTasks()
 
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<me.rerere.rikkahub.data.knowledge.KnowledgeImportCoordinator>().recoverOrphanedImports()
+            }.onFailure { Log.e(TAG, "Knowledge import recovery failed", it) }
+        }
+
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
         // Increment launch count
         incrementLaunchCount()
+        startupAppearance.start()
 
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
     }
 
     private fun incrementLaunchCount() {
-        get<AppScope>().launch {
+        get<AppScope>().launch(Dispatchers.IO) {
             runCatching {
                 val store = get<SettingsStore>()
-                val current = store.settingsFlowRaw.first()
-                store.update(current.copy(launchCount = current.launchCount + 1))
-                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlowRaw.first().launchCount}")
+                store.settingsFlow.first { !it.init }
+                store.update { it.copy(launchCount = it.launchCount + 1) }
+                Log.i(TAG, "incrementLaunchCount: ${store.settingsFlow.value.launchCount}")
             }.onFailure {
                 Log.e(TAG, "incrementLaunchCount failed", it)
                 Logging.logSoftwareError(TAG, "incrementLaunchCount", it)
@@ -181,7 +224,7 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 delay(500)
-                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                val settings = get<SettingsStore>().settingsFlow.first { !it.init }
                 if (settings.webServerEnabled) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         ContextCompat.checkSelfPermission(

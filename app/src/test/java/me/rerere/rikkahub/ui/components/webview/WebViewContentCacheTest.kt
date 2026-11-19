@@ -7,9 +7,25 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class WebViewContentCacheTest {
+    @Test fun `old geometry templates cannot load against new runtime dependencies`() {
+        val content = "<html><meta name='rikkahub-preview' content='geometry-typed'></html>"
+        val id = WebViewContentCache.store(temporaryFolder.root, content)
+        val previous = temporaryFolder.root.resolve("webview_content_safe_v2").apply { mkdirs() }
+        previous.resolve(id).writeText(content)
+        temporaryFolder.root.resolve("${WebViewContentCache.DIRECTORY_NAME}/$id").delete()
+        assertNull(WebViewContentCache.load(temporaryFolder.root, id))
+        assertEquals(content, previous.resolve(id).readText())
+    }
+    @Test fun `legacy executable HTML cache is not replayed after policy upgrade`() {
+        val id = WebViewContentCache.store(temporaryFolder.root, "<html>new</html>")
+        val legacy = temporaryFolder.root.resolve("webview_content").apply { mkdirs() }
+        legacy.resolve(id).writeText("<script>alert('old')</script>")
+        temporaryFolder.root.resolve("${WebViewContentCache.DIRECTORY_NAME}/$id").delete()
+        assertNull(WebViewContentCache.load(temporaryFolder.root, id))
+    }
     @Test fun `corrupt cache is detected and repaired when reopening source`() {
         val id = WebViewContentCache.store(temporaryFolder.root, "<html>ok</html>")
-        temporaryFolder.root.resolve("webview_content/$id").writeText("broken")
+        temporaryFolder.root.resolve("${WebViewContentCache.DIRECTORY_NAME}/$id").writeText("broken")
         assertNull(WebViewContentCache.load(temporaryFolder.root, id))
         WebViewContentCache.store(temporaryFolder.root, "<html>ok</html>")
         assertEquals("<html>ok</html>", WebViewContentCache.load(temporaryFolder.root, id))
@@ -39,7 +55,7 @@ class WebViewContentCacheTest {
         val secondId = WebViewContentCache.store(temporaryFolder.root, content)
 
         assertEquals(firstId, secondId)
-        assertEquals(1, temporaryFolder.root.resolve("webview_content").listFiles()?.size)
+        assertEquals(1, temporaryFolder.root.resolve(WebViewContentCache.DIRECTORY_NAME).listFiles()?.size)
     }
 
     @Test

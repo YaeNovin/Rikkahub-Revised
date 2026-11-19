@@ -8,7 +8,8 @@ const {chromium}=require('playwright');
  await page.route('**/*',route=>{
  const u=new URL(route.request().url());
  if(u.host!=='rikkahub.local')return route.abort();
- const file=u.pathname==='/'?'app/build/reports/fullscreen-pan/preview.html':'app/src/main/assets/html/fullscreen-pan.js';
+ if(u.pathname!=='/' && !u.pathname.startsWith('/assets/html/'))return route.abort();
+ const file=u.pathname==='/'?'app/build/reports/fullscreen-pan/preview.html':'app/src/main'+u.pathname;
  return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:u.pathname==='/'?'text/html':'text/javascript'});
  });
  await page.goto('https://rikkahub.local/');

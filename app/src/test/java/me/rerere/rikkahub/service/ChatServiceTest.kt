@@ -161,7 +161,8 @@ class ChatServiceTest {
         val assistant = Assistant(enableWebSearch = true)
         val model = Model(tools = setOf(BuiltInTools.Search))
 
-        assertFalse(shouldUseExternalWebSearch(assistant, model))
+        assertFalse(shouldUseExternalWebSearch(assistant, model,
+            provider = me.rerere.ai.provider.ProviderSetting.OpenAI(useResponseApi = true)))
     }
 
     @Test
@@ -169,7 +170,8 @@ class ChatServiceTest {
         val assistant = Assistant(enableWebSearch = false)
         val model = Model(tools = setOf(BuiltInTools.Search))
 
-        assertFalse(shouldUseExternalWebSearch(assistant, model))
+        assertFalse(shouldUseExternalWebSearch(assistant, model,
+            provider = me.rerere.ai.provider.ProviderSetting.OpenAI(useResponseApi = true)))
     }
 
     @Test

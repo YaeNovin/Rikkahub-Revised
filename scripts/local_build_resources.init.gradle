@@ -1,0 +1,17 @@
+// Add the local immutable mirror for both the main build and included build-logic.
+def resourceRoot = System.getenv('RIKKAHUB_BUILD_RESOURCES')
+if (resourceRoot != null) {
+    def mirror = new File(resourceRoot, 'maven-repository')
+    if (mirror.isDirectory()) {
+        gradle.beforeSettings { settings ->
+            settings.pluginManagement.repositories.maven {
+                name = 'LocalBuildResourceMirror'
+                url = mirror.toURI()
+            }
+            settings.dependencyResolutionManagement.repositories.maven {
+                name = 'LocalBuildResourceMirror'
+                url = mirror.toURI()
+            }
+        }
+    }
+}

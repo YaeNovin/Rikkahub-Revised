@@ -19,6 +19,9 @@ data class Model(
     /** Maximum input context accepted by this model. Null means it has not been configured. */
     val contextWindowTokens: Int? = null,
     val providerOverwrite: ProviderSetting? = null,
+    /** Relative to the provider base URL; null keeps automatic routing. */
+    val imageGenerationPath: String? = null,
+    val imageEditPath: String? = null,
 )
 
 @Serializable
@@ -27,6 +30,7 @@ enum class ModelType {
     IMAGE,
     VIDEO,
     EMBEDDING,
+    DECISION,
 }
 
 @Serializable

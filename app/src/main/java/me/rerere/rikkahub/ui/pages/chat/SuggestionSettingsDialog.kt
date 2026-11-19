@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.ai.provider.isDecisionModel
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,7 +22,14 @@ import kotlin.math.roundToInt
 fun SuggestionSettingsDialog(config: ChatSuggestionConfig, providers: List<ProviderSetting>,
     onConfirm: (ChatSuggestionConfig) -> Unit, onDismiss: () -> Unit, onInherit: (() -> Unit)? = null) {
     var draft by remember { mutableStateOf(config.bounded()) }
-    val modelState = rememberModelListState(draft.modelId, providers, ModelType.CHAT)
+    val generationProviders = remember(providers) { providers.map { provider ->
+        provider.copyProvider(models = provider.models.filterNot { it.isDecisionModel() })
+    } }
+    val modelState = rememberModelListState(draft.modelId, generationProviders, ModelType.CHAT)
+    val decisionProviders = remember(providers) { providers.filterIsInstance<ProviderSetting.OpenAI>().map { provider ->
+        provider.copyProvider(models = provider.models.filter { it.isDecisionModel() }.map { it.copy(type = ModelType.DECISION) })
+    } }
+    val decisionState = rememberModelListState(draft.options.decisionModelId, decisionProviders, ModelType.DECISION)
     AppearanceAlertDialog(onDismissRequest = onDismiss, title = { Text("聊天建议设置") }, text = {
         Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("生成方式")
@@ -32,6 +40,16 @@ fun SuggestionSettingsDialog(config: ChatSuggestionConfig, providers: List<Provi
             }
             TextButton(onClick = { modelState.open() }) { Text("生成模型：${modelState.currentModel?.displayName ?: "使用默认快速模型"}") }
             if (draft.modelId != null) TextButton(onClick = { draft = draft.copy(modelId = null) }) { Text("恢复默认模型") }
+            TextButton(onClick = { decisionState.open() }) {
+                Text("决策评估模型：${decisionState.currentModel?.displayName?.ifBlank { decisionState.currentModel?.modelId.orEmpty() } ?: if (draft.options.useDefaultDecisionModel) "跟随默认决策模型" else "关闭"}")
+            }
+            Text("decision-model-preview 只进行分类、是非判断和评分，不生成文字。启用后评估建议相关性并排序；评估失败时保留原建议。请先在支持 System One 的供应商中添加该模型。", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = {
+                draft = draft.copy(options = draft.options.copy(decisionModelId = null, useDefaultDecisionModel = false))
+            }) { Text("关闭决策评估") }
+            TextButton(onClick = {
+                draft = draft.copy(options = draft.options.copy(decisionModelId = null, useDefaultDecisionModel = true))
+            }) { Text("跟随默认决策模型") }
             SuggestionSettingSlider("建议数量", draft.count, 1..10) { draft = draft.copy(count = it) }
             SuggestionSettingSlider("文字长度上限", draft.maxLength, 10..200) { draft = draft.copy(maxLength = it) }
             SuggestionSettingSlider("自动生成最短间隔（秒）", draft.options.intervalSeconds, 0..600) { draft = draft.copy(options = draft.options.copy(intervalSeconds = it)) }
@@ -65,6 +83,7 @@ fun SuggestionSettingsDialog(config: ChatSuggestionConfig, providers: List<Provi
     }, confirmButton = { TextButton(onClick = { onConfirm(draft.bounded()); onDismiss() }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
     ModelListSheet(modelState, onSelect = { draft = draft.copy(modelId = it.id) })
+    ModelListSheet(decisionState, onSelect = { draft = draft.copy(options = draft.options.copy(decisionModelId = it.id)) })
 }
 
 @Composable private fun SuggestionSettingSlider(label: String, value: Int, range: IntRange, onChange: (Int) -> Unit) {

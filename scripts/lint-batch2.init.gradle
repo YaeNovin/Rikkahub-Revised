@@ -1,0 +1,14 @@
+// Opt-in second-batch checks; full Lint remains the default without this script.
+def batchChecks = ['LocalContextGetResourceValueCall', 'NonObservableLocale', 'ConstantLocale',
+                   'ConfigurationScreenWidthHeight', 'ClickableViewAccessibility', 'DiscouragedPrivateApi']
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.plugins.withId(pluginId) {
+            def lint = project.extensions.getByName('android').lint
+            lint.checkOnly.addAll(batchChecks)
+            lint.xmlOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch2.xml')
+            lint.htmlOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch2.html')
+            lint.textOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch2.txt')
+        }
+    }
+}

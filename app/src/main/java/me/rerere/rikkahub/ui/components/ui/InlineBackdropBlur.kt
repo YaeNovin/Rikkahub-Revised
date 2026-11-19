@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Shape
 @Composable
 internal fun InlineBackdropBlur(blurRadius: Float, shape: Shape, modifier: Modifier = Modifier, glass: Boolean = true,
     sourceOverride: dev.chrisbanes.haze.HazeState? = null) {
-    if (LocalInsideGlassSurface.current) return
+    // An explicit scene is independent of an enclosing wallpaper-only glass surface.
+    if (LocalInsideGlassSurface.current && sourceOverride == null) return
     GlassBackdropLayer(blurRadius = blurRadius, shape = shape, glass = glass, modifier = modifier, sourceOverride = sourceOverride)
 }

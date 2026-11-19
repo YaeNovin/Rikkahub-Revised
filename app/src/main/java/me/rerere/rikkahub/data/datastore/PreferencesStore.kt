@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.datastore
 
+import me.rerere.ai.provider.parameterModelId
 import android.content.Context
 import android.util.Log
 import androidx.datastore.core.IOException
@@ -14,7 +15,9 @@ import androidx.datastore.preferences.preferencesDataStore
 import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -24,9 +27,11 @@ import kotlinx.serialization.Transient
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.withNameBasedCapabilities
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.model.withChatComposerMaterial
+import me.rerere.rikkahub.data.model.chatComposerMaterial
 import me.rerere.rikkahub.data.ai.DEFAULT_GENERATION_RETRY_COUNT
 import me.rerere.rikkahub.data.ai.DEFAULT_GENERATION_RETRY_DURATION_SECONDS
 import me.rerere.rikkahub.data.ai.DEFAULT_GENERATION_RETRY_INTERVAL_SECONDS
@@ -69,8 +74,12 @@ import me.rerere.tts.provider.TTSProviderSetting
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import kotlin.uuid.Uuid
+import java.security.SecureRandom
+import android.util.Base64
+import me.rerere.rikkahub.web.withSharedWebServices
 
 private const val TAG = "PreferencesStore"
+private val Context.webSettingsStore by preferencesDataStore(name = "web_settings")
 
 internal fun Settings.withUpdatedAssistant(
     assistantId: Uuid,
@@ -96,6 +105,7 @@ private val Context.settingsStore by preferencesDataStore(
 class SettingsStore(
     context: Context,
     scope: AppScope,
+    private val sharedServicesStore: SettingsStore? = null,
 ) : KoinComponent {
     private val settingsUpdateMutex = Mutex()
 
@@ -125,6 +135,8 @@ class SettingsStore(
         val TRANSLATE_MODEL = stringPreferencesKey("translate_model")
         val ENABLE_SUGGESTION = booleanPreferencesKey("enable_suggestion")
         val SUGGESTION_MODEL = stringPreferencesKey("suggestion_model")
+        val DECISION_MODEL = stringPreferencesKey("decision_model")
+        val DECISION_PROMPT = stringPreferencesKey("decision_prompt")
         val SUGGESTION_COUNT = intPreferencesKey("suggestion_count")
         val SUGGESTION_MAX_LENGTH = intPreferencesKey("suggestion_max_length")
         val SUGGESTION_STYLE = stringPreferencesKey("suggestion_style")
@@ -180,6 +192,7 @@ class SettingsStore(
         val WEB_SERVER_PORT = intPreferencesKey("web_server_port")
         val WEB_SERVER_JWT_ENABLED = booleanPreferencesKey("web_server_jwt_enabled")
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
+        val WEB_SERVER_JWT_SECRET = stringPreferencesKey("web_server_jwt_secret")
         val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
 
         // 提示词注入
@@ -202,8 +215,9 @@ class SettingsStore(
     }
 
     private val dataStore = context.settingsStore
+    private val webDataStore = context.webSettingsStore
 
-    val settingsFlowRaw = dataStore.data
+    private val nativeSettingsFlow = dataStore.data
         .catch { exception ->
             if (exception is IOException) {
                 emit(emptyPreferences())
@@ -229,6 +243,8 @@ class SettingsStore(
                     ?: DEFAULT_AUTO_MODEL_ID,
                 enableSuggestion = preferences[ENABLE_SUGGESTION] != false,
                 suggestionModelId = preferences[SUGGESTION_MODEL]?.let { Uuid.parse(it) },
+                decisionModelId = preferences[DECISION_MODEL]?.let { Uuid.parse(it) },
+                decisionPrompt = preferences[DECISION_PROMPT] ?: me.rerere.ai.provider.DEFAULT_SUGGESTION_DECISION_PROMPT,
                 suggestionCount = (preferences[SUGGESTION_COUNT] ?: 5).coerceIn(1, 10),
                 suggestionMaxLength = (preferences[SUGGESTION_MAX_LENGTH] ?: 80).coerceIn(10, 200),
                 suggestionStyle = decodeChatSuggestionStyle(preferences[SUGGESTION_STYLE]),
@@ -331,6 +347,7 @@ class SettingsStore(
                 webServerPort = preferences[WEB_SERVER_PORT] ?: 8080,
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
+                webServerJwtSecret = preferences[WEB_SERVER_JWT_SECRET] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
@@ -385,15 +402,15 @@ class SettingsStore(
                 providers = settings.providers.distinctBy { it.id }.map { provider ->
                     when (provider) {
                         is ProviderSetting.OpenAI -> provider.copy(
-                            models = provider.models.distinctBy { model -> model.id }
+                            models = provider.models.distinctBy { model -> model.id }.map { model -> model.withNameBasedCapabilities() }
                         )
 
                         is ProviderSetting.Google -> provider.copy(
-                            models = provider.models.distinctBy { model -> model.id }
+                            models = provider.models.distinctBy { model -> model.id }.map { model -> model.withNameBasedCapabilities() }
                         )
 
                         is ProviderSetting.Claude -> provider.copy(
-                            models = provider.models.distinctBy { model -> model.id }
+                            models = provider.models.distinctBy { model -> model.id }.map { model -> model.withNameBasedCapabilities() }
                         )
                     }
                 },
@@ -441,21 +458,52 @@ class SettingsStore(
         .onEach {
             get<PebbleEngine>().templateCache.invalidateAll()
         }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
 
-    val settingsFlow = settingsFlowRaw
+    val settingsFlowRaw: kotlinx.coroutines.flow.Flow<Settings> = if (sharedServicesStore == null) nativeSettingsFlow else
+        kotlinx.coroutines.flow.combine(
+            webDataStore.data.map { preferences ->
+                val key = stringPreferencesKey("snapshot")
+                if (preferences[key] == null) {
+                    val initial = sharedServicesStore.settingsFlow.first { !it.init }
+                    webDataStore.edit { if (it[key] == null) it[key] = JsonInstant.encodeToString(initial) }
+                    initial
+                } else JsonInstant.decodeFromString<Settings>(preferences[key]!!)
+            },
+            sharedServicesStore.settingsFlow,
+        ) { web, native ->
+            if (native.init) web else web.withSharedWebServices(native)
+        }
+
+    val settingsFlow: kotlinx.coroutines.flow.MutableStateFlow<Settings> = settingsFlowRaw
         .distinctUntilChanged()
         .toMutableStateFlow(scope, Settings.dummy())
 
     suspend fun update(settings: Settings) = settingsUpdateMutex.withLock {
-        updateUnlocked(settings)
+        updateUnlocked(rotateWebServerSecretIfPasswordChanged(settings))
     }
 
-    private suspend fun updateUnlocked(settings: Settings) {
+    /** Returns a random signing secret for the local Web API, creating it once if needed. */
+    suspend fun ensureWebServerJwtSecret(): String = settingsUpdateMutex.withLock {
+        val current = settingsFlow.value.takeUnless { it.init } ?: settingsFlowRaw.first()
+        current.webServerJwtSecret.takeIf { it.isNotBlank() } ?: run {
+            val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+            val generated = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            updateUnlocked(current.copy(webServerJwtSecret = generated))
+            generated
+        }
+    }
+
+    private suspend fun updateUnlocked(settings: Settings): Unit = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         if(settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
-            return
+            return@withContext
         }
         settingsFlow.value = settings
+        if (sharedServicesStore != null) {
+            webDataStore.edit { it[stringPreferencesKey("snapshot")] = JsonInstant.encodeToString(settings) }
+            return@withContext
+        }
         dataStore.edit { preferences ->
             preferences[DYNAMIC_COLOR] = settings.dynamicColor
             preferences[THEME_ID] = settings.themeId
@@ -494,6 +542,9 @@ class SettingsStore(
             preferences[SUGGESTION_INSERT_MODE] = settings.suggestionInsertMode.name
             preferences[SUGGESTION_DISPLAY_MODE] = settings.suggestionDisplayMode.name
             preferences[SUGGESTION_OPTIONS] = JsonInstant.encodeToString(settings.suggestionOptions)
+            settings.decisionModelId?.let { preferences[DECISION_MODEL] = it.toString() }
+                ?: preferences.remove(DECISION_MODEL)
+            preferences[DECISION_PROMPT] = settings.decisionPrompt
             settings.suggestionModelId?.let {
                 preferences[SUGGESTION_MODEL] = it.toString()
             } ?: preferences.remove(SUGGESTION_MODEL)
@@ -547,6 +598,9 @@ class SettingsStore(
             preferences[WEB_SERVER_PORT] = settings.webServerPort
             preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
             preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
+            if (settings.webServerJwtSecret.isNotBlank()) {
+                preferences[WEB_SERVER_JWT_SECRET] = settings.webServerJwtSecret
+            }
             preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
@@ -555,7 +609,14 @@ class SettingsStore(
     }
 
     suspend fun update(fn: (Settings) -> Settings) = settingsUpdateMutex.withLock {
-        updateUnlocked(fn(settingsFlow.value))
+        updateUnlocked(rotateWebServerSecretIfPasswordChanged(fn(settingsFlow.value)))
+    }
+
+    private fun rotateWebServerSecretIfPasswordChanged(next: Settings): Settings {
+        val current = settingsFlow.value
+        if (current.init || current.webServerAccessPassword == next.webServerAccessPassword) return next
+        val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        return next.copy(webServerJwtSecret = Base64.encodeToString(bytes, Base64.NO_WRAP))
     }
 
     /** Prompt edits report success only after persistence; failed writes leave live books intact. */
@@ -661,6 +722,11 @@ class SettingsStore(
 
     suspend fun updateAssistant(assistantId: Uuid) = settingsUpdateMutex.withLock {
         val currentSettings = settingsFlow.value
+        if (sharedServicesStore != null) {
+            val current = currentSettings.takeUnless { it.init } ?: settingsFlowRaw.first()
+            updateUnlocked(current.copy(assistantId = assistantId))
+            return@withLock
+        }
         if (!currentSettings.init) {
             settingsFlow.value = currentSettings.copy(assistantId = assistantId)
         }
@@ -820,6 +886,8 @@ data class Settings(
     val translateThinkingBudget: Int = 0,
     val enableSuggestion: Boolean = true,
     val suggestionModelId: Uuid? = null,
+    val decisionModelId: Uuid? = null,
+    val decisionPrompt: String = me.rerere.ai.provider.DEFAULT_SUGGESTION_DECISION_PROMPT,
     val suggestionCount: Int = 5,
     val suggestionMaxLength: Int = 80,
     val suggestionStyle: ChatSuggestionStyle = ChatSuggestionStyle.BALANCED,
@@ -859,6 +927,8 @@ data class Settings(
     val webServerPort: Int = 8080,
     val webServerJwtEnabled: Boolean = false,
     val webServerAccessPassword: String = "",
+    @Transient
+    val webServerJwtSecret: String = "",
     val webServerLocalhostOnly: Boolean = false,
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
@@ -949,7 +1019,13 @@ internal fun decodeAdvancedAppearanceSetting(raw: String?): AdvancedAppearanceSe
 
 @Serializable
 data class AdvancedAppearanceSetting(
+    val micaTintStrength: Float = .45f,
+    /** Null keeps the legacy blur/liquid-glass selection until the user chooses a material. */
+    val composerSurfaceStyle: BackgroundSurfaceStyle? = null,
+    val enableOverlayPerformanceEffects: Boolean = true,
     val textColorMode: TextColorMode = TextColorMode.AUTO_CLEAR,
+    val wallpaperTextSeedArgb: Long? = null,
+    val wallpaperTextSeedWallpaperId: Int? = null,
     val liquidGlass: me.rerere.rikkahub.data.model.LiquidGlassSettings = me.rerere.rikkahub.data.model.LiquidGlassSettings(),
     val enableGlobalBackground: Boolean = false,
     val globalBackground: String? = null,
@@ -1052,6 +1128,18 @@ enum class BackgroundSurfaceStyle {
 
     @SerialName("liquid_glass")
     LIQUID_GLASS,
+
+    @SerialName("acrylic")
+    ACRYLIC,
+
+    @SerialName("mica")
+    MICA;
+
+    val opaqueMaterial: Boolean
+        get() = this == OPAQUE
+
+    val usesBlur: Boolean
+        get() = this == FROSTED || this == LIQUID_GLASS || this == ACRYLIC
 }
 
 fun AdvancedAppearanceSetting.normalizedChatTextLineHeightRatio(): Float =
@@ -1129,7 +1217,8 @@ fun Settings.resolveChatBackground(): ResolvedChatBackground {
     val appearance = advancedAppearanceSetting
     if (isGlobalBackgroundAppliedToChat()) {
         val blurRadius = when (appearance.pageSurfaceStyle) {
-            BackgroundSurfaceStyle.FROSTED -> appearance.globalBackgroundBlurRadius.coerceIn(
+            BackgroundSurfaceStyle.FROSTED,
+            BackgroundSurfaceStyle.ACRYLIC -> appearance.globalBackgroundBlurRadius.coerceIn(
                 MIN_GLOBAL_BACKGROUND_BLUR_RADIUS,
                 MAX_GLOBAL_BACKGROUND_BLUR_RADIUS,
             )
@@ -1140,6 +1229,7 @@ fun Settings.resolveChatBackground(): ResolvedChatBackground {
             )
 
             BackgroundSurfaceStyle.OPAQUE,
+            BackgroundSurfaceStyle.MICA,
             BackgroundSurfaceStyle.TRANSLUCENT -> 0f
         }
         return ResolvedChatBackground(
@@ -1155,7 +1245,7 @@ fun Settings.resolveChatBackground(): ResolvedChatBackground {
     return ResolvedChatBackground(
         background = assistant.background,
         opacity = assistant.backgroundOpacity.coerceIn(0f, 1f),
-        blurRadius = assistant.backgroundBlurRadius.coerceIn(0f, MAX_GLOBAL_BACKGROUND_BLUR_RADIUS),
+        blurRadius = if (appearance.pageSurfaceStyle.usesBlur) assistant.backgroundBlurRadius.coerceIn(0f, MAX_GLOBAL_BACKGROUND_BLUR_RADIUS) else 0f,
         useGradientBackground = assistant.useGradientBackground,
         gradientAnimation = assistant.gradientBackgroundAnimation,
         gradientSpeed = assistant.gradientBackgroundSpeed,
@@ -1177,8 +1267,7 @@ fun Settings.hasActiveChatBackground(): Boolean = resolveChatBackground().isActi
 fun Settings.isNavigationGlassActive(): Boolean =
     advancedAppearanceSetting.enableNavigationPerformanceEffects &&
     advancedAppearanceSetting.enableNavigationGlass &&
-        advancedAppearanceSetting.navigationSurfaceStyle != BackgroundSurfaceStyle.OPAQUE &&
-        hasActiveChatBackground()
+        advancedAppearanceSetting.navigationSurfaceStyle != BackgroundSurfaceStyle.OPAQUE
 
 fun Settings.isChatDockGlassActive(): Boolean =
     advancedAppearanceSetting.enableChatDockPerformanceEffects &&
@@ -1190,7 +1279,7 @@ fun Settings.isEnhancedChatBubbleActive(): Boolean =
 
 fun Settings.isChatInputGlassActive(): Boolean =
     advancedAppearanceSetting.enableInputPerformanceEffects &&
-        displaySetting.enableBlurEffect && hasActiveChatBackground()
+        chatComposerMaterial().usesBlur
 
 fun Settings.chatInputContainerOpacity(): Float =
     displaySetting.inputSurfaceOpacity.coerceIn(0f, 1f)
@@ -1253,10 +1342,13 @@ data class DisplaySetting(
     val sendOnEnter: Boolean = false,
     val enableAutoScroll: Boolean = true,
     val enableLatexRendering: Boolean = true,
+    val showHexColorSwatches: Boolean = true,
+    val highlightQuotedText: Boolean = true,
     val enableBlurEffect: Boolean = false,
     val inputBlurRadius: Float = 12f,
     val inputSurfaceOpacity: Float = 0.55f,
     val enableTopBarBlur: Boolean = true,
+    val showTopBarBackground: Boolean = false,
     val topBarBlurRadius: Float = 20f,
     val topBarSurfaceOpacity: Float = 0.65f,
     // Keep a new chat blank until the user explicitly enables starter cards.
@@ -1320,7 +1412,7 @@ fun Settings.resolveBackgroundChatModel(preferredId: Uuid?): Model? {
     val chatModels = providers
         .filter { it.enabled }
         .flatMap { it.models }
-        .filter { it.type == me.rerere.ai.provider.ModelType.CHAT }
+        .filter { it.type == me.rerere.ai.provider.ModelType.CHAT && !me.rerere.ai.provider.isDecisionModelId(it.parameterModelId()) }
     return preferredId?.let { id -> chatModels.firstOrNull { it.id == id } }
         ?: chatModels.firstOrNull { it.id == fastModelId }
         ?: chatModels.firstOrNull { it.id == chatModelId }

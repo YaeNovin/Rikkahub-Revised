@@ -16,7 +16,8 @@ internal fun preprocessMarkdownContent(
     } else {
         rawSvgProtected
     }
-    return normalizeMarkdownLatex(sourceProtected)
+    val safeSource = if (renderMode == MarkdownRenderMode.USER_MESSAGE) sourceProtected else protectRawHtml(sourceProtected)
+    return normalizeMarkdownLatex(normalizeMarkdownCitations(safeSource))
 }
 
 /**

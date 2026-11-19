@@ -1,11 +1,14 @@
 package me.rerere.ai.provider.providers.google
 
 import me.rerere.ai.provider.toGoogleToolSchema
+import me.rerere.ai.provider.wireParameters
+import me.rerere.ai.provider.parseOutputSchema
 
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -14,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -56,6 +60,7 @@ import me.rerere.ai.provider.ImageGenerationConstraints
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.supportsFunctionCalling
 import me.rerere.ai.provider.ModelDiscoveryProtocol
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -96,6 +101,7 @@ import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.removeElements
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -146,6 +152,13 @@ private data class UploadedGoogleFile(
 )
 
 class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
+    private val argonClient = client.newBuilder()
+        .readTimeout(20, java.util.concurrent.TimeUnit.MINUTES)
+        .callTimeout(20, java.util.concurrent.TimeUnit.MINUTES)
+        .retryOnConnectionFailure(false).build()
+
+    private fun textClient(params: TextGenerationParams) =
+        if (params.model.isGemini4Model()) argonClient else client
     override val capabilities: Set<ProviderCapability> = setOf(
         ProviderCapability.IMAGE_GENERATION,
         ProviderCapability.IMAGE_EDIT,
@@ -177,17 +190,18 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 privateKeyPem = StringEscapeUtils.unescapeJson(providerSetting.privateKey.trim()),
             )
             request.newBuilder()
-                .addHeader("Authorization", "Bearer $accessToken")
+                .header("Authorization", "Bearer $accessToken")
                 .build()
         } else {
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
-            if (providerSetting.vertexAI) {
+            if (key.isBlank()) request
+            else if (providerSetting.vertexAI) {
                 request.newBuilder()
-                    .url(request.url.newBuilder().addQueryParameter("key", key).build())
+                    .url(request.url.newBuilder().setQueryParameter("key", key).build())
                     .build()
             } else {
                 request.newBuilder()
-                    .addHeader("x-goog-api-key", key)
+                    .header("x-goog-api-key", key)
                     .build()
             }
         }
@@ -246,7 +260,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         providerSetting: ProviderSetting,
         model: Model,
     ): ImageGenerationConstraints {
-        val modelId = model.modelId.substringAfterLast('/').lowercase()
+        val modelId = model.parameterModelId()
         val isGeminiImage = modelId.startsWith("gemini-") &&
             inferModelTypeFromId(modelId) == ModelType.IMAGE
         if (providerSetting !is ProviderSetting.Google || !isGeminiImage) {
@@ -570,13 +584,79 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         })
     }
 
+    private fun buildInteractionsRequest(
+        messages: List<UIMessage>, params: TextGenerationParams, stream: Boolean,
+        uploaded: Map<String, UploadedGoogleFile>,
+    ): JsonObject = buildGoogleInteractionsRequest(messages, params, stream) { it.toGooglePart(uploaded, null) }
+
+    private fun interactionsApi(
+        setting: ProviderSetting.Google, params: TextGenerationParams, stream: Boolean,
+    ) = GoogleInteractionsAPI(client) { body ->
+        val generation = body["generation_config"] as? JsonObject
+        val diagnostics = ProviderRequestDiagnostics(
+            provider = setting.name, model = params.model.modelId, channel = setting.requestChannel(),
+            operation = if (stream) ProviderRequestOperation.STREAM_TEXT else ProviderRequestOperation.TEXT_GENERATION,
+            parameters = buildMap {
+                put("api", "interactions")
+                put("store", "false")
+                generation?.forEach { (key, value) ->
+                    if (value is JsonPrimitive && key != "stop_sequences") put("generation_config.$key", value.content)
+                }
+                put("tools", (body["tools"] as? JsonArray).orEmpty().joinToString(",") { (it as? JsonObject)?.string("type").orEmpty() })
+            }, requestId = params.requestId,
+        )
+        transformRequest(setting, Request.Builder()
+            .url(buildUrl(setting, "interactions"))
+            .headers(params.customHeaders.toHeaders())
+            .header("Api-Revision", "2026-05-20")
+            .header("Content-Type", "application/json")
+            .tag(ProviderRequestDiagnostics::class.java, diagnostics)
+            .post(body.toString().toRequestBody("application/json".toMediaType())).build())
+    }
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.Google,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): TextGenerationResult = withContext(Dispatchers.IO) {
-        val uploadedFiles = uploadLargeMedia(providerSetting, messages)
-        val requestBody = buildCompletionRequestBody(messages, params, uploadedFiles)
+    ): TextGenerationResult {
+        if (providerSetting.useInteractionsApi) {
+            require(!providerSetting.vertexAI) { "Interactions API(Beta) 暂仅支持 Gemini Developer API；Vertex AI 请使用 GenerateContent。" }
+            val uploaded = uploadLargeMedia(providerSetting, messages)
+            return interactionsApi(providerSetting, params, false).generate(
+                buildInteractionsRequest(messages, params, false, uploaded))
+        }
+        val longDecode = params.model.isGemini4Model()
+        val preparedMessages = prepareGoogleRemoteImages(client, messages)
+        val uploaded = uploadLargeMedia(providerSetting, preparedMessages)
+        val seen = mutableSetOf<String>()
+        var token: String? = null
+        var accumulated: TextGenerationResult? = null
+        do {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val (hop, candidate) = generateTextHop(providerSetting, preparedMessages, params, uploaded, token)
+            val previous = accumulated
+            accumulated = if (previous == null) hop else hop.copy(
+                id = previous.id,
+                message = hop.message.copy(
+                    id = previous.message.id,
+                    parts = appendGoogleContinuationParts(previous.message.parts, hop.message.parts),
+                    annotations = (previous.message.annotations + hop.message.annotations).distinct(),
+                ),
+                usage = addGoogleHopUsage(previous.usage, hop.usage),
+            )
+            token = if (longDecode) nextArgonContinuation(candidate, seen) else null
+        } while (token != null)
+        return checkNotNull(accumulated)
+    }
+
+    private suspend fun generateTextHop(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        uploadedFiles: Map<String, UploadedGoogleFile>,
+        continuationToken: String?,
+    ): Pair<TextGenerationResult, JsonObject> = withContext(Dispatchers.IO) {
+        val requestBody = buildCompletionRequestBody(messages, params, uploadedFiles).withArgonContinuation(continuationToken)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -610,17 +690,17 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            val body = response.body?.string()
-            throw providerRequestFailure(
-                response = response,
-                cause = null,
-                detail = "Failed to get response: ${response.code} $body",
-            )
+        val bodyStr = textClient(params).newCall(request).awaitAndUse { response ->
+            if (!response.isSuccessful) {
+                val body = response.body?.string()
+                throw providerRequestFailure(
+                    response = response,
+                    cause = null,
+                    detail = "Failed to get response: ${response.code} $body",
+                )
+            }
+            response.body?.string() ?: ""
         }
-
-        val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         val candidate = bodyJson["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
@@ -639,16 +719,72 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             message = message,
             finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull,
             usage = parseUsageMeta(bodyJson["usageMetadata"] as? JsonObject),
-        )
+        ) to candidate
     }
 
     override suspend fun streamText(
         providerSetting: ProviderSetting.Google,
         messages: List<UIMessage>,
         params: TextGenerationParams,
+    ): Flow<StreamChunk> = flow {
+        val prepared = if (providerSetting.useInteractionsApi) messages else prepareGoogleRemoteImages(client, messages)
+        emitAll(streamPreparedText(providerSetting, prepared, params))
+    }
+
+    private suspend fun streamPreparedText(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): Flow<StreamChunk> {
+        if (providerSetting.useInteractionsApi) return flow {
+            require(!providerSetting.vertexAI) { "Interactions API(Beta) 暂仅支持 Gemini Developer API；Vertex AI 请使用 GenerateContent。" }
+            val uploaded = uploadLargeMedia(providerSetting, messages)
+            emitAll(interactionsApi(providerSetting, params, true).stream(
+                buildInteractionsRequest(messages, params, true, uploaded)))
+        }
+        if (!params.model.isGemini4Model()) return streamTextHop(providerSetting, messages, params)
+        return kotlinx.coroutines.flow.flow {
+            val uploaded = uploadLargeMedia(providerSetting, messages)
+            val seen = mutableSetOf<String>()
+            var token: String? = null
+            var totalUsage: me.rerere.ai.core.TokenUsage? = null
+            do {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                var reason: String? = null
+                var checkpoint: String? = null
+                var hopUsage: me.rerere.ai.core.TokenUsage? = null
+                streamTextHop(providerSetting, messages, params, uploaded, token) { candidate ->
+                    (candidate["finishReason"] as? JsonPrimitive)?.contentOrNull?.let { reason = it }
+                    (candidate["continuationToken"] as? JsonPrimitive)?.contentOrNull?.let { checkpoint = it }
+                }.collect { chunk ->
+                    when {
+                        chunk is StreamChunk.Finish && chunk.finishReason == "CONTINUATION" -> Unit
+                        chunk is StreamChunk.Usage -> {
+                            hopUsage = chunk.usage
+                            emit(StreamChunk.Usage(checkNotNull(addGoogleHopUsage(totalUsage, hopUsage))))
+                        }
+                        else -> emit(chunk)
+                    }
+                }
+                totalUsage = addGoogleHopUsage(totalUsage, hopUsage)
+                token = nextArgonContinuation(buildJsonObject {
+                    reason?.let { put("finishReason", it) }
+                    checkpoint?.let { put("continuationToken", it) }
+                }, seen)
+            } while (token != null)
+        }
+    }
+
+    private suspend fun streamTextHop(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        uploadedFilesOverride: Map<String, UploadedGoogleFile>? = null,
+        continuationToken: String? = null,
+        onCandidate: (JsonObject) -> Unit = {},
     ): Flow<StreamChunk> = callbackFlow {
-        val uploadedFiles = uploadLargeMedia(providerSetting, messages)
-        val requestBody = buildCompletionRequestBody(messages, params, uploadedFiles)
+        val uploadedFiles = uploadedFilesOverride ?: uploadLargeMedia(providerSetting, messages)
+        val requestBody = buildCompletionRequestBody(messages, params, uploadedFiles).withArgonContinuation(continuationToken)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -694,7 +830,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.javaClass?.simpleName ?: "unknown"})")
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
                 }
             }
         }
@@ -706,9 +842,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, dataLength=${data.length}")
+                // Network content is captured only by the private, opt-in diagnostic interceptor.
 
                 try {
+                    if (params.model.isGemini4Model() && data != "[DONE]") {
+                        (json.parseToJsonElement(data).jsonObject["candidates"] as? JsonArray)
+                            ?.firstOrNull()?.let { (it as? JsonObject)?.let(onCandidate) }
+                    }
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
                     if (result.completed) close()
@@ -757,7 +897,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }
 
-        val eventSource = EventSources.createFactory(client)
+        val eventSource = EventSources.createFactory(textClient(params))
                 .newEventSource(request, listener)
 
         awaitClose {
@@ -779,7 +919,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     ): JsonObject = buildJsonObject {
         val supportsImageOutput = params.model.supportsGoogleNativeImageOutput()
         val parameterModelId = params.model.parameterModelId()
-        val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(parameterModelId)
+        val isGemini4 = params.model.isGemini4Model()
+        val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(parameterModelId) || isGemini4
         val isGemini37Flash = ModelRegistry.GEMINI_3_7_FLASH.match(parameterModelId)
         val isGemini38Flash = ModelRegistry.GEMINI_3_8_FLASH.match(parameterModelId)
         val reasoningLevel = resolveReasoningLevelSupport(
@@ -810,12 +951,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 if (params.topP != null) put("topP", params.topP)
             }
             if (params.maxTokens != null) put("maxOutputTokens", params.maxTokens)
-            if (isGemini3) {
+            if (isGemini3 || params.model.isGeminiModel()) {
                 val options = params.geminiOptions
-                if (options.mediaResolution != GeminiMediaResolution.ULTRA_HIGH) {
+                if (isGemini3 && options.mediaResolution != GeminiMediaResolution.ULTRA_HIGH) {
                     options.mediaResolution.apiValue?.let { put("mediaResolution", it) }
                 }
                 options.seed?.let { put("seed", it) }
+                if (!isGemini3) options.topK?.takeIf { it > 0 }?.let { put("topK", it) }
                 options.stopSequences
                     .map(String::trim)
                     .filter(String::isNotEmpty)
@@ -827,7 +969,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         }
                     }
                 // Gemini 3.8 Flash rejects repetition penalties instead of ignoring them.
-                if (!isGemini38Flash) {
+                if (!isGemini38Flash && !isGemini4) {
                     options.presencePenalty
                         ?.takeIf { it >= -2f && it < 2f }
                         ?.let { put("presencePenalty", it) }
@@ -837,8 +979,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 val schema = options.responseJsonSchema
-                    .takeIf(String::isNotBlank)
-                    ?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() }
+                    .takeIf { it.isNotBlank() && options.responseMimeType != me.rerere.ai.provider.GeminiResponseMimeType.TEXT }
+                    ?.let(::parseOutputSchema)
                 val responseMimeType = options.responseMimeType.apiValue
                     ?: if (schema != null) "application/json" else null
                 responseMimeType?.let { put("responseMimeType", it) }
@@ -854,7 +996,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 put("thinkingConfig", buildJsonObject {
                     put(
                         "includeThoughts",
-                        if (isGemini3) params.geminiOptions.includeThoughts else true,
+                        params.geminiOptions.includeThoughts,
                     )
 
                     val isGeminiPro = parameterModelId.contains(Regex("2[.-]5.*pro", RegexOption.IGNORE_CASE))
@@ -867,7 +1009,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                 // Gemini 3.7/3.8 Flash reject "minimal"; their lowest level is "low".
                                 put(
                                     "thinkingLevel",
-                                    if (isGemini37Flash || isGemini38Flash) "low" else "minimal",
+                                    if (isGemini4 || isGemini37Flash || isGemini38Flash) "low" else "minimal",
                                 )
                             } else if (!isGeminiPro) {
                                 put("thinkingBudget", 0)
@@ -881,6 +1023,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                     ReasoningLevel.MINIMAL -> put("thinkingLevel", "minimal")
                                     ReasoningLevel.LOW -> put("thinkingLevel", "low")
                                     ReasoningLevel.MEDIUM -> put("thinkingLevel", "medium")
+                                    ReasoningLevel.XHIGH -> put("thinkingLevel", if (params.model.isGeminiHydrogen()) "xhigh" else "high")
                                     else -> put("thinkingLevel", "high") // HIGH, XHIGH, MAX
                                 }
                             } else {
@@ -903,12 +1046,23 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         // Gemini 3 can combine function declarations with built-in tools. Older Gemini
         // versions cannot, so client-side tools take priority instead of being overwritten.
+        val searchOptions = if (params.model.isGeminiModel()) params.geminiOptions.search
+            else me.rerere.ai.provider.GeminiSearchOptions(enabled = false, urlContext = false)
+        val supportsToolCombination = params.model.supportsGoogleToolCombination()
+        // Gemini 2 cannot mix custom functions with built-ins. Explicit assistant choices
+        // take priority; unset choices retain the existing client-function preference.
+        val explicitBuiltIns = searchOptions.enabled == true || searchOptions.urlContext == true || params.geminiOptions.codeExecution
         val clientToolsEnabled = params.tools.isNotEmpty() &&
-            params.model.abilities.contains(ModelAbility.TOOL)
-        val serverTools = params.model.tools - BuiltInTools.ImageGeneration
-        val enabledServerTools = if (clientToolsEnabled && !isGemini3) emptySet() else serverTools
-        if (clientToolsEnabled || enabledServerTools.isNotEmpty()) {
+            params.model.supportsFunctionCalling() && (supportsToolCombination || !explicitBuiltIns)
+        val serverTools = (params.model.tools - BuiltInTools.ImageGeneration).toMutableSet().apply {
+            searchOptions.enabled?.let { if (it) add(BuiltInTools.Search) else remove(BuiltInTools.Search) }
+            searchOptions.urlContext?.let { if (it) add(BuiltInTools.UrlContext) else remove(BuiltInTools.UrlContext) }
+        }
+        val enabledServerTools = if (clientToolsEnabled && !supportsToolCombination) emptySet() else serverTools
+        val codeExecution = params.geminiOptions.codeExecution
+        if (clientToolsEnabled || enabledServerTools.isNotEmpty() || codeExecution) {
             putJsonArray("tools") {
+                if (codeExecution) add(buildJsonObject { put("codeExecution", buildJsonObject {}) })
                 if (clientToolsEnabled) {
                     add(buildJsonObject {
                         put("functionDeclarations", buildJsonArray {
@@ -917,9 +1071,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                     put("name", JsonPrimitive(tool.name))
                                     put("description", JsonPrimitive(tool.description))
                                     put(
-                                        key = "parameters",
-                                        element = json.encodeToJsonElement(tool.parameters())
-                                            .toGoogleToolSchema()
+                                        key = "parametersJsonSchema",
+                                        element = tool.wireParameters()
                                     )
                                 })
                             }
@@ -929,9 +1082,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 enabledServerTools.forEach { builtInTool ->
                     when (builtInTool) {
                         BuiltInTools.Search -> {
-                            add(buildJsonObject {
-                                put("googleSearch", buildJsonObject {})
-                            })
+                            add(buildGoogleSearchTool(searchOptions, params.model))
                         }
 
                         BuiltInTools.UrlContext -> {
@@ -946,25 +1097,22 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }
 
+        if (clientToolsEnabled && params.geminiOptions.toolChoice != me.rerere.ai.provider.GeminiToolChoice.AUTO) {
+            put("toolConfig", buildJsonObject {
+                put("functionCallingConfig", buildJsonObject { put("mode", params.geminiOptions.toolChoice.name) })
+            })
+        }
+
         // Safety Settings
         putJsonArray("safetySettings") {
             val safetySettings = params.geminiOptions.safetySettings
-            val categoryThresholds: List<Pair<String, String?>> = if (isGemini3) {
+            val categoryThresholds: List<Pair<String, String?>> =
                 listOf(
                     "HARM_CATEGORY_HARASSMENT" to safetySettings.harassment.apiValue,
                     "HARM_CATEGORY_HATE_SPEECH" to safetySettings.hateSpeech.apiValue,
                     "HARM_CATEGORY_SEXUALLY_EXPLICIT" to safetySettings.sexuallyExplicit.apiValue,
                     "HARM_CATEGORY_DANGEROUS_CONTENT" to safetySettings.dangerousContent.apiValue,
                 )
-            } else {
-                listOf(
-                    "HARM_CATEGORY_HARASSMENT" to "OFF",
-                    "HARM_CATEGORY_HATE_SPEECH" to "OFF",
-                    "HARM_CATEGORY_SEXUALLY_EXPLICIT" to "OFF",
-                    "HARM_CATEGORY_DANGEROUS_CONTENT" to "OFF",
-                    "HARM_CATEGORY_CIVIC_INTEGRITY" to "OFF",
-                )
-            }
             categoryThresholds.forEach { (category, threshold) ->
                 if (threshold == null) return@forEach
                 add(buildJsonObject {
@@ -973,7 +1121,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 })
             }
         }
-    }.mergeCustomBody(params.customBody).withGoogleToolContextCirculation()
+    }.mergeCustomBody(params.customBody).let {
+        if (params.model.isGemini4Model()) normalizeArgonRequest(it, params.model) else it
+    }.withGoogleToolContextCirculation()
 
     private fun commonRoleToGoogleRole(role: MessageRole): String {
         return when (role) {
@@ -993,7 +1143,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     private fun Model.supportsGoogleNativeImageOutput(): Boolean =
         BuiltInTools.ImageGeneration in tools ||
             Modality.IMAGE in outputModalities ||
-            Modality.IMAGE in ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(modelId)
+            Modality.IMAGE in ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(this)
 
     private fun UIMessage.hasFinalGoogleOutput(): Boolean = parts.any { part ->
         when (part) {
@@ -1227,29 +1377,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val groundingMetadata = message["groundingMetadata"]?.jsonObject
         Log.d(TAG, "parseMessage: groundingMetadata=${groundingMetadata != null}")
-        val annotations = parseSearchGroundingMetadata(groundingMetadata)
+        val annotations = parseGoogleGroundingAnnotations(message)
 
         return UIMessage(
             role = role,
             parts = completeGoogleServerCalls(parts),
             annotations = annotations
         )
-    }
-
-    private fun parseSearchGroundingMetadata(jsonObject: JsonObject?): List<UIMessageAnnotation> {
-        if (jsonObject == null) return emptyList()
-        val groundingChunks = jsonObject["groundingChunks"]?.jsonArray ?: emptyList()
-        val chunks = groundingChunks.mapNotNull { chunk ->
-            val web = chunk.jsonObject["web"]?.jsonObject ?: return@mapNotNull null
-            val uri = web["uri"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val title = web["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            UIMessageAnnotation.UrlCitation(
-                title = title,
-                url = uri
-            )
-        }
-        Log.d(TAG, "parseSearchGroundingMetadata: chunkCount=${chunks.size}")
-        return chunks
     }
 
     private fun parseMessagePart(jsonObject: JsonObject): UIMessagePart? {
@@ -1506,20 +1640,20 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                 // 1. 拆分出纯文本部分
                 val textParts = output.filterIsInstance<UIMessagePart.Text>()
-                
+
                 // 2. 提取所有的多模态(图片/视频/音频)，并直接转为 Google 要求的格式
                 // 过滤出最终包含 inlineData 的数据块
                 val mediaGoogleParts = output
                     .filter { it !is UIMessagePart.Text }
                     .mapNotNull { it.toGooglePart(mediaResolution = mediaResolution) }
-                    .filter { it.containsKey("inlineData") } 
+                    .filter { it.containsKey("inlineData") }
 
                 // 3. 构建给模型看的结构化 response 节点
                 put("response", buildJsonObject {
                     // 处理文本结果
                     if (textParts.isNotEmpty()) {
                         put(
-                            "result", 
+                            "result",
                             textParts.joinToString("\n") { it.text }
                         )
                     } else if (mediaGoogleParts.isEmpty()) {
@@ -1551,7 +1685,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                     // 添加能够让 $ref 认出它的唯一名称
                                     put("displayName", refName)
                                 })
-                                
+
                                 // 保留可能存在的其他字段
                                 googlePart.forEach { (k, v) ->
                                     if (k != "inlineData") put(k, v)
@@ -1685,6 +1819,19 @@ internal fun buildGoogleRequestDiagnostics(
 
         ProviderRequestOperation.TEXT_GENERATION,
         ProviderRequestOperation.STREAM_TEXT -> {
+            val requestTools = (requestBody["tools"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+            parameters["tools.functionDeclarations"] = requestTools.sumOf { tool ->
+                listOf("functionDeclarations", "function_declarations").sumOf { key ->
+                    (tool[key] as? JsonArray)?.size ?: 0
+                }
+            }.toString()
+            parameters["tools.googleSearch"] = requestTools.any { "googleSearch" in it || "google_search" in it }.toString()
+            parameters["tools.urlContext"] = requestTools.any { "urlContext" in it || "url_context" in it }.toString()
+            parameters["toolConfig.includeServerSideToolInvocations"] =
+                (requestBody["toolConfig"] as? JsonObject).value("includeServerSideToolInvocations") ?: apiDefault
+            parameters["toolConfig.functionCallingConfig.mode"] =
+                ((requestBody["toolConfig"] as? JsonObject)?.get("functionCallingConfig") as? JsonObject)
+                    .value("mode") ?: apiDefault
             val thinkingConfig = generationConfig?.get("thinkingConfig") as? JsonObject
             val perPartMediaResolution = requestBody["contents"].findMediaResolutionLevel()
             parameters["temperature"] = generationConfig.value("temperature") ?: apiDefault
@@ -1834,7 +1981,7 @@ internal fun buildGoogleImageRequestBody(
                 })
             }
         }
-    }.mergeCustomBody(customBody)
+    }.mergeCustomBody(customBody).withGoogleToolContextCirculation()
 }
 
 internal fun parseGoogleGeneratedImages(response: JsonObject): List<ImageGenerationItem> =
@@ -1865,6 +2012,7 @@ internal fun inferGoogleModelType(
     ModelType.IMAGE -> ModelType.IMAGE
     ModelType.VIDEO -> ModelType.VIDEO
     ModelType.EMBEDDING -> ModelType.EMBEDDING
+    ModelType.DECISION -> null
     ModelType.CHAT -> when {
         ("embedContent" in supportedGenerationMethods ||
             "batchEmbedContents" in supportedGenerationMethods) &&

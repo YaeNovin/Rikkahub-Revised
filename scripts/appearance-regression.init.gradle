@@ -1,0 +1,10 @@
+// Keep device regression fixtures and their data separate from the user's QA.
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.buildTypes.getByName('debug').applicationIdSuffix = '.revised.appearanceqa'
+            }
+        }
+    }
+}

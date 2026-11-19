@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.backup.tabs
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
@@ -79,6 +81,7 @@ fun WebDavTab(
     val backupItemsState by vm.webDavBackupItems.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val scope = rememberCoroutineScope()
     var showBackupFiles by remember { mutableStateOf(false) }
     var restoringItemId by remember { mutableStateOf<String?>(null) }
@@ -251,7 +254,7 @@ fun WebDavTab(
                         try {
                             vm.testWebDav()
                             toaster.show(
-                                context.getString(R.string.backup_page_connection_success),
+                                appResources.getString(R.string.backup_page_connection_success),
                                 type = ToastType.Success
                             )
                         } catch (e: Exception) {
@@ -282,7 +285,7 @@ fun WebDavTab(
                             vm.backup()
                             vm.loadBackupFileItems()
                             toaster.show(
-                                context.getString(R.string.backup_page_backup_success),
+                                appResources.getString(R.string.backup_page_backup_success),
                                 type = ToastType.Success
                             )
                         }.onFailure {
@@ -350,7 +353,7 @@ fun WebDavTab(
                                         runCatching {
                                             vm.deleteWebDavBackupFile(item)
                                             toaster.show(
-                                                context.getString(R.string.backup_page_delete_success),
+                                                appResources.getString(R.string.backup_page_delete_success),
                                                 type = ToastType.Success
                                             )
                                             vm.loadBackupFileItems()
@@ -369,7 +372,7 @@ fun WebDavTab(
                                         runCatching {
                                             vm.restore(item = restoreItem)
                                             toaster.show(
-                                                context.getString(R.string.backup_page_restore_success),
+                                                appResources.getString(R.string.backup_page_restore_success),
                                                 type = ToastType.Success
                                             )
                                             showBackupFiles = false

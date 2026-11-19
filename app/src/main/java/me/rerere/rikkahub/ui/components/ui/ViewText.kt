@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
@@ -48,6 +50,7 @@ fun ViewText(
     style: TextStyle = LocalTextStyle.current,
 ) {
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val mergedStyle = style.merge(LocalContentColor.current)
     AndroidView(
         factory = { context ->
@@ -62,12 +65,12 @@ fun ViewText(
                 isFocusable = false
                 isFocusableInTouchMode = false
                 setText(text)
-                setComposeTextStyle(density, mergedStyle)
+                setComposeTextStyle(density, layoutDirection, mergedStyle)
             }
         },
         modifier = modifier,
         update = { view ->
-            view.setComposeTextStyle(density, mergedStyle)
+            view.setComposeTextStyle(density, layoutDirection, mergedStyle)
             view.text = text
         }
     )
@@ -125,6 +128,7 @@ private fun TextViewPreview() {
 
 private fun TextView.setComposeTextStyle(
     density: Density,
+    layoutDirection: LayoutDirection,
     textStyle: TextStyle
 ) {
     with(density) {
@@ -158,8 +162,8 @@ private fun TextView.setComposeTextStyle(
         // align
         textStyle.textAlign.let {
             gravity = when (it) {
-                TextAlign.Left -> Gravity.LEFT
-                TextAlign.Right -> Gravity.RIGHT
+                TextAlign.Left -> if (layoutDirection == LayoutDirection.Ltr) Gravity.START else Gravity.END
+                TextAlign.Right -> if (layoutDirection == LayoutDirection.Ltr) Gravity.END else Gravity.START
                 TextAlign.Center -> Gravity.CENTER_HORIZONTAL
                 TextAlign.Start -> Gravity.START
                 TextAlign.End -> Gravity.END

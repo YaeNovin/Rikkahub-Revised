@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.ui.pages.imggen
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import android.text.format.Formatter
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,7 +54,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -128,6 +131,7 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.ImageGenerationRequestState
+import me.rerere.ai.provider.forOutputFormat
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
@@ -302,6 +306,7 @@ private fun ImageGenScreen(
     val sequentialMaxImages by vm.sequentialMaxImages.collectAsStateWithLifecycle()
     val promptOptimizationMode by vm.promptOptimizationMode.collectAsStateWithLifecycle()
     val geminiImageOptions by vm.geminiImageOptions.collectAsStateWithLifecycle()
+    val gptImage26Options by vm.gptImage26Options.collectAsStateWithLifecycle()
     val requestState = ImageGenerationRequestState(
         prompt = prompt,
         size = size,
@@ -329,6 +334,7 @@ private fun ImageGenScreen(
         sequentialMaxImages = sequentialMaxImages,
         promptOptimizationMode = promptOptimizationMode,
         geminiOptions = geminiImageOptions,
+        gptImage26Options = gptImage26Options,
     )
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val currentGeneratedImages by vm.currentGeneratedImages.collectAsStateWithLifecycle()
@@ -748,6 +754,7 @@ private fun ImageGalleryScreen(
     val folders by vm.galleryFolders.collectAsStateWithLifecycle()
     val selectedFolderId by vm.selectedGalleryFolderId.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val filesManager: FilesManager = koinInject()
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
@@ -797,7 +804,7 @@ private fun ImageGalleryScreen(
             try {
                 filesManager.saveMessageImage(context, "file://${image.filePath}")
                 toaster.show(
-                    message = context.getString(R.string.imggen_page_image_saved_success),
+                    message = appResources.getString(R.string.imggen_page_image_saved_success),
                     type = ToastType.Success,
                 )
             } catch (e: Exception) {
@@ -1113,7 +1120,7 @@ private fun ImageGalleryScreen(
             onCopyPrompt = {
                 clipboardManager.setText(AnnotatedString(image.prompt))
                 toaster.show(
-                    message = context.getString(R.string.imggen_page_prompt_copied),
+                    message = appResources.getString(R.string.imggen_page_prompt_copied),
                     type = ToastType.Success,
                 )
             },
@@ -1531,11 +1538,12 @@ internal fun ImageGenerationSettingsBottomSheet(
     val sequentialMaxImages = state.sequentialMaxImages
     val promptOptimizationMode = state.promptOptimizationMode
     val geminiImageOptions = state.geminiOptions
-    val maxOutputImages = constraints.maxOutputImages.coerceAtLeast(1)
+    val formatConstraints = constraints.forOutputFormat(state.outputFormat)
+    val maxOutputImages = formatConstraints.maxOutputImages.coerceAtLeast(1)
     val supportsOutputCount = constraints.supportsOutputCount
     val supportsSize = constraints.supportsSize
-    val supportedSizes = constraints.supportedSizes
-    val supportsCustomSize = constraints.supportsCustomSize
+    val supportedSizes = formatConstraints.supportedSizes
+    val supportsCustomSize = formatConstraints.supportsCustomSize
     val groupSizesByAspectRatio = constraints.groupSizesByAspectRatio
     val customSizeMultiple = constraints.customSizeMultiple
     val customSizeMaxDimension = constraints.customSizeMaxDimension
@@ -1545,8 +1553,8 @@ internal fun ImageGenerationSettingsBottomSheet(
     val sizeRequestField = constraints.sizeRequestField
     val supportedQualityValues = constraints.supportedQualityValues
     val supportedOutputFormats = constraints.supportedOutputFormats
-    val supportedBackgroundValues = constraints.supportedBackgroundValues
-    val supportsOutputCompression = constraints.supportsOutputCompression
+    val supportedBackgroundValues = formatConstraints.supportedBackgroundValues
+    val supportsOutputCompression = formatConstraints.supportsOutputCompression
     val supportedResolutionValues = constraints.supportedResolutionValues
     val supportedThinkingValues = constraints.supportedThinkingValues
     val seedRange = constraints.seedRange
@@ -1623,27 +1631,6 @@ internal fun ImageGenerationSettingsBottomSheet(
                 .fillMaxHeight(0.9f)
                 .imePadding(),
         ) {
-            Text(
-                text = stringResource(R.string.imggen_page_settings_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-            headerContent?.invoke()
-            SecondaryTabRow(selectedTabIndex = settingsPagerState.currentPage) {
-                listOf(
-                    R.string.imggen_page_basic_options,
-                    R.string.imggen_page_advanced_options,
-                ).forEachIndexed { index, titleRes ->
-                    Tab(
-                        selected = settingsPagerState.currentPage == index,
-                        onClick = {
-                            settingsScope.launch { settingsPagerState.animateScrollToPage(index) }
-                        },
-                        text = { Text(stringResource(titleRes)) },
-                    )
-                }
-            }
             HorizontalPager(
                 state = settingsPagerState,
                 modifier = Modifier
@@ -1657,12 +1644,41 @@ internal fun ImageGenerationSettingsBottomSheet(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    Text(
+                        text = stringResource(R.string.imggen_page_settings_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    // All controls, including the chat-only permission/model header,
+                    // belong to the same bounded scroll viewport as the parameters.
+                    headerContent?.invoke()
+                    me.rerere.rikkahub.ui.components.ui.AppearanceSecondaryTabRow(settingsPagerState.currentPage) {
+                        listOf(R.string.imggen_page_basic_options, R.string.imggen_page_advanced_options)
+                            .forEachIndexed { index, titleRes ->
+                                Tab(selected = settingsPagerState.currentPage == index,
+                                    onClick = { settingsScope.launch { settingsPagerState.animateScrollToPage(index) } },
+                                    selectedContentColor = androidx.compose.material3.LocalContentColor.current,
+                                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    text = { Text(stringResource(titleRes)) })
+                            }
+                    }
                     if (page == 0) {
                         Text(
                             text = stringResource(R.string.imggen_page_basic_options_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+
+            if (constraints.supportedGptImage26Versions.isNotEmpty()) {
+                ImageOptionChips(
+                    title = "模型版本",
+                    description = "Flare 侧重速度与性价比，Sunburst 侧重画面细节。",
+                    value = state.gptImage26Options.version,
+                    options = constraints.supportedGptImage26Versions,
+                ) { value ->
+                    update { copy(gptImage26Options = gptImage26Options.copy(version = value)) }
+                }
+            }
 
             if (supportsOutputCount) {
                 FormItem(
@@ -1839,6 +1855,44 @@ internal fun ImageGenerationSettingsBottomSheet(
                 }
             }
 
+            if (constraints.supportsGptImage26Options) {
+                ImageOptionChips(title = "图像规划复杂度", value = state.gptImage26Options.complexity,
+                    options = setOf("low", "medium", "high")) { value ->
+                    update { copy(gptImage26Options = gptImage26Options.copy(complexity = value)) }
+                }
+                Text("复杂度控制构图规划，画质控制渲染细节；两项可分别调整。", style = MaterialTheme.typography.bodySmall)
+                if (outputFormat == "gif") {
+                    OutlinedTextField(
+                        value = state.gptImage26Options.frameCount?.toString().orEmpty(),
+                        onValueChange = { text -> update { copy(gptImage26Options = gptImage26Options.copy(frameCount = text.toIntOrNull())) } },
+                        label = { Text("GIF 帧数（2–16，默认 9）") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = state.gptImage26Options.frameDurationMs?.toString().orEmpty(),
+                        onValueChange = { text -> update { copy(gptImage26Options = gptImage26Options.copy(frameDurationMs = text.toIntOrNull())) } },
+                        label = { Text("每帧时长（毫秒，默认 200，最小 20）") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("GIF 需要项目预览权限；提供自动和 512×512 尺寸。", style = MaterialTheme.typography.bodySmall)
+                }
+                if (outputFormat == "svg") {
+                    OutlinedTextField(
+                        value = state.gptImage26Options.svgModel.orEmpty(),
+                        onValueChange = { text -> update { copy(gptImage26Options = gptImage26Options.copy(svgModel = text.takeIf(String::isNotBlank))) } },
+                        label = { Text("SVG 绘制模型（可选）") }, singleLine = true,
+                        supportingText = { Text("仅在项目已开放 SVG 选模时填写；留空使用服务默认值。每次生成一个 SVG。") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (!state.gptImage26Options.svgModel.isNullOrBlank()) ImageOptionChips(
+                        title = "SVG 推理深度", value = state.gptImage26Options.svgReasoningEffort,
+                        options = setOf("none", "minimal", "low", "medium", "high", "xhigh", "max"),
+                    ) { value -> update { copy(gptImage26Options = gptImage26Options.copy(svgReasoningEffort = value)) } }
+                }
+            }
+
             if (supportedQualityValues.isNotEmpty()) {
                 ImageOptionChips(
                     title = stringResource(R.string.imggen_page_quality),
@@ -1857,8 +1911,10 @@ internal fun ImageGenerationSettingsBottomSheet(
                         update {
                             copy(
                                 outputFormat = value,
+                                count = if (value == "svg") 1 else count,
+                                size = if (value == "gif") "auto" else size,
                                 background = background.takeUnless {
-                                    it == "transparent" && value !in setOf(null, "png", "webp")
+                                    it == "transparent" && value !in setOf(null, "png", "webp", "svg")
                                 },
                             )
                         }
@@ -2345,9 +2401,9 @@ internal fun ImageGenerationSettingsBottomSheet(
 
                         Spacer(modifier = Modifier.height(16.dp))
                     }
+                    footerContent?.invoke()
                 }
             }
-            footerContent?.invoke()
         }
     }
 }
@@ -2377,6 +2433,8 @@ private fun ImageOptionChips(
             options.forEach { option ->
                 val label = when (option) {
                     "auto" -> stringResource(R.string.imggen_page_option_auto)
+                    "flare" -> "Flare（标准版）"
+                    "sunburst" -> "Sunburst（增强版）"
                     "direct" -> stringResource(R.string.imggen_page_option_direct)
                     "agent" -> stringResource(R.string.imggen_page_option_agent)
                     "standard" -> stringResource(R.string.imggen_page_option_standard)

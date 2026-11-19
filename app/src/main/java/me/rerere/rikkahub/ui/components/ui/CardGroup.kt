@@ -28,11 +28,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.ui.theme.SurfaceTextTheme
 import me.rerere.rikkahub.ui.context.LocalGlobalBackgroundActive
 import me.rerere.rikkahub.ui.context.LocalPageSurfaceStyle
 import me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle
@@ -123,26 +125,32 @@ private fun CardGroupListItem(
         bottomStart = bottomCorner,
         bottomEnd = bottomCorner,
     )
-    ListItem(
-        headlineContent = item.headlineContent,
-        modifier = item.modifier
-            .fillMaxWidth()
-            .clip(itemShape)
-            .then(
-                if (item.onClick != null) {
-                    Modifier.clickable(
-                        interactionSource = interactionSource,
-                        indication = LocalIndication.current,
-                        onClick = item.onClick,
-                    )
-                } else Modifier
-            ),
-        overlineContent = item.overlineContent,
-        supportingContent = item.supportingContent,
-        leadingContent = item.leadingContent,
-        trailingContent = item.trailingContent,
-        colors = item.colors ?: CustomColors.listItemColors,
-    )
+    val colors = item.colors ?: CustomColors.listItemColors
+    val backgrounds = LocalAppearanceBackground.current?.readability?.backgrounds?.map {
+        colors.containerColor.compositeOver(it)
+    }
+    SurfaceTextTheme(colors.contentColor, colors.supportingContentColor, backgrounds) {
+        ListItem(
+            headlineContent = item.headlineContent,
+            modifier = item.modifier
+                .fillMaxWidth()
+                .clip(itemShape)
+                .then(
+                    if (item.onClick != null) {
+                        Modifier.clickable(
+                            interactionSource = interactionSource,
+                            indication = LocalIndication.current,
+                            onClick = item.onClick,
+                        )
+                    } else Modifier
+                ),
+            overlineContent = item.overlineContent,
+            supportingContent = item.supportingContent,
+            leadingContent = item.leadingContent,
+            trailingContent = item.trailingContent,
+            colors = colors,
+        )
+    }
 }
 
 @Composable
@@ -178,13 +186,13 @@ fun CardGroup(
             }
             if (liquidGlassActive) LiquidGlassSurfaceLayers(Modifier.matchParentSize(), strength = .5f, shape = groupShape, drawEdges = false)
             CompositionLocalProvider(LocalInsideGlassSurface provides true) {
-            Column(Modifier.fillMaxWidth()) {
-                val count = scope.items.size
-                scope.items.fastForEachIndexed { index, item ->
-                    CardGroupListItem(item = item, count = count, index = index)
-                    if (index != count - 1) Spacer(modifier = Modifier.height(CardGroupItemSpacing))
+                Column(Modifier.fillMaxWidth()) {
+                    val count = scope.items.size
+                    scope.items.fastForEachIndexed { index, item ->
+                        CardGroupListItem(item = item, count = count, index = index)
+                        if (index != count - 1) Spacer(modifier = Modifier.height(CardGroupItemSpacing))
+                    }
                 }
-            }
             }
             if (liquidGlassActive) LiquidGlassSurfaceLayers(Modifier.matchParentSize(), strength = .5f, shape = groupShape, drawTint = false)
         }

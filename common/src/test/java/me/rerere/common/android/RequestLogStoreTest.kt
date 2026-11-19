@@ -10,6 +10,19 @@ import kotlin.uuid.Uuid
 class RequestLogStoreTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun `metadata index never retains request bodies and damaged indexes fall back to detail`() {
+        val folder=temp.newFolder()
+        val entry=LogEntry.RequestLog(tag="HTTP",url="https://example.test",method="POST",requestBody="PRIVATE_PROMPT",responseBody="PRIVATE_ANSWER")
+        RequestLogStore(folder).save(entry)
+        val restored=RequestLogStore(folder)
+        val summary=restored.summaries().single() as LogEntry.RequestLog
+        assertNull(summary.requestBody); assertNull(summary.responseBody)
+        assertFalse(File(folder,"${entry.id}.index").readText().contains("PRIVATE_"))
+        assertEquals(entry,restored.detail(entry.id))
+        File(folder,"${entry.id}.index").writeText("broken index")
+        assertEquals(entry,RequestLogStore(folder).detail(entry.id))
+    }
+
     @Test fun `request and provider response updates survive a new store instance`() {
         val folder = temp.newFolder()
         val store = RequestLogStore(folder)

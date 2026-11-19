@@ -25,7 +25,7 @@ class DiagramSourceTest {
         listOf("json", "JSON", "jsonc", "json5", "javascript", "application/json", "application/geo+json").forEach { language ->
             listOf("", "<div>Heading</div>\n\n").forEach { prefix ->
                 val doc = buildMarkdownDocument(prefix + "```$language\n$point\n```\n")
-                val code = doc.selectFirst("pre > code")!!
+                val code = doc.select("pre > code").last()!!
                 val declared = code.classNames().first { it.startsWith("language-") }.removePrefix("language-")
                 assertEquals(language, "geojson", resolveDiagramLanguage(declared, code.wholeText()))
                 assertFalse(doc.selectFirst("pre")!!.attr("data-rikka-complete") == "false")

@@ -100,6 +100,7 @@ fun AssistantQwenPage(id: String) {
             supportsHighResolutionVision = support.supportsHighResolutionVision,
             unavailableMessage = unavailableMessage,
             onUpdate = vm::update,
+            qwen4 = me.rerere.ai.provider.providers.openai.isQwen4Max(model?.parameterModelId().orEmpty()),
         )
     }
 }
@@ -117,6 +118,7 @@ private fun AssistantQwenContent(
     supportsHighResolutionVision: Boolean,
     unavailableMessage: String?,
     onUpdate: (Assistant) -> Unit,
+    qwen4: Boolean = false,
 ) {
     val options = assistant.qwenOptions
 
@@ -133,6 +135,21 @@ private fun AssistantQwenContent(
             .imePadding(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (qwen4) Card(colors = CustomColors.cardColorsOnSurfaceContainer) {
+            Text("千问4-Max：思考默认开启，支持 low / high / xhigh；输出上限分别为思考模式 262,144、非思考模式 131,072 Token。", modifier = Modifier.padding(12.dp))
+            QwenSelectItem(title = "联网搜索", description = "使用百炼内置搜索。", warning = "调用可能产生搜索费用。",
+                options = QwenOptionalToggle.entries, selected = options.enableSearch, enabled = enabled && !isResponses,
+                label = { it.displayName() }, onSelected = { value -> update { it.copy(enableSearch = value) } })
+            QwenFloatItem(title = "频率惩罚", description = "取值 -2 到 2，留空使用默认值。", warning = "仅发送给千问4-Max。",
+                value = options.frequencyPenalty, enabled = enabled && !isResponses, valid = { it in -2f..2f },
+                onValueChange = { value -> update { it.copy(frequencyPenalty = value) } })
+            QwenSelectItem(title = "图片精度", description = "默认 high，最大 16,777,216 像素。", warning = "高精度可能增加输入 Token。",
+                options = listOf("默认", "low", "high", "auto"), selected = options.imageDetail ?: "默认", enabled = enabled && !isResponses,
+                label = { it }, onSelected = { value -> update { it.copy(imageDetail = value.takeUnless { v -> v == "默认" }) } })
+            QwenIntegerItem(title = "图片像素上限", description = "优先于图片精度，最大 16,777,216。", warning = "留空使用供应商默认值。",
+                value = options.imageMaxPixels, enabled = enabled && !isResponses, valid = { it in 1..16_777_216 },
+                onValueChange = { value -> update { it.copy(imageMaxPixels = value) } })
+        }
         Card(colors = CustomColors.cardColorsOnSurfaceContainer) {
             FormItem(
                 modifier = Modifier.padding(12.dp),

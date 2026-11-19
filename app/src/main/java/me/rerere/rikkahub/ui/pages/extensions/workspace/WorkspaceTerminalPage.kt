@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
 import android.graphics.Typeface
-import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -213,18 +212,14 @@ private fun WorkspaceTerminalContent(
                             attachSession(session)
                             sessionClient.terminalView = this
                             viewClient.terminalView = this
-                            setOnTouchListener { _, event ->
-                                if (event.action == MotionEvent.ACTION_UP) {
-                                    viewClient.focusAndShowKeyboard()
-                                }
-                                false
-                            }
                             post {
                                 viewClient.focusAndShowKeyboard()
                             }
                         }
                     },
                     update = { terminalView ->
+                        // Native single taps and accessibility ACTION_CLICK both use performClick.
+                        terminalView.setOnClickListener { viewClient.focusAndShowKeyboard() }
                         terminalView.isFocusable = true
                         terminalView.isFocusableInTouchMode = true
                         terminalView.setTextSize(terminalTextSizePx)
@@ -232,12 +227,6 @@ private fun WorkspaceTerminalContent(
                         terminalView.setTerminalViewClient(viewClient)
                         sessionClient.terminalView = terminalView
                         viewClient.terminalView = terminalView
-                        terminalView.setOnTouchListener { _, event ->
-                            if (event.action == MotionEvent.ACTION_UP) {
-                                viewClient.focusAndShowKeyboard()
-                            }
-                            false
-                        }
                         terminalView.attachSession(session)
                         terminalView.onScreenUpdated()
                     },

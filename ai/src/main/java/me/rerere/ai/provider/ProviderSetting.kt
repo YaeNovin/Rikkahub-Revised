@@ -125,6 +125,7 @@ sealed class ProviderSetting {
         var apiKey: String = "",
         var baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
         var vertexAI: Boolean = false,
+        var useInteractionsApi: Boolean = false,
         var useServiceAccount: Boolean = false,
         var privateKey: String = "", // only for vertex AI service account
         var serviceAccountEmail: String = "", // only for vertex AI service account
@@ -189,6 +190,7 @@ sealed class ProviderSetting {
         @Transient override val shortDescription: @Composable (() -> Unit) = {},
         var apiKey: String = "",
         var baseUrl: String = "https://api.anthropic.com/v1",
+        var apiVersion: String = "2023-06-01",
         var promptCaching: Boolean = false,
         var promptCacheTtl: ClaudePromptCacheTtl = ClaudePromptCacheTtl.FIVE_MINUTES,
     ) : ProviderSetting() {

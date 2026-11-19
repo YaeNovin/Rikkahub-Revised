@@ -33,7 +33,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
@@ -196,7 +195,7 @@ fun ModelSelector(
                 },
                 modifier = modifier
             ) {
-                model?.modelId?.let {
+                model?.let {
                     AutoAIIcon(
                         it, Modifier
                             .padding(end = 4.dp)
@@ -233,7 +232,7 @@ fun ModelSelector(
             if (model != null) {
                 AutoAIIcon(
                     modifier = Modifier.size(36.dp),
-                    name = model.modelId,
+                    model = model,
                     color = Color.Transparent
                 )
             } else {
@@ -302,6 +301,25 @@ fun ModelListSheet(
                 }
             )
         }
+    }
+}
+
+/** Used by both chat and image model sheets; the overlay owns its backing material. */
+@Composable
+internal fun ModelSearchField(value: String, onValueChange: (String) -> Unit) {
+    me.rerere.rikkahub.ui.components.ui.AppearanceOptionSurface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        shape = RoundedCornerShape(50),
+    ) {
+        OutlinedTextField(
+            value = value, onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(50),
+            placeholder = { Text(stringResource(R.string.model_list_search_placeholder)) },
+            colors = me.rerere.rikkahub.ui.components.ui.appearanceOutlinedTextFieldColors().copy(
+                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+            ),
+            leadingIcon = { Icon(HugeIcons.Search01, null) }, singleLine = true,
+        )
     }
 }
 
@@ -433,34 +451,7 @@ private fun ColumnScope.ModelList(
         }.toMap()
     }
 
-    Surface(
-        shape = RoundedCornerShape(50),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-    ) {
-        OutlinedTextField(
-            value = searchKeywords,
-            onValueChange = { searchKeywords = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.model_list_search_placeholder),
-                )
-            },
-            shape = RoundedCornerShape(50),
-            colors = TextFieldDefaults.colors(
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-            ),
-            leadingIcon = {
-                Icon(HugeIcons.Search01, null)
-            },
-            maxLines = 1,
-        )
-    }
+    ModelSearchField(searchKeywords, { searchKeywords = it })
 
     LazyColumn(
         state = lazyListState,
@@ -734,7 +725,7 @@ private fun ModelItem(
                     shape = MaterialTheme.shapes.small,
                 ) {
                     AutoAIIcon(
-                        name = model.modelId,
+                        model = model,
                         modifier = Modifier
                             .padding(4.dp)
                             .size(32.dp)
@@ -783,6 +774,7 @@ fun ModelTypeTag(model: Model) {
                     ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
                     ModelType.IMAGE -> R.string.setting_provider_page_image_model
                     ModelType.VIDEO -> R.string.setting_provider_page_video_model
+                    ModelType.DECISION -> R.string.setting_provider_page_decision_model
                 }
             )
         )

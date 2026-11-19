@@ -1,0 +1,10 @@
+// Keep Web configuration acceptance tests separate from all existing app data.
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.buildTypes.getByName('debug').applicationIdSuffix = '.revised.websettingsqa'
+            }
+        }
+    }
+}

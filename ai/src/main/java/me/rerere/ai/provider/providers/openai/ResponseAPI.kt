@@ -27,6 +27,13 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.withModernVendorOptions
+import me.rerere.ai.provider.openAIAuthentication
+import me.rerere.ai.provider.responsesUrl
+import me.rerere.ai.provider.wireParameters
+import me.rerere.ai.provider.officialChatVendor
+import me.rerere.ai.provider.OfficialChatVendor
+import me.rerere.ai.provider.supportsFunctionCalling
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelParameterFamily
 import me.rerere.ai.provider.ProviderRequestDiagnostics
@@ -62,6 +69,7 @@ import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -93,7 +101,7 @@ class ResponseAPI(
             stream = false,
         )
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
+            .url(providerSetting.responsesUrl())
             .tag(
                 ProviderRequestDiagnostics::class.java,
                 requestBody.openAIRequestDiagnostics(
@@ -105,28 +113,25 @@ class ResponseAPI(
             )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
+            .openAIAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        // Network content is captured only by the private, opt-in diagnostic interceptor.
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            val body = response.body.string()
-            throw providerRequestFailure(
-                response = response,
-                cause = null,
-                detail = "Failed to get response: ${response.code} $body",
-            )
+        val bodyStr = client.newCall(request).awaitAndUse { response ->
+            if (!response.isSuccessful) {
+                val body = response.body.string()
+                throw providerRequestFailure(
+                    response = response,
+                    cause = null,
+                    detail = "Failed to get response: ${response.code} $body",
+                )
+            }
+            response.body?.string() ?: ""
         }
-
-        val bodyStr = response.body?.string() ?: ""
-        Log.i(TAG, "generateText: $bodyStr")
+        // Network content is captured only by the private, opt-in diagnostic interceptor.
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val output = parseResponseOutput(bodyJson)
 
@@ -145,7 +150,7 @@ class ResponseAPI(
             stream = true,
         )
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
+            .url(providerSetting.responsesUrl())
             .tag(
                 ProviderRequestDiagnostics::class.java,
                 requestBody.openAIRequestDiagnostics(
@@ -157,21 +162,18 @@ class ResponseAPI(
             )
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
+            .openAIAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        // Network content is captured only by the private, opt-in diagnostic interceptor.
 
         val decoder = ResponseApiStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
                 trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
                 }
             }
         }
@@ -183,7 +185,7 @@ class ResponseAPI(
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: $id/$type $data")
+                // Network content is captured only by the private, opt-in diagnostic interceptor.
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -196,20 +198,20 @@ class ResponseAPI(
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var detail = t?.message
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+                // Failure propagates to the structured application diagnostics.
+                // Raw network content is not written to stdout.
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        println(bodyElement)
+                        // Raw network content is not written to stdout.
                         detail = bodyElement.parseErrorDetail().message ?: bodyRaw
-                        Log.i(TAG, "onFailure: $detail")
+                        // Network content is captured only by the private, opt-in diagnostic interceptor.
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    // Network content is captured only by the private, opt-in diagnostic interceptor.
+                    // Failure propagates to the structured application diagnostics.
                 } finally {
                     close(providerRequestFailure(response, t, detail ?: bodyRaw))
                 }
@@ -229,7 +231,7 @@ class ResponseAPI(
             .newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource ")
+            // Raw network content is not written to stdout.
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -244,12 +246,15 @@ class ResponseAPI(
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
         val parameterModelId = params.model.parameterModelId()
+        require(!(isAlibabaModelStudioHost(host) && messages.any { message -> message.parts.any { it is UIMessagePart.Video || it is UIMessagePart.Audio } })) {
+            "百炼 Responses API 暂不支持视频或音频输入，请切换为 Chat Completions。"
+        }
         val modelSupport = resolveOpenAIModelParameterSupport(parameterModelId)
         val parameterFamily = params.model.inferParameterFamily() ?: ModelParameterFamily.OPENAI
         val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
         val deepSeekSupport = resolveDeepSeekModelParameterSupport(parameterModelId)
         val useFunctionTools =
-            (params.model.abilities.contains(ModelAbility.TOOL) || deepSeekSupport.available) &&
+                (params.model.supportsFunctionCalling() || deepSeekSupport.available) &&
                 params.tools.isNotEmpty()
         val hasAnyTools = useFunctionTools || params.model.tools.isNotEmpty()
         val toolCount = (if (useFunctionTools) params.tools.size else 0) + params.model.tools.size
@@ -280,7 +285,7 @@ class ResponseAPI(
                 params.openAIOptions.serviceTier.apiValue
                     ?.takeIf {
                         it != "ultrafast" ||
-                            (host == OPENAI_API_HOST && modelSupport.supportsUltrafast)
+                            (isUltrafastOpenAIHost(host) && modelSupport.supportsUltrafast)
                     }
                     ?.let { put("service_tier", it) }
                 if (hasAnyTools) {
@@ -302,7 +307,9 @@ class ResponseAPI(
             applyDeepSeekResponseOptions(params = params, hasAnyTools = hasAnyTools)
 
             // system instructions
-            if (messages.any { it.role == MessageRole.SYSTEM }) {
+            val developerPrefix = isOfficialOpenAIHost(host) &&
+                Regex("^gpt-6[.-]2(?:[.-]|$)").containsMatchIn(parameterModelId.lowercase())
+            if (!developerPrefix && messages.any { it.role == MessageRole.SYSTEM }) {
                 val parts = messages.first { it.role == MessageRole.SYSTEM }.parts
                 put(
                     "instructions",
@@ -310,7 +317,15 @@ class ResponseAPI(
             }
 
             // messages
-            put("input", buildMessages(messages, params.deepSeekImageDetail()))
+            put("input", buildJsonArray {
+                if (developerPrefix) messages.filter { it.role == MessageRole.SYSTEM }.forEach { message ->
+                    add(buildJsonObject {
+                        put("role", "developer")
+                        put("content", message.toText())
+                    })
+                }
+                buildMessages(messages, params.deepSeekImageDetail()).forEach(::add)
+            })
 
             // reasoning
             if (params.model.supportsReasoningCapability()) {
@@ -331,10 +346,10 @@ class ResponseAPI(
                         else -> level.effort.takeUnless { level == ReasoningLevel.AUTO }
                     }
                     effort?.let { put("effort", it) }
-                    if (host == OPENAI_API_HOST && modelSupport.supportsReasoningContext) {
+                    if (isOfficialOpenAIHost(host) && modelSupport.supportsReasoningContext) {
                         params.openAIOptions.reasoningContext.apiValue?.let { put("context", it) }
                     }
-                    if (host == OPENAI_API_HOST && modelSupport.supportsReasoningMode) {
+                    if (isOfficialOpenAIHost(host) && modelSupport.supportsReasoningMode) {
                         params.openAIOptions.reasoningMode.apiValue?.let { put("mode", it) }
                     }
                 })
@@ -358,12 +373,10 @@ class ResponseAPI(
                                 put("description", tool.description)
                                 // ask_user has type-specific optional fields. Do not normalize
                                 // every field to required (including hidden question parameters).
-                                if (tool.name == me.rerere.ai.ui.AskUserProtocol.TOOL_NAME) put("strict", false)
+                                put("strict", false)
                                 put(
                                     "parameters",
-                                    json.encodeToJsonElement(
-                                        tool.parameters()
-                                    )
+                                    tool.wireParameters()
                                 )
                             })
                         }
@@ -389,7 +402,10 @@ class ResponseAPI(
                     }
                 }
             }
-        }.mergeCustomBody(params.customBody)
+        }.mergeCustomBody(params.customBody).withModernVendorOptions(params, "responses")
+            .withNewOfficialModelOptions(params, host, responses = true)
+            .withOfficialChatContract(providerSetting, params, responses = true)
+            .withNewOfficialModelOptions(params, host, responses = true)
     }
 
     internal fun buildMessages(
@@ -536,7 +552,7 @@ class ResponseAPI(
                                                     put("image_url", encoded.base64)
                                                     deepSeekImageDetail?.let { put("detail", it) }
                                                 }.onFailure {
-                                                    it.printStackTrace()
+                                                    // Failure propagates to the structured application diagnostics.
                                                     put("type", "input_text")
                                                     put("text", "Error: Failed to encode image to base64")
                                                 }
@@ -632,7 +648,7 @@ class ResponseAPI(
                                         put("image_url", encodedImage.base64)
                                         deepSeekImageDetail?.let { put("detail", it) }
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        // Failure propagates to the structured application diagnostics.
                                         put("type", "input_text")
                                         put("text", "Error: Failed to encode image to base64")
                                     }
@@ -648,7 +664,7 @@ class ResponseAPI(
     }
 
     internal fun parseResponseOutput(jsonObject: JsonObject): TextGenerationResult {
-        println(jsonObject)
+        // Raw network content is not written to stdout.
         val outputs = jsonObject["output"]?.jsonArray ?: error("output not found")
         val parts = arrayListOf<UIMessagePart>()
 
@@ -662,7 +678,7 @@ class ResponseAPI(
                         encryptedContent = output["encrypted_content"]?.jsonPrimitive?.contentOrNull,
                     ).toMetadata()
                     val reasoningPartStart = parts.size
-                    output["summary"]?.jsonArray.orEmpty().map { it.jsonObject }.forEach { part ->
+                    output["summary"].responseContentParts().forEach { part ->
                         val partType = part["type"]?.jsonPrimitive?.content ?: error("part type not found")
                         when (partType) {
                             "summary_text" -> {
@@ -679,7 +695,7 @@ class ResponseAPI(
                             }
                         }
                     }
-                    output["content"]?.jsonArray.orEmpty().map { it.jsonObject }.forEach { part ->
+                    output["content"].responseContentParts().forEach { part ->
                         if (part["type"]?.jsonPrimitive?.contentOrNull == "reasoning_text") {
                             parts.add(
                                 UIMessagePart.Reasoning(
@@ -721,8 +737,8 @@ class ResponseAPI(
                 }
 
                 "message" -> {
-                    val content = output["content"]?.jsonArray ?: error("content not found")
-                    content.map { it.jsonObject }.forEach { part ->
+                    val content = output["content"].responseContentParts()
+                    content.forEach { part ->
                         val partType = part["type"]?.jsonPrimitive?.content ?: error("part type not found")
                         when (partType) {
                             "output_text" -> {
@@ -734,6 +750,7 @@ class ResponseAPI(
                                 )
                             }
 
+                            "refusal" -> parts.add(UIMessagePart.Text(part["refusal"]?.jsonPrimitive?.content.orEmpty()))
                             else -> error("unknown part type $partType")
                         }
                     }
@@ -762,7 +779,8 @@ class ResponseAPI(
         return TokenUsage(
             promptTokens = jsonObject["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
             completionTokens = jsonObject["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
-            totalTokens = jsonObject["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+            totalTokens = jsonObject["total_tokens"]?.jsonPrimitive?.intOrNull
+                ?: ((jsonObject["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0) + (jsonObject["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0)),
             cachedTokens = jsonObject["input_tokens_details"]?.jsonObjectOrNull?.get("cached_tokens")?.jsonPrimitive?.intOrNull
                 ?: 0
         )
@@ -810,8 +828,8 @@ private fun ServerToolStatus.toOpenAIStatus(): String = when (this) {
 }
 
 private fun isModelAllowTemperature(params: TextGenerationParams): Boolean {
-    return !ModelRegistry.OPENAI_O_MODELS.match(params.model.modelId) &&
-        !isOpenAIGpt5Model(params.model.modelId) &&
+    return !ModelRegistry.OPENAI_O_MODELS.match(params.model.parameterModelId()) &&
+        allowsOpenAISampling(params) &&
         !params.usesDeepSeekThinkingMode()
 }
 
@@ -827,6 +845,9 @@ internal data class ResponseProviderCapabilities(
 )
 
 internal fun resolveResponseProviderCapabilities(host: String): ResponseProviderCapabilities {
+    if (officialChatVendor("https://$host") in setOf(OfficialChatVendor.MIMO, OfficialChatVendor.KIMI, OfficialChatVendor.GLM)) {
+        return ResponseProviderCapabilities(supportsReasoningSummary = false, supportEncryptedContent = false)
+    }
     return when (host) {
         DEEPSEEK_API_HOST -> ResponseProviderCapabilities(
             supportsReasoningSummary = false,
@@ -840,4 +861,12 @@ internal fun resolveResponseProviderCapabilities(host: String): ResponseProvider
 
         else -> ResponseProviderCapabilities()
     }
+}
+
+/** GLM documents singleton message content; OpenAI and Kimi return an array. */
+private fun kotlinx.serialization.json.JsonElement?.responseContentParts(): List<JsonObject> = when (this) {
+    null, kotlinx.serialization.json.JsonNull -> emptyList()
+    is JsonObject -> listOf(this)
+    is kotlinx.serialization.json.JsonArray -> map { it.jsonObject }
+    else -> error("Responses content must be an object or array")
 }

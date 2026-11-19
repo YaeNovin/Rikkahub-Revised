@@ -57,6 +57,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.formatContextWindowTokens
 import me.rerere.ai.provider.parseContextWindowTokens
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.providers.google.isGeminiArgon
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.ai.provider.resolveReasoningLevelSupport
+import me.rerere.ai.provider.providers.google.isGemini4Model
+import me.rerere.ai.provider.isMiniMaxM3
+import me.rerere.ai.provider.ReasoningLevelSupport
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
@@ -144,6 +152,11 @@ internal fun AssistantBasicContent(
     vm: AssistantDetailVM
 ) {
     val settings = LocalSettings.current
+    val selectedModel = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
+    val usesArgon = selectedModel?.isGemini4Model() == true || selectedModel?.isMiniMaxM3() == true
+    val fixedSamplingModel = if (selectedModel?.isMiniMaxM3() == true) "MiniMax M3 系列" else "Gemini 4"
+    val reasoningSupport = selectedModel?.let { resolveReasoningLevelSupport(it, it.findProvider(providers)) }
+        ?: ReasoningLevelSupport.ALL
     val globalBackgroundOverridesChat = settings.isGlobalBackgroundAppliedToChat()
     Column(
         modifier = Modifier
@@ -316,13 +329,14 @@ internal fun AssistantBasicContent(
                 description = {
                     Text(
                         text = buildAnnotatedString {
-                            append(stringResource(R.string.assistant_page_temperature_warning))
+                            append(if (usesArgon) "$fixedSamplingModel 使用固定采样，发送时会省略温度参数。" else stringResource(R.string.assistant_page_temperature_warning))
                         }
                     )
                 },
                 tail = {
                     Switch(
-                        checked = assistant.temperature != null,
+                        enabled = !usesArgon,
+                        checked = !usesArgon && assistant.temperature != null,
                         onCheckedChange = { enabled ->
                             onUpdate(
                                 assistant.copy(
@@ -333,7 +347,7 @@ internal fun AssistantBasicContent(
                     )
                 }
             ) {
-                if (assistant.temperature != null) {
+                if (!usesArgon && assistant.temperature != null) {
                     var temperatureInput by remember(assistant.id) {
                         mutableStateOf(assistant.temperature.toString())
                     }
@@ -426,13 +440,14 @@ internal fun AssistantBasicContent(
                 description = {
                     Text(
                         text = buildAnnotatedString {
-                            append(stringResource(R.string.assistant_page_top_p_warning))
+                            append(if (usesArgon) "$fixedSamplingModel 使用固定采样，发送时会省略 Top-P 参数。" else stringResource(R.string.assistant_page_top_p_warning))
                         }
                     )
                 },
                 tail = {
                     Switch(
-                        checked = assistant.topP != null,
+                        enabled = !usesArgon,
+                        checked = !usesArgon && assistant.topP != null,
                         onCheckedChange = { enabled ->
                             onUpdate(
                                 assistant.copy(
@@ -443,7 +458,7 @@ internal fun AssistantBasicContent(
                     )
                 }
             ) {
-                assistant.topP?.let { topP ->
+                assistant.topP?.takeUnless { usesArgon }?.let { topP ->
                     var topPInput by remember(assistant.id) {
                         mutableStateOf(topP.toString())
                     }
@@ -500,7 +515,10 @@ internal fun AssistantBasicContent(
                 },
             ) {
                 ReasoningButton(
-                    reasoningLevel = assistant.reasoningLevel,
+                    reasoningLevel = reasoningSupport.coerce(assistant.reasoningLevel),
+                    availableLevels = reasoningSupport.levels,
+                    modelName = selectedModel?.modelId,
+                    compatibleEndpoint = reasoningSupport.compatibleEndpoint,
                     onUpdateReasoningLevel = { level ->
                         onUpdate(assistant.copy(reasoningLevel = level))
                     }
@@ -953,7 +971,8 @@ internal fun AssistantBasicContent(
                 ) {
                     Slider(
                         value = blurSlider,
-                        enabled = !globalBackgroundOverridesChat,
+                        enabled = !globalBackgroundOverridesChat && settings.advancedAppearanceSetting.pageSurfaceStyle.usesBlur &&
+                            me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities.current.supportsRealtimeBlur,
                         onValueChange = {
                             blurDragging = true
                             blurSlider = it

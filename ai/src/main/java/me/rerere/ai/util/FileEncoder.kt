@@ -109,7 +109,7 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
         this.url.startsWith("data:") -> {
             // 从 data URL 提取 mime type
             val mimeType = url.substringAfter("data:").substringBefore(";")
-            EncodedImage(base64 = url, mimeType = mimeType)
+            EncodedImage(base64 = if (withPrefix) url else url.substringAfter(','), mimeType = mimeType)
         }
         this.url.startsWith("http") -> {
             // HTTP URL 无法确定 mime type，默认使用 image/png

@@ -286,7 +286,10 @@
   <string name="chat_page_history">チャット履歴</string>
   <string name="chat_page_menu_ai_translator">AI翻訳</string>
   <string name="chat_page_menu_image_generation">画像生成</string>
-  <string name="chat_page_message_count">%d件のメッセージ</string>
+  <plurals name="chat_page_message_count">
+    <item quantity="one">%d件のメッセージ</item>
+    <item quantity="other">%d件のメッセージ</item>
+  </plurals>
   <string name="chat_page_move_to_assistant">アシスタントに移動</string>
   <string name="chat_page_new_chat">新しいチャット</string>
   <string name="chat_page_new_message">新しいメッセージ</string>
@@ -300,7 +303,10 @@
   <string name="chat_page_yesterday">昨日</string>
   <string name="chat_size_dialog_content">現在のメッセージ数: %1$d。これによりアプリがクラッシュしたり動作が遅くなったり、この会話データが失われる可能性があります。チャットを続けるには、できるだけ早く新しい会話を作成してください。</string>
   <string name="chat_size_dialog_title">この会話データは大きすぎます</string>
-  <string name="citations_count">%1$d 件の引用</string>
+  <plurals name="citations_count">
+    <item quantity="one">%1$d 件の引用</item>
+    <item quantity="other">%1$d 件の引用</item>
+  </plurals>
   <string name="code_block_collapse">折りたたむ</string>
   <string name="code_block_copy">コードをコピー</string>
   <string name="code_block_expand">展開</string>
@@ -699,9 +705,9 @@
   <string name="setting_files_page_clean_action">クリーンアップ</string>
   <string name="setting_files_page_clean_confirmation">このカテゴリのすべてのファイルを完全に削除します。この操作は元に戻せません。</string>
   <string name="setting_files_page_clean_content_description">ファイルをクリーンアップ</string>
-  <string name="setting_files_page_clean_failed_toast">一部のファイルを削除できませんでした</string>
+  <string name="setting_files_page_clean_failed_toast">%1$d 個のファイルを削除しました。%2$d 個のファイルは削除できませんでした。</string>
   <string name="setting_files_page_clean_title">ファイルをクリーンアップしますか？</string>
-  <string name="setting_files_page_cleaned_toast">ファイルをクリーンアップしました</string>
+  <string name="setting_files_page_cleaned_toast">%1$d 個のファイルを削除しました（チャットの添付ファイル %2$d 個、生成画像 %3$d 個）。</string>
   <string name="setting_files_page_delete_action">削除</string>
   <string name="setting_files_page_delete_content_description">削除</string>
   <string name="setting_files_page_delete_failed_toast">削除に失敗しました</string>

@@ -36,17 +36,17 @@ internal fun appearanceSurfaceOpacityPolicy(
     inputOpacity: Float,
     dockOpacity: Float,
     cardBackgroundActive: Boolean,
+    cardMaterial: me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle = me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle.TRANSLUCENT,
 ): AppearanceSurfaceOpacityPolicy = AppearanceSurfaceOpacityPolicy(
-    // Cards and the shared top bar remain opaque when no background is visible;
-    // this keeps ordinary pages readable while preserving configured translucency
-    // over an active background.
+    // Card material owns opacity, independently of whether the page uses an image.
+    // The wallpaper-only top-bar blur path retains its solid no-source fallback.
     card = normalizeAppearanceSurfaceOpacity(
         AppearanceSurfaceRole.CARD,
-        if (cardBackgroundActive) cardOpacity else 1f,
+        if (cardMaterial.opaqueMaterial) 1f else cardOpacity,
     ),
     topBar = normalizeAppearanceSurfaceOpacity(
         AppearanceSurfaceRole.TOP_BAR,
-        if (cardBackgroundActive) topBarOpacity else 1f,
+        if (cardBackgroundActive && !cardMaterial.opaqueMaterial) topBarOpacity else 1f,
     ),
     input = normalizeAppearanceSurfaceOpacity(AppearanceSurfaceRole.INPUT, inputOpacity),
     // Dock is part of the composer. Ignore the retired independent dock tint.

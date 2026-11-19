@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.extensions.skills
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -78,6 +80,7 @@ fun SkillsPage() {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     var showImportSheet by rememberSaveable { mutableStateOf(false) }
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
@@ -88,7 +91,7 @@ fun SkillsPage() {
         uri ?: return@rememberLauncherForActivityResult
         vm.importSkillFromFile(context, uri) { success, message ->
             if (success) {
-                toaster.show(context.getString(R.string.skills_page_import_success, message))
+                toaster.show(appResources.getString(R.string.skills_page_import_success, message))
             } else {
                 toaster.show(context.formatUserFacingError(message))
             }
@@ -193,7 +196,7 @@ fun SkillsPage() {
                 vm.saveSkill(name, content) { success ->
                     showAddDialog = false
                     if (!success) {
-                        toaster.show(context.getString(R.string.skills_page_save_failed))
+                        toaster.show(appResources.getString(R.string.skills_page_save_failed))
                     }
                 }
             },
@@ -207,7 +210,7 @@ fun SkillsPage() {
                 vm.importSkillFromGitHub(repoUrl) { success, message ->
                     showImportDialog = false
                     if (success) {
-                        toaster.show(context.getString(R.string.skills_page_import_success, message))
+                        toaster.show(appResources.getString(R.string.skills_page_import_success, message))
                     } else {
                         toaster.show(context.formatUserFacingError(message))
                     }

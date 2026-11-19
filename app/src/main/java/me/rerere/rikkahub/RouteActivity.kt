@@ -31,6 +31,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +50,6 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import coil3.ImageLoader
-import coil3.compose.setSingletonImageLoaderFactory
 import coil3.gif.AnimatedImageDecoder
 import coil3.gif.GifDecoder
 import coil3.network.cachecontrol.CacheControlCacheStrategy
@@ -98,6 +99,8 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantClaudePage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDeepSeekPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGeminiPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMiniMaxPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGeminiToolsPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantGrokPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantOpenAIPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantQwenPage
@@ -192,29 +195,30 @@ class RouteActivity : ComponentActivity() {
             finish()
             return
         }
-        setContent {
-            RikkahubTheme {
-                setSingletonImageLoaderFactory { context ->
-                    ImageLoader.Builder(context)
-                        .crossfade(true)
-                        .components {
-                            add(
-                                OkHttpNetworkFetcherFactory(
-                                    callFactory = { okHttpClient },
-                                    cacheStrategy = { CacheControlCacheStrategy() },
-                                )
-                            )
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                add(AnimatedImageDecoder.Factory())
-                            } else {
-                                add(GifDecoder.Factory())
-                            }
-                            add(SvgDecoder.Factory(scaleToDensity = true))
-                        }
-                        .build()
-                }
-                AppRoutes()
+        // Keep the starting window until actual settings and cached colors are ready.
+        // Never compose the full chat using Settings.dummy() first.
+        val contentView = findViewById<android.view.View>(android.R.id.content)
+        var ready = false
+        val started = android.os.SystemClock.uptimeMillis()
+        contentView.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (!ready && android.os.SystemClock.uptimeMillis() - started < 3000) return false
+                contentView.viewTreeObserver.removeOnPreDrawListener(this)
+                return true
             }
+        })
+        setContent {
+            val initialSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+            var appearanceReady by remember { androidx.compose.runtime.mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                settingsStore.settingsFlow.first { !it.init }
+                kotlinx.coroutines.withTimeoutOrNull(1200) {
+                    (application as RikkaHubApp).startupAppearance.await()
+                }
+                appearanceReady = true
+                ready = true
+            }
+            if (!initialSettings.init && appearanceReady) RikkahubTheme { AppRoutes() }
         }
     }
 
@@ -301,63 +305,16 @@ class RouteActivity : ComponentActivity() {
         val backStack = rememberNavBackStack(startScreen)
         val navigator = remember(backStack) { Navigator(backStack) }
         SideEffect { this@RouteActivity.navStack = backStack }
-        val globalBackgroundActive = settings.isGlobalBackgroundActive() &&
-            backStack.lastOrNull() !is Screen.Chat
-        val appearanceCapabilities = remember {
-            advancedAppearanceCapabilities(Build.VERSION.SDK_INT)
-        }
-        val globalBackgroundHazeState = rememberHazeState()
-        val glassBackdrop = me.rerere.rikkahub.ui.components.ui.rememberGlassBackdrop()
-        val glassPowerSave = me.rerere.rikkahub.ui.components.ui.rememberGlassPowerSave()
         val motionAllowed = me.rerere.rikkahub.ui.components.ui.rememberSystemMotionAllowed()
-        val pageSurfaceStyle = appearanceCapabilities.effectiveSurfaceStyle(
-            settings.advancedAppearanceSetting.pageSurfaceStyle
-        )
-        val globalBackgroundVisible = globalBackgroundActive &&
-            pageSurfaceStyle != BackgroundSurfaceStyle.OPAQUE
-        val globalReadability = rememberBackgroundReadability(
-            background = settings.advancedAppearanceSetting.globalBackground
-                .takeIf { globalBackgroundActive },
-            backgroundOpacity = settings.advancedAppearanceSetting.globalBackgroundOpacity,
-            useGradientBackground = false,
-            overlayTopAlpha = .28f,
-            overlayBottomAlpha = .42f,
-        )
-        val globalBackgroundSpec = if (globalBackgroundActive) {
-            AppearanceBackgroundSpec(
-                background = settings.advancedAppearanceSetting.globalBackground,
-                opacity = settings.advancedAppearanceSetting.globalBackgroundOpacity,
-                blurRadius = settings.advancedAppearanceSetting.globalBackgroundBlurRadius,
-                foreground = globalReadability.foreground,
-                readability = globalReadability,
-            )
-        } else {
-            null
-        }
 
         ShareHandler(backStack)
 
-        SharedTransitionLayout {
+        // Avatar hero animation must not put every restored message/table under
+        // an additional app-wide LookaheadScope. Route transitions remain local.
+        Box {
             CompositionLocalProvider(
                 LocalNavController provides navigator,
-                LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
-                LocalGlobalBackgroundActive provides globalBackgroundVisible,
-                LocalGlobalGlassSurfaceOpacity provides settings.advancedAppearanceSetting.pageSurfaceOpacity,
-                LocalAppearanceSurfaceOpacityPolicy provides appearanceSurfaceOpacityPolicy(
-                    cardOpacity = settings.advancedAppearanceSetting.pageSurfaceOpacity,
-                    topBarOpacity = settings.displaySetting.topBarSurfaceOpacity,
-                    inputOpacity = settings.displaySetting.inputSurfaceOpacity,
-                    dockOpacity = settings.advancedAppearanceSetting.chatDockGlassOpacity,
-                    cardBackgroundActive = globalBackgroundVisible,
-                ),
-                LocalPageSurfaceStyle provides pageSurfaceStyle,
-                LocalAdvancedAppearanceCapabilities provides appearanceCapabilities,
-                LocalAppearanceBackground provides globalBackgroundSpec,
-                LocalGlobalBackgroundHazeState provides globalBackgroundHazeState,
-                me.rerere.rikkahub.ui.components.ui.LocalGlassBackdrop provides glassBackdrop,
-                me.rerere.rikkahub.ui.components.ui.LocalGlassPowerSave provides glassPowerSave,
-                me.rerere.rikkahub.ui.components.ui.LocalGlassBusy provides glassBackdrop.interacting,
                 LocalToaster provides toastState,
                 LocalTTSState provides tts,
                 LocalASRState provides asr,
@@ -374,23 +331,8 @@ class RouteActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .semantics { testTagsAsResourceId = true }
-                        .trackGlassInteraction(glassBackdrop)
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    if (globalBackgroundActive) {
-                        GlobalAppBackground(
-                            settings = settings,
-                            captureOnly = !globalBackgroundVisible,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .hazeSource(globalBackgroundHazeState),
-                        )
-                    }
-                    GlobalGlassTheme(
-                        active = globalBackgroundVisible,
-                        surfaceOpacity = settings.advancedAppearanceSetting.pageSurfaceOpacity,
-                        style = pageSurfaceStyle,
-                    ) {
                         NavDisplay(
                         backStack = backStack,
                         entryDecorators = listOf(
@@ -434,7 +376,7 @@ class RouteActivity : ComponentActivity() {
                                     fadeOut(animationSpec = tween(200)))
                             }
                         },
-                        entryProvider = entryProvider {
+                        entryProvider = me.rerere.rikkahub.ui.theme.withRouteAppearance(settings, entryProvider {
                             entry<Screen.Chat> { key ->
                                 ChatPage(
                                     id = Uuid.parse(key.id),
@@ -481,6 +423,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.AssistantGemini> { key ->
                                 AssistantGeminiPage(key.id)
+                            }
+                            entry<Screen.AssistantMiniMax> { key -> AssistantMiniMaxPage(key.id) }
+                            entry<Screen.AssistantGeminiTools> { key ->
+                                AssistantGeminiToolsPage(key.id)
                             }
 
                             entry<Screen.AssistantGrok> { key ->
@@ -693,9 +639,8 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Stats> {
                                 StatsPage()
                             }
-                        }
+                        })
                         )
-                    }
                     if (BuildConfig.DEBUG) {
                         Text(
                             text = "[开发模式]",
@@ -779,6 +724,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class AssistantGemini(val id: String) : Screen
+
+    @Serializable
+    data class AssistantMiniMax(val id: String) : Screen
+
+    @Serializable
+    data class AssistantGeminiTools(val id: String) : Screen
 
     @Serializable
     data class AssistantGrok(val id: String) : Screen

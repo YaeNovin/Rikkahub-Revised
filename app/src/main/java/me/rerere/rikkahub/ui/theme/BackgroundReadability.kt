@@ -6,16 +6,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.TextStyle
 import kotlinx.coroutines.CancellationException
 import me.rerere.rikkahub.data.model.GradientBackgroundPreset
 import me.rerere.rikkahub.data.model.GradientBackgroundCustomColors
 
-private const val READABILITY_HALO_ALPHA = 1f
-private const val READABILITY_HALO_BLUR_RADIUS = 4.5f
 
 val LocalChatBackgroundForeground = compositionLocalOf { Color.Unspecified }
 
@@ -53,17 +49,6 @@ internal suspend fun safeBackgroundForegroundExtraction(
     fallback
 }
 
-internal fun backgroundReadabilityHaloColor(foreground: Color): Color =
-    readableForegroundColor(foreground.copy(alpha = 1f))
-
-internal fun backgroundReadabilityShadow(foreground: Color): Shadow = Shadow(
-    color = backgroundReadabilityHaloColor(foreground).copy(alpha = READABILITY_HALO_ALPHA),
-    offset = Offset.Zero,
-    blurRadius = READABILITY_HALO_BLUR_RADIUS,
-)
-
-internal fun TextStyle.withBackgroundReadability(foreground: Color): TextStyle =
-    copy(shadow = backgroundReadabilityShadow(foreground))
 
 internal fun ColorScheme.withReadableForeground(foreground: Color): ColorScheme {
     val opaqueForeground = foreground.copy(alpha = 1f)
@@ -81,24 +66,29 @@ fun BackgroundReadabilityTheme(
     foreground: Color,
     content: @Composable () -> Unit,
 ) {
-    if (!active || foreground == Color.Unspecified ||
-        LocalTextColorMode.current == me.rerere.rikkahub.data.datastore.TextColorMode.THEME) {
-        content()
-        return
-    }
-
     val baseScheme = MaterialTheme.colorScheme
+    val applyForeground = active && foreground != Color.Unspecified &&
+        LocalTextColorMode.current != me.rerere.rikkahub.data.datastore.TextColorMode.THEME
     // MaterialTheme can update ColorScheme in place. Copy live roles rather than
     // retaining a scheme keyed only by object identity when the foreground is unchanged.
-    val readableScheme = baseScheme.withReadableForeground(foreground)
-    CompositionLocalProvider(LocalBackgroundBaseColorScheme provides (LocalBaseThemeColorScheme.current ?: baseScheme),
-        androidx.compose.material3.LocalContentColor provides foreground,
-        LocalChatBackgroundForeground provides foreground) {
+    val readableScheme = if (applyForeground) baseScheme.withReadableForeground(foreground) else baseScheme
+    // Keep one composition path across mode changes: removing these wrappers also
+    // removes descendants' remembered scroll and navigation state.
+    CompositionLocalProvider(
+        LocalBackgroundBaseColorScheme provides if (applyForeground) (LocalBaseThemeColorScheme.current ?: baseScheme)
+            else LocalBackgroundBaseColorScheme.current,
+        androidx.compose.material3.LocalContentColor provides if (applyForeground) foreground
+            else androidx.compose.material3.LocalContentColor.current,
+        LocalChatBackgroundForeground provides if (applyForeground) foreground else LocalChatBackgroundForeground.current,
+    ) {
         MaterialTheme(
             colorScheme = readableScheme,
             typography = MaterialTheme.typography,
             shapes = MaterialTheme.shapes,
-            content = content,
-        )
+        ) {
+            val style = androidx.compose.material3.LocalTextStyle.current
+            androidx.compose.material3.ProvideTextStyle(
+                style.copy(shadow = null), content)
+        }
     }
 }

@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.ai.provider.parameterModelId
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import me.rerere.rikkahub.data.model.placeholderNames
 import me.rerere.rikkahub.data.model.render
 
@@ -21,6 +24,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,6 +44,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import me.rerere.rikkahub.ui.components.ui.AppearanceAlertDialog as AlertDialog
+import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -70,18 +77,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -163,6 +175,7 @@ import me.rerere.rikkahub.ui.components.ai.ContextUsageSummary
 import me.rerere.rikkahub.ui.components.ai.calculateChatContextUsage
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.SearchMode
+import me.rerere.rikkahub.data.datastore.withChatSearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.LOCAL_WORKSPACE_CWD_PREFIX
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
@@ -187,6 +200,7 @@ import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.isAllowedFileType
 import me.rerere.rikkahub.utils.isMidiFileType
 import me.rerere.rikkahub.utils.navigateToChatPage
+import me.rerere.rikkahub.utils.openUrl
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -222,7 +236,15 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     )
     val filesManager: FilesManager = koinInject()
     val navController = LocalNavController.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val chatUriHandler = remember(context) {
+        object : UriHandler {
+            override fun openUri(uri: String) {
+                context.openUrl(uri)
+            }
+        }
+    }
 
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
@@ -239,10 +261,23 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val errors by vm.errors.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    var drawerNavigationPending by rememberSaveable { mutableStateOf(false) }
+    val returningFromDrawer = drawerNavigationPending &&
+        (navController.currentScreen as? me.rerere.rikkahub.Screen.Chat)?.id == id.toString()
+    // A returning entry must paint closed immediately, before restoration effects run.
+    val closedDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val visibleDrawerState = if (returningFromDrawer) closedDrawerState else drawerState
+    LaunchedEffect(returningFromDrawer) {
+        if (returningFromDrawer) {
+            drawerState.snapTo(DrawerValue.Closed)
+            drawerNavigationPending = false
+        }
+    }
     val chatChromeHazeState = rememberHazeState()
     val navigationHazeState = rememberHazeState()
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val requestOpenDrawer: () -> Unit = { scope.launch { drawerState.openWhenReady() } }
 
     // Handle back press when drawer is open
     BackHandler(enabled = drawerState.isOpen) {
@@ -251,8 +286,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    // Clear focus as well as hiding the IME so a focused editor cannot reopen it
-    // while the modal drawer is animating or after a drawer destination is chosen.
+    // Hide keyboard when drawer is open
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen) {
             focusManager.clearFocus(force = true)
@@ -263,11 +297,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val windowAdaptiveInfo = currentWindowDpSize()
     val isBigScreen =
         windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
-    val requestOpenDrawer: () -> Unit = {
-        // Keep this job in the page scope so transient toolbar replacement cannot
-        // cancel it. The existing isOpen effect owns the IME/focus handoff.
-        scope.launch { drawerState.openWhenReady() }
-    }
 
     // 进入大屏（永久抽屉）模式时重置抽屉状态为关闭，
     // 避免从横屏旋转回竖屏后，模态抽屉残留为打开状态且无法关闭（#1304）
@@ -279,7 +308,18 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val inputState = vm.inputState
     var webPreviewId by remember(id) { mutableStateOf<String?>(null) }
-    me.rerere.rikkahub.ui.components.webview.ChatWebPreviewHost(webPreviewId) { webPreviewId = null }
+    var linkActionsTarget by remember(id) { mutableStateOf<me.rerere.rikkahub.ui.components.richtext.LinkTarget?>(null) }
+    me.rerere.rikkahub.ui.components.richtext.LinkActionsSheet(
+        target = linkActionsTarget,
+        onDismiss = { linkActionsTarget = null },
+        onDraft = { draft ->
+            webPreviewId = null
+            inputState.appendText((if (inputState.textContent.text.isNotBlank()) "\n\n" else "") + draft)
+        },
+    )
+    CompositionLocalProvider(me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler provides { linkActionsTarget = it }) {
+        me.rerere.rikkahub.ui.components.webview.ChatWebPreviewHost(webPreviewId) { webPreviewId = null }
+    }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {
@@ -319,10 +359,22 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val chatListState = key(id) {
         rememberLazyListState(
             cacheWindow = LazyLayoutCacheWindow(
-                aheadFraction = 0.5f,
-                behindFraction = 1f,
+                // Start before a long message is urgent, allowing pausable composition
+                // to use idle frame budgets. Disabling prefetch shifts the whole
+                // composition/measurement cost into its first visible frame.
+                aheadFraction = 1.5f,
+                behindFraction = 2.5f,
             ),
         )
+    }
+    // Rapid reversing gestures briefly settle between touches. Keep the rendering
+    // profile stable through those gaps instead of invalidating every paragraph's
+    // background local and rebuilding glass effects at each touch up/down.
+    val scrollRenderingBusy by produceState(false, chatListState) {
+        androidx.compose.runtime.snapshotFlow { chatListState.isScrollInProgress }.collectLatest { scrolling ->
+            if (!scrolling) kotlinx.coroutines.delay(400)
+            value = scrolling
+        }
     }
     val previewReturn = rememberChatPreviewReturn(
         conversationKey = id.toString(),
@@ -351,11 +403,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val resolvedChatBackground = setting.resolveChatBackground()
-    val drawerCoversChat = drawerOccludesChat(
-        current = drawerState.currentValue,
-        target = drawerState.targetValue,
+    val chatSceneBusy = scrollRenderingBusy || loadingJob != null || drawerOccludesChat(
+        current = visibleDrawerState.currentValue, target = visibleDrawerState.targetValue,
     )
-    val chatSceneBusy = chatListState.isScrollInProgress || loadingJob != null || drawerCoversChat
     val glassBackdrop = me.rerere.rikkahub.ui.components.ui.rememberGlassBackdrop()
     val chatReadability = rememberBackgroundReadability(
         background = resolvedChatBackground.background,
@@ -395,6 +445,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     )
 
     CompositionLocalProvider(
+        LocalUriHandler provides chatUriHandler,
+        me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler provides { linkActionsTarget = it },
         me.rerere.rikkahub.ui.components.webview.LocalChatWebPreview provides { previewId -> webPreviewId = previewId },
         me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible provides (webPreviewId != null),
         LocalChatPreviewReturn provides previewReturn,
@@ -415,9 +467,10 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             inputOpacity = setting.displaySetting.inputSurfaceOpacity,
             dockOpacity = setting.advancedAppearanceSetting.chatDockGlassOpacity,
             cardBackgroundActive = setting.hasActiveChatBackground(),
+            cardMaterial = setting.advancedAppearanceSetting.pageSurfaceStyle,
         ),
     ) {
-            BackgroundReadabilityTheme(
+            me.rerere.rikkahub.ui.theme.ChatMaterialTheme(
             active = setting.hasActiveChatBackground() ||
                 me.rerere.rikkahub.ui.theme.LocalTextColorMode.current != me.rerere.rikkahub.data.datastore.TextColorMode.THEME,
                 foreground = appearanceForeground,
@@ -476,7 +529,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
             else -> {
             ModalNavigationDrawer(
-                drawerState = drawerState,
+                drawerState = visibleDrawerState,
                 scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.56f),
                 drawerContent = {
                     ChatDrawerContent(
@@ -494,6 +547,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         },
                         onNavigate = { destination ->
                             scope.launch {
+                                drawerNavigationPending = true
                                 navController.navigate(destination)
                                 // The destination transition owns the handoff. Keep the drawer
                                 // state until its parent entry is removed so it does not flash shut.
@@ -502,9 +556,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     )
                 }
             ) {
-                // Keep content measured during the drawer transition; removing it collapses
-                // the drawer anchors and makes the toolbar trigger appear non-functional.
-                ChatPageContent(
+                val drawerOccludesContent = visibleDrawerState.currentValue != DrawerValue.Closed ||
+                    visibleDrawerState.targetValue != DrawerValue.Closed
+                Box(Modifier.fillMaxSize().drawWithContent {
+                    if (!drawerOccludesContent) drawContent()
+                }) {
+                    ChatPageContent(
                     inputState = inputState,
                     loadingJob = loadingJob,
                     processingStatus = processingStatus,
@@ -528,7 +585,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     branchSourceAvailable = branchSourceAvailable,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
-                )
+                    )
+                }
             }
             BackHandler(drawerState.isOpen) {
                 scope.launch { drawerState.close() }
@@ -570,6 +628,7 @@ private fun ChatPageContent(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     var showChatImageDialog by remember(conversation.id) { mutableStateOf(false) }
     // Save primitive coordinates instead of Offset, which is not Bundle-saveable
     // on all Compose versions used by supported Android devices.
@@ -583,6 +642,8 @@ private fun ChatPageContent(
     val assistant = setting.getAssistantById(conversation.assistantId)
         ?: setting.getCurrentAssistant()
     val chatImageProvider = chatImageModel?.findProvider(setting.providers)
+    val imageModelPicker = me.rerere.rikkahub.ui.components.ai.rememberModelListState(
+        modelId = chatImageModel?.id, providers = setting.providers, type = me.rerere.ai.provider.ModelType.IMAGE)
     val chatImageGoogleProvider = chatImageProvider as? ProviderSetting.Google
     val isGeminiChatImageModel = chatImageGoogleProvider != null &&
         chatImageConstraints?.sizeRequestField == "aspect_ratio" &&
@@ -598,7 +659,7 @@ private fun ChatPageContent(
             val current = inputState.imageGenerationSettings
             val constrained = current.constrained(constraints)
             if (constrained != current) {
-                inputState.imageGenerationSettings = constrained
+                vm.updateImageToolDefaults(constrained)
             }
         }
     }
@@ -631,7 +692,7 @@ private fun ChatPageContent(
     val recentMemories by vm.recentMemories.collectAsStateWithLifecycle()
     val recentConversationMemories by vm.recentConversationMemories.collectAsStateWithLifecycle()
     var showFilesSheet by remember(conversation.id) { mutableStateOf(false) }
-    val contextCapacityTokens = currentChatModel?.let { it.contextWindowTokens?.takeIf { value -> value > 0 } ?: me.rerere.ai.provider.inferContextWindowTokens(it.modelId) }
+    val contextCapacityTokens = currentChatModel?.let { it.contextWindowTokens?.takeIf { value -> value > 0 } ?: me.rerere.ai.provider.inferContextWindowTokens(it.parameterModelId()) }
     val scopeKey = currentChatModel?.let { me.rerere.rikkahub.data.ai.context.requestContextScopeKey(conversation, setting, it) }
     val latestContextConversation by rememberUpdatedState(conversation)
     val contextUsage by produceState(
@@ -652,7 +713,7 @@ private fun ChatPageContent(
             val contextMessages = DocumentAsPromptTransformer.transformDocumentContents(raw)
             value = withContext(Dispatchers.Default) {
                 calculateChatContextUsage(messages = contextMessages, rawMessages = raw,
-                    rollingContextSummary = source.rollingContextSummary.takeIf { assistant.enableRollingContextCompression },
+                    rollingContextSummary = source.rollingContextSummary?.takeIf { assistant.enableRollingContextCompression || it.manuallyRequested },
                     capacityTokens = contextCapacityTokens, scopeKey = scopeKey, modelId = currentChatModel?.id?.toString(),
                     includeReasoning = me.rerere.rikkahub.data.ai.context.countHistoryReasoning(currentChatModel?.findProvider(setting.providers)),
                     systemPrompt = if (assistant.allowConversationSystemPrompt && !source.customSystemPrompt.isNullOrBlank()) source.customSystemPrompt.orEmpty() else assistant.systemPrompt)
@@ -670,14 +731,14 @@ private fun ChatPageContent(
         }
         when (suggestion.action) {
             ChatSuggestionAction.COPY_TEXT -> scope.launch {
-                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, text))); toaster.show(context.getString(R.string.copied))
+                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(null, text))); toaster.show(appResources.getString(R.string.copied))
             }
             ChatSuggestionAction.SAVE_QUICK_MESSAGE -> {
                 val targetAssistantId = latest.assistantId
                 scope.launch {
-                    try { vm.saveSuggestionAsQuickMessage(suggestion, targetAssistantId); toaster.show(context.getString(R.string.chat_page_suggestion_saved)) }
+                    try { vm.saveSuggestionAsQuickMessage(suggestion, targetAssistantId); toaster.show(appResources.getString(R.string.chat_page_suggestion_saved)) }
                     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (_: Exception) { toaster.show(context.getString(R.string.chat_page_suggestion_save_failed), type = ToastType.Error) }
+                    catch (_: Exception) { toaster.show(appResources.getString(R.string.chat_page_suggestion_save_failed), type = ToastType.Error) }
                 }
             }
             ChatSuggestionAction.CREATE_BRANCH -> {
@@ -705,7 +766,7 @@ private fun ChatPageContent(
         if (suggestion.action !in setOf(ChatSuggestionAction.COPY_TEXT, ChatSuggestionAction.SAVE_QUICK_MESSAGE) &&
             (suggestionConfig.options.previewBeforeInsert || suggestion.parameterForm != null || suggestion.action == ChatSuggestionAction.IMAGE_DRAFT)) {
             suggestionPreview = suggestion
-        } else applySuggestion(suggestion, suggestionActionInput(context, suggestion),
+        } else applySuggestion(suggestion, suggestionActionInput(appResources, suggestion),
             if (suggestionConfig.insertMode == SuggestionInsertMode.APPEND) SuggestionInsertLocation.APPEND else SuggestionInsertLocation.REPLACE)
     }
     val suggestionActions = SuggestionUiActions(
@@ -748,6 +809,9 @@ private fun ChatPageContent(
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
 
     val chatBackgroundForeground = LocalChatBackgroundForeground.current
+    var floatingHeaderHeight by remember { mutableStateOf(0) }
+    val chromeDensity = LocalDensity.current
+    val chromeDirection = LocalLayoutDirection.current
 
     Surface(
         color = if (setting.hasActiveChatBackground()) {
@@ -765,47 +829,6 @@ private fun ChatPageContent(
             },
         ) {
             Scaffold(
-            topBar = {
-                Column {
-                    TopBar(
-                        settings = setting,
-                        conversation = conversation,
-                        titleEditable = conversationLoadState == ConversationLoadState.Ready,
-                        hazeState = chatChromeHazeState,
-                        bigScreen = bigScreen,
-                        onOpenDrawer = onOpenDrawer,
-                        previewMode = previewMode,
-                        onNewChat = {
-                            navigateToChatPage(navController)
-                        },
-                        onClickMenu = {
-                            previewMode = !previewMode
-                        },
-                        onUpdateTitle = {
-                            vm.updateTitle(it)
-                        }
-                    )
-                    conversation.sourceConversationId?.let { sourceConversationId ->
-                        BranchSourceBar(
-                            sourceTitle = conversation.sourceConversationTitle
-                                ?.takeIf { it.isNotBlank() }
-                                ?: stringResource(R.string.chat_page_new_chat),
-                            sourceAvailable = branchSourceAvailable,
-                            settings = setting,
-                            onOpenSource = {
-                                navigateToChatPage(navController, chatId = sourceConversationId)
-                            },
-                        )
-                    }
-                    if (setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT &&
-                        activeModes.isNotEmpty()
-                    ) {
-                        ActiveModesBar(
-                            activeModes = activeModes,
-                        )
-                    }
-                }
-            },
             bottomBar = {
                 if (conversationLoadState == ConversationLoadState.Ready) {
                     ChatInput(
@@ -819,36 +842,16 @@ private fun ChatPageContent(
                     },
                     enableSearch = enableWebSearch,
                     onUpdateSearchMode = { mode ->
-                        val current = setting.getCurrentAssistant()
-                        val model = setting.getCurrentChatModel()
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == current.id) {
-                                        assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
-                                    } else {
-                                        assistant
-                                    }
-                                },
-                                providers = if (model == null) {
-                                    setting.providers
-                                } else {
-                                    setting.providers.map { provider ->
-                                        provider.editModel(
-                                            model.copy(
-                                                tools = if (mode == SearchMode.BUILT_IN) {
-                                                    model.tools + BuiltInTools.Search
-                                                } else {
-                                                    model.tools - BuiltInTools.Search
-                                                }
-                                            )
-                                        )
-                                    }
-                                },
-                            )
-                        )
+                        vm.updateSettings(setting.withChatSearchMode(
+                            builtIn = mode == SearchMode.BUILT_IN,
+                            external = mode == SearchMode.LOCAL,
+                        ))
                     },
                     onSendClick = {
+                        if (vm.isImageToolRunning()) {
+                            toaster.show("图片生成中，草稿已保留；可等待完成或停止当前任务", type = ToastType.Info)
+                            return@ChatInput
+                        }
                         if (currentChatModel == null) {
                             toaster.show(selectModelRequired, type = ToastType.Error)
                             return@ChatInput
@@ -895,6 +898,10 @@ private fun ChatPageContent(
                     imageModel = chatImageModel,
                     imageGenerationLoading = chatImageState is ChatVM.ChatImageState.Running,
                     onGenerateImageClick = {
+                        if (vm.isImageToolRunning()) {
+                            toaster.show("请等待当前生图任务完成，草稿已保留", type = ToastType.Info)
+                            return@ChatInput
+                        }
                         val prompt = inputState.textContent.text.toString().trim()
                         if (prompt.isNotEmpty()) {
                             vm.generateChatImage(prompt)
@@ -910,7 +917,10 @@ private fun ChatPageContent(
                 }
             },
             containerColor = Color.Transparent,
-        ) { innerPadding ->
+        ) { scaffoldPadding ->
+            val innerPadding = remember(scaffoldPadding, chromeDensity) {
+                chatPagePadding(scaffoldPadding) { with(chromeDensity) { floatingHeaderHeight.toDp() } }
+            }
             Box(Modifier.fillMaxSize()) {
             var hasShownConversation by rememberSaveable(conversation.id) {
                 mutableStateOf(conversationLoadState == ConversationLoadState.Ready)
@@ -935,6 +945,17 @@ private fun ChatPageContent(
                 modifier = Modifier.fillMaxSize(),
             ) { contentKey ->
                 if (contentKey.stage == ConversationContentStage.READY) {
+                    CompositionLocalProvider(me.rerere.rikkahub.ui.components.message.LocalChatImageToolActions provides
+                        me.rerere.rikkahub.ui.components.message.ChatImageToolActions(
+                            conversation.id, vm::confirmImageTool, vm::stopGeneration, vm::resumeImageTool,
+                            modelId = chatImageModel?.id,
+                            options = inputState.imageGenerationSettings,
+                            openSettings = { showChatImageDialog = true },
+                            canResume = { messageId -> conversation.currentMessages.lastOrNull()?.let {
+                                it.id.toString() == messageId && (it.finishedAt == null || it.interrupted || it.getTools().any { tool -> tool.canResumeExecution }) &&
+                                    it.getTools().none { tool -> tool.isPending }
+                            } == true },
+                        )) {
                     ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
@@ -1048,6 +1069,7 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
                     )
+                    }
                 } else {
                     ConversationLoadContent(
                         state = conversationLoadState,
@@ -1067,6 +1089,27 @@ private fun ChatPageContent(
                         }
                     }
                 }
+                FloatingConversationHeader(
+                    settings = setting, conversation = conversation,
+                    titleEditable = conversationLoadState == ConversationLoadState.Ready,
+                    hazeState = chatChromeHazeState, bigScreen = bigScreen, onOpenDrawer = onOpenDrawer,
+                    previewMode = previewMode, onNewChat = { navigateToChatPage(navController) },
+                    onClickMenu = { previewMode = !previewMode }, onUpdateTitle = vm::updateTitle,
+                    modifier = Modifier.align(Alignment.TopCenter).onSizeChanged { floatingHeaderHeight = it.height },
+                    notices = {
+                        conversation.sourceConversationId?.let { sourceConversationId ->
+                            BranchSourceBar(
+                                sourceTitle = conversation.sourceConversationTitle?.takeIf { it.isNotBlank() }
+                                    ?: stringResource(R.string.chat_page_new_chat),
+                                sourceAvailable = branchSourceAvailable, settings = setting,
+                                onOpenSource = { navigateToChatPage(navController, chatId = sourceConversationId) },
+                            )
+                        }
+                        if (setting.extensionManagementMode == ExtensionManagementMode.ENTERTAINMENT && activeModes.isNotEmpty()) {
+                            ActiveModesBar(activeModes = activeModes)
+                        }
+                    },
+                )
         }
 
             if (showFilesSheet) {
@@ -1211,7 +1254,7 @@ private fun ChatPageContent(
     if (showSuggestionPanel) SuggestionControlPanel(conversation, setting, suggestionGenerationState, suggestionActions,
         onRefresh = { vm.generateSuggestion(vm.conversation.value) }, onClear = { vm.dismissSuggestions(vm.conversation.value) },
         onAction = ::selectSuggestion, onDismiss = { showSuggestionPanel = false }, mainGenerating = loadingJob != null)
-    suggestionPreview?.let { item -> SuggestionPreviewDialog(item, suggestionActionInput(context, item),
+    suggestionPreview?.let { item -> SuggestionPreviewDialog(item, suggestionActionInput(appResources, item),
         onInsert = { text, location -> applySuggestion(item, text, location) }, onDismiss = { suggestionPreview = null }) }
     inspirationDraft?.let { card ->
         val owner = setting.getAssistantById(conversation.assistantId)
@@ -1221,6 +1264,7 @@ private fun ChatPageContent(
             onDismiss = { inspirationDraft = null })
     }
 
+    me.rerere.rikkahub.ui.components.ai.ModelListSheet(state = imageModelPicker, onSelect = vm::setChatImageModel)
     if (showChatImageDialog && chatImageModel != null && chatImageConstraints != null) {
         key(conversation.id, chatImageModel.id) {
             val imageSettingsSheetState = rememberBottomSheetState(
@@ -1230,13 +1274,32 @@ private fun ChatPageContent(
             ImageGenerationSettingsBottomSheet(
                 state = inputState.imageGenerationSettings,
                 constraints = chatImageConstraints,
-                onStateChange = { inputState.imageGenerationSettings = it },
+                onStateChange = vm::updateImageToolDefaults,
                 geminiModelId = chatImageGeminiModelId,
                 geminiRequestChannel = chatImageRequestChannel,
                 referenceImageCount = 0,
                 sheetState = imageSettingsSheetState,
                 onDismiss = { showChatImageDialog = false },
                 headerContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text("允许聊天模型调用生图", modifier = Modifier.weight(1f))
+                        androidx.compose.material3.Switch(
+                            checked = assistant.enableImageGenerationTool,
+                            onCheckedChange = vm::setImageToolEnabled,
+                        )
+                    }
+                    if (assistant.enableImageGenerationTool) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Text("模型自行调用（无需逐次确认）", modifier = Modifier.weight(1f))
+                            androidx.compose.material3.Switch(checked = assistant.autoApproveImageGeneration,
+                                onCheckedChange = vm::setImageToolAutomatic)
+                        }
+                        Text("可能产生费用；每轮最多一次、最多 4 张。模型仅提供提示词，始终使用这里的手动参数。执行中调整只影响下次请求。",
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
+                    }
+                    TextButton(onClick = imageModelPicker::open, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text("选择图片模型（手动生图与模型调用共用）")
+                    }
                     Text(
                         text = buildString {
                             append(chatImageModel.displayName.ifBlank { chatImageModel.modelId })
@@ -1707,7 +1770,7 @@ private fun promptInjectionPositionLabel(position: InjectionPosition): String = 
 }
 
 private fun suggestionActionInput(
-    context: Context,
+    resources: android.content.res.Resources,
     suggestion: ChatSuggestionItem,
 ): String {
     val payload = suggestion.payload.ifBlank { suggestion.text }.trim()
@@ -1726,7 +1789,7 @@ private fun suggestionActionInput(
         ChatSuggestionAction.SAVE_QUICK_MESSAGE,
         ChatSuggestionAction.CREATE_BRANCH -> return payload
     }
-    return context.getString(resource, payload)
+    return resources.getString(resource, payload)
 }
 
 @Composable
@@ -1746,6 +1809,7 @@ private fun ChatFilesPickerSheet(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val toaster = LocalToaster.current
     val filesManager: FilesManager = koinInject()
     val scope = rememberCoroutineScope()
@@ -1910,7 +1974,7 @@ private fun ChatFilesPickerSheet(
                                 val localUri = filesManager.createChatFilesByContents(listOf(uri)).firstOrNull()
                                 if (localUri == null) {
                                     toaster.show(
-                                        context.getString(R.string.chat_input_file_read_failed, fileName),
+                                        appResources.getString(R.string.chat_input_file_read_failed, fileName),
                                         type = ToastType.Error,
                                     )
                                 } else {
@@ -1918,7 +1982,7 @@ private fun ChatFilesPickerSheet(
                                 }
                             } else {
                                 toaster.show(
-                                    context.getString(R.string.chat_input_unsupported_file_type, fileName),
+                                    appResources.getString(R.string.chat_input_unsupported_file_type, fileName),
                                     type = ToastType.Error,
                                 )
                             }
@@ -2066,17 +2130,19 @@ private fun BranchSourceBar(
 }
 
 @Composable
-private fun TopBar(
+private fun FloatingConversationHeader(
     settings: Settings,
     conversation: Conversation,
     titleEditable: Boolean,
     hazeState: HazeState,
+    onOpenDrawer: () -> Unit,
     bigScreen: Boolean,
     previewMode: Boolean,
-    onOpenDrawer: () -> Unit,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
-    onUpdateTitle: (String) -> Unit
+    onUpdateTitle: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    notices: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     val toaster = LocalToaster.current
     val titleState = key(conversation.id) {
@@ -2084,113 +2150,36 @@ private fun TopBar(
             onUpdateTitle(it)
         }
     }
-    val displaySetting = settings.displaySetting
-    val appearanceCapabilities = LocalAdvancedAppearanceCapabilities.current
     val currentAssistant = settings.getCurrentAssistant()
-    val backgroundForeground = if (settings.hasActiveChatBackground()) {
-        LocalChatBackgroundForeground.current
-            .takeUnless { it == Color.Unspecified }
-            ?: MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-    val useTopBarBlur = displaySetting.enableTopBarBlur &&
-        settings.advancedAppearanceSetting.enableTopBarPerformanceEffects &&
-        appearanceCapabilities.supportsRealtimeBlur &&
-        settings.hasActiveChatBackground()
-    val topBarEffectsDisabled = !settings.advancedAppearanceSetting.enableTopBarPerformanceEffects
-    val topBarBlurRadius = appearanceCapabilities.limitLiveBlur(displaySetting.topBarBlurRadius)
-    val topBarHazeStyle = me.rerere.rikkahub.ui.components.ui.backgroundOnlyBlurStyle(topBarBlurRadius)
-    val topBarColor = when {
-        !topBarEffectsDisabled && settings.hasActiveChatBackground() ->
-            MaterialTheme.colorScheme.surface.copy(
-            alpha = LocalAppearanceSurfaceOpacityPolicy.current.topBar
-        )
-        topBarEffectsDisabled && settings.hasActiveChatBackground() ->
-            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 1f)
-        else -> Color.Transparent
-    }
-
-    val topBarContentColor = me.rerere.rikkahub.ui.components.ui.rememberTintedSurfaceForeground(
-        topBarColor, topBarColor.alpha, backgroundForeground,
-        LocalAppearanceBackground.current?.readability?.backgrounds,
-        me.rerere.rikkahub.ui.theme.currentTextPaletteSeed(),
-    )
-
-    TopAppBar(
-        modifier = if (useTopBarBlur && topBarBlurRadius > 0f) {
-            Modifier.hazeBlur(
-                input = HazeInput.Sources(hazeState),
-                style = topBarHazeStyle,
-            )
-        } else {
-            Modifier
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = topBarColor,
-            scrolledContainerColor = topBarColor,
-            navigationIconContentColor = topBarContentColor,
-            titleContentColor = topBarContentColor,
-            actionIconContentColor = topBarContentColor,
-        ),
-        navigationIcon = {
-            if (!bigScreen) {
-                IconButton(
-                    onClick = onOpenDrawer,
-                ) {
-                    Icon(HugeIcons.Menu03, "Messages")
-                }
-            }
-        },
-        title = {
-            val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
-            Surface(
-                onClick = {
-                    if (conversation.messageNodes.isNotEmpty()) {
-                        titleState.open(conversation.title)
-                    } else {
-                        toaster.show(editTitleWarning, type = ToastType.Warning)
-                    }
-                },
-                enabled = titleEditable,
-                color = Color.Transparent,
+    var expanded by remember(conversation.id) { mutableStateOf(false) }
+    val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
+    ChatFloatingHeader(settings, hazeState, showNavigation = !bigScreen,
+        onNavigation = onOpenDrawer, onNewChat = onNewChat,
+        onMenu = { expanded = true }, modifier = modifier, notices = notices,
+        menu = {
+            me.rerere.rikkahub.ui.components.ui.AppearanceDropdownMenu(
+                expanded = expanded, onDismissRequest = { expanded = false },
             ) {
-                Column {
+                Column(Modifier.width(260.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text(conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
+                        style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     val model = settings.getCurrentChatModel()
-                    val provider = model?.findProvider(providers = settings.providers, checkOverwrite = false)
-                    Text(
-                        text = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) },
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodyMedium,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (model != null && provider != null) {
-                        Text(
-                            text = "${currentAssistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model.displayName} (${provider.name})",
-                            overflow = TextOverflow.Ellipsis,
-                            maxLines = 1,
-                            color = topBarContentColor,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
+                    val provider = model?.findProvider(settings.providers, checkOverwrite = false)
+                    Text("${currentAssistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) }} / ${model?.displayName.orEmpty()} (${provider?.name.orEmpty()})",
+                        style = MaterialTheme.typography.labelSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
-            }
-        },
-        actions = {
-            IconButton(
-                onClick = {
-                    onClickMenu()
-                }
-            ) {
-                Icon(if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet, "Chat Options")
-            }
-
-            IconButton(
-                onClick = {
-                    onNewChat()
-                }
-            ) {
-                Icon(HugeIcons.MessageAdd01, "New Message")
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(if (previewMode) "返回对话正文" else "消息目录与搜索") },
+                    onClick = { expanded = false; onClickMenu() },
+                )
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(stringResource(R.string.chat_page_edit_title)) }, enabled = titleEditable,
+                    onClick = {
+                        expanded = false
+                        if (conversation.messageNodes.isNotEmpty()) titleState.open(conversation.title)
+                        else toaster.show(editTitleWarning, type = ToastType.Warning)
+                    },
+                )
             }
         },
     )

@@ -9,9 +9,9 @@ class WebRendererRegressionTest {
     @Test fun `mixed HTML leaves streaming diagram unrendered until its closing fence`() {
         val source = "<div>Header</div>\n\n```mermaid\nflowchart LR\n A --> B\n"
         val open = buildMarkdownDocument(source)
-        assertEquals("false", open.selectFirst("pre")!!.attr("data-rikka-complete"))
+        assertEquals("false", open.select("pre").last()!!.attr("data-rikka-complete"))
         val complete = buildMarkdownDocument(source + "```\n")
-        assertFalse(complete.selectFirst("pre")!!.hasAttr("data-rikka-complete"))
+        assertFalse(complete.select("pre").last()!!.hasAttr("data-rikka-complete"))
     }
     @Test fun `plain HTML preformatted blocks are preserved`() {
         assertFalse(buildMarkdownDocument("<pre><code>hello</code></pre>").selectFirst("pre")!!.hasAttr("data-rikka-complete"))

@@ -33,10 +33,8 @@ import me.rerere.common.http.awaitAndUse
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import kotlin.uuid.Uuid
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import me.rerere.rikkahub.R
 import me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
+import me.rerere.rikkahub.utils.NotificationUtil
 
 class VideoGenerationWorker(
     appContext: Context,
@@ -334,15 +332,17 @@ class VideoGenerationWorker(
     }
 
     private fun notifyResult(task: VideoGenerationTaskEntity, succeeded: Boolean) {
-        val notifications = NotificationManagerCompat.from(applicationContext)
-        if (!notifications.areNotificationsEnabled()) return
+        if (!NotificationUtil.hasNotificationPermission(applicationContext)) return
         runCatching {
             val intent = android.content.Intent(applicationContext, me.rerere.rikkahub.RouteActivity::class.java)
             val pending = android.app.PendingIntent.getActivity(applicationContext, task.id.hashCode(), intent,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            notifications.notify(task.id.hashCode(), NotificationCompat.Builder(applicationContext, CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID)
-                .setSmallIcon(R.drawable.small_icon).setContentTitle(if (succeeded) "视频生成完成" else "视频生成失败")
-                .setContentText(task.prompt.take(100)).setContentIntent(pending).setAutoCancel(true).build())
+            NotificationUtil.notify(applicationContext, CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID, task.id.hashCode()) {
+                title = if (succeeded) "视频生成完成" else "视频生成失败"
+                content = task.prompt.take(100)
+                contentIntent = pending
+                autoCancel = true
+            }
         }
     }
 

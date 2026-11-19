@@ -78,6 +78,7 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
     val lastError by vm.lastError.collectAsStateWithLifecycle()
     val assistants by vm.assistants.collectAsStateWithLifecycle()
     val documentPreview by vm.documentPreview.collectAsStateWithLifecycle()
+    val importProgress by vm.importProgress.collectAsStateWithLifecycle()
     val settingsStore: SettingsStore = koinInject()
     val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -152,6 +153,9 @@ fun KnowledgeBasePage(vm: KnowledgeBaseVM = koinViewModel()) {
                         vm.setAssistantBinding(base.id, assistantId, bound)
                     },
                     onDeleteDocument = vm::deleteDocument,
+                    onRetryImport = vm::retryImport,
+                    onCancelImport = vm::cancelImport,
+                    importProgress = importProgress,
                     onPreviewDocument = vm::previewDocument,
                 )
             }
@@ -206,6 +210,9 @@ private fun KnowledgeBaseCard(
     onSetEmbeddingModel: (Uuid?) -> Unit,
     onSetAssistantBinding: (Uuid, Boolean) -> Unit,
     onDeleteDocument: (String) -> Unit,
+    onRetryImport: (String) -> Unit,
+    onCancelImport: (String) -> Unit,
+    importProgress: Map<String, Pair<Int, Int>>,
     onPreviewDocument: (KnowledgeDocumentEntity) -> Unit,
 ) {
     val repository: KnowledgeBaseRepository = koinInject()
@@ -324,6 +331,9 @@ private fun KnowledgeBaseCard(
                     document = document,
                     onPreview = { onPreviewDocument(document) },
                     onDelete = { documentToDelete = document },
+                    onRetry = { onRetryImport(document.id) },
+                    onCancel = { onCancelImport(document.id) },
+                    progress = importProgress[document.id],
                 )
             }
         }
@@ -420,8 +430,12 @@ private fun KnowledgeDocumentRow(
     document: KnowledgeDocumentEntity,
     onPreview: () -> Unit,
     onDelete: () -> Unit,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    progress: Pair<Int, Int>?,
 ) {
     val context = LocalContext.current
+    val active = document.status in setOf(KnowledgeDocumentEntity.STATUS_QUEUED, KnowledgeDocumentEntity.STATUS_INDEXING)
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -432,7 +446,11 @@ private fun KnowledgeDocumentRow(
             Text(document.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 text = when (document.status) {
-                    KnowledgeDocumentEntity.STATUS_INDEXING -> stringResource(R.string.knowledge_base_page_status_indexing)
+                    KnowledgeDocumentEntity.STATUS_QUEUED -> "等待后台导入"
+                    KnowledgeDocumentEntity.STATUS_CANCELLED -> "已取消，可继续导入"
+                    KnowledgeDocumentEntity.STATUS_INDEXING -> progress?.takeIf { it.second > 0 }?.let {
+                        "已完成 ${it.first}/${it.second} 个分块"
+                    } ?: stringResource(R.string.knowledge_base_page_status_indexing)
                     KnowledgeDocumentEntity.STATUS_READY -> stringResource(R.string.knowledge_base_page_status_ready)
                     KnowledgeDocumentEntity.STATUS_READY_WITHOUT_EMBEDDING -> stringResource(R.string.knowledge_base_page_status_ready_without_embedding)
                     KnowledgeDocumentEntity.STATUS_FAILED -> stringResource(R.string.knowledge_base_page_status_failed)
@@ -447,10 +465,15 @@ private fun KnowledgeDocumentRow(
                     color = androidx.compose.material3.MaterialTheme.colorScheme.error,
                 )
             }
+            if (active) {
+                TextButton(onClick = onCancel) { Text("取消导入") }
+            } else if (document.status in setOf(KnowledgeDocumentEntity.STATUS_FAILED, KnowledgeDocumentEntity.STATUS_CANCELLED)) {
+                TextButton(onClick = onRetry) { Text("重试 / 继续导入") }
+            }
         }
         IconButton(
             onClick = onPreview,
-            enabled = document.status != KnowledgeDocumentEntity.STATUS_INDEXING,
+            enabled = !active,
         ) {
             Icon(
                 HugeIcons.Eye,

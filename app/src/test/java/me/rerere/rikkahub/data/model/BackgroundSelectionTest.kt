@@ -16,11 +16,11 @@ class BackgroundSelectionTest {
         assertEquals(1f, Assistant(backgroundOpacity = 0f).selectGradientBackground(true).backgroundOpacity)
         assertEquals(.5f, Assistant(backgroundOpacity = .5f).selectGradientBackground(true).backgroundOpacity)
     }
-    @Test fun `global image selection recovers opaque page but never opts into chat override`() {
+    @Test fun `global image selection preserves opaque material and never opts into chat override`() {
         val result = AdvancedAppearanceSetting(pageSurfaceStyle = BackgroundSurfaceStyle.OPAQUE, globalBackgroundOpacity = Float.NaN).selectGlobalBackground("file:///image.jpg")
         assertTrue(result.enableGlobalBackground)
         assertFalse(result.applyGlobalBackgroundToChat)
-        assertEquals(BackgroundSurfaceStyle.TRANSLUCENT, result.pageSurfaceStyle)
+        assertEquals(BackgroundSurfaceStyle.OPAQUE, result.pageSurfaceStyle)
         assertEquals(1f, result.globalBackgroundOpacity)
     }
     @Test fun `clearing global image restores assistant background selection`() {

@@ -26,6 +26,11 @@ fun AssistantBackground(
     interactionInProgress: Boolean = false,
 ) {
     val background = setting.resolveChatBackground()
+    if (setting.advancedAppearanceSetting.pageSurfaceStyle == me.rerere.rikkahub.data.datastore.BackgroundSurfaceStyle.MICA &&
+        (!(background.opacity > 0f) || (background.background.isNullOrBlank() && !background.useGradientBackground))) {
+        me.rerere.rikkahub.ui.components.ui.MicaBackdrop(modifier.fillMaxSize())
+        return
+    }
     val fallbackBackground = if (background.isActive) {
         Modifier
     } else {

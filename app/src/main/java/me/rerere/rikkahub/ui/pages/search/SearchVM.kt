@@ -6,11 +6,8 @@ import androidx.compose.runtime.setValue
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.db.fts.MessageSearchResult
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.hooks.readStringPreference
@@ -22,79 +19,60 @@ class SearchVM(
     private val context: Application,
     private val conversationRepo: ConversationRepository,
 ) : ViewModel() {
-    private val _searchQuery = MutableStateFlow("")
-
-    var searchQuery by mutableStateOf("")
-        private set
-    var sortOrder by mutableStateOf(
-        runCatching {
+    private val pager = MessageSearchPager(
+        scope = viewModelScope,
+        initialSort = runCatching {
             MessageSearchSort.valueOf(
                 context.readStringPreference(SORT_ORDER_PREF_KEY, MessageSearchSort.RELEVANCE.name)!!
             )
-        }.getOrDefault(MessageSearchSort.RELEVANCE)
+        }.getOrDefault(MessageSearchSort.RELEVANCE),
+        fetch = { query, sort, limit, offset -> conversationRepo.searchMessages(query, sort, limit, offset) },
     )
-        private set
-    var results by mutableStateOf<List<MessageSearchResult>>(emptyList())
-        private set
-    var isLoading by mutableStateOf(false)
-        private set
+    val state = pager.state
     var isRebuilding by mutableStateOf(false)
         private set
     var rebuildProgress by mutableStateOf(0 to 0)
         private set
-
-    init {
-        viewModelScope.launch {
-            _searchQuery
-                .debounce(300L)
-                .collectLatest { query -> performSearch(query) }
-        }
-    }
+    var rebuildError by mutableStateOf<String?>(null)
+        private set
 
     fun onQueryChange(query: String) {
-        searchQuery = query
-        _searchQuery.value = query
+        pager.changeQuery(query)
+        if (isRebuilding) pager.cancel()
     }
 
     fun onSortChange(sort: MessageSearchSort) {
-        if (sortOrder == sort) return
-        sortOrder = sort
+        if (state.value.sort == sort) return
         context.writeStringPreference(SORT_ORDER_PREF_KEY, sort.name)
-        viewModelScope.launch {
-            performSearch(searchQuery)
-        }
+        pager.changeSort(sort)
+        if (isRebuilding) pager.cancel()
     }
 
     fun search() {
-        viewModelScope.launch {
-            performSearch(searchQuery)
-        }
+        if (!isRebuilding) pager.refresh()
     }
 
+    fun loadMore() { if (!isRebuilding) pager.loadMore() }
+
     fun rebuildIndex() {
+        if (isRebuilding) return
+        isRebuilding = true
+        rebuildError = null
+        pager.cancel()
         viewModelScope.launch {
-            isRebuilding = true
             rebuildProgress = 0 to 0
             try {
                 conversationRepo.rebuildAllIndexes { current, total ->
                     rebuildProgress = current to total
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                rebuildError = error.message ?: "索引重建失败，请重试"
             } finally {
                 isRebuilding = false
             }
-        }
-    }
-
-    private suspend fun performSearch(query: String) {
-        if (query.isBlank()) {
-            results = emptyList()
-            return
-        }
-        isLoading = true
-        try {
-            results = conversationRepo.searchMessages(query, sortOrder)
-        } finally {
-            isLoading = false
+            pager.refresh()
         }
     }
 }

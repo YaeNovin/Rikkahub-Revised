@@ -5,6 +5,14 @@ import org.junit.Test
 
 class ChatErrorFormatterTest {
     @Test
+    fun `missing stream identifiers are response errors and do not imply missing files`() {
+        assertEquals(SoftwareFailureKind.INVALID_DATA, classifySoftwareFailure("item_id not found"))
+        assertEquals(SoftwareFailureKind.INVALID_DATA, classifySoftwareFailure("Responses protocol: response.output_text.delta omitted item_id and output_index"))
+        assertEquals(SoftwareFailureKind.GENERIC, classifySoftwareFailure("Message node not found"))
+        assertEquals(SoftwareFailureKind.FILE_NOT_FOUND, classifySoftwareFailure("java.io.FileNotFoundException: attachment.bin"))
+        assertEquals(SoftwareFailureKind.FILE_NOT_FOUND, classifySoftwareFailure("open failed: ENOENT (No such file or directory)"))
+    }
+    @Test
     fun `classifies common software failures without exposing raw text`() {
         assertEquals(SoftwareFailureKind.MIDI, classifySoftwareFailure("Invalid MIDI header"))
         assertEquals(SoftwareFailureKind.DOCUMENT, classifySoftwareFailure("Failed to parse DOCX document"))

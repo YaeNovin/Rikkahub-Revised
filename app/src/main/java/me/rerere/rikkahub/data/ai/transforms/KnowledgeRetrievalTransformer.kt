@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai.transforms
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingTaskType
@@ -17,13 +18,13 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.db.dao.KnowledgeChunkSearchRow
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.repository.KnowledgeBaseRepository
+import me.rerere.rikkahub.data.knowledge.rankKnowledgePages
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 import kotlin.uuid.Uuid
 
 private const val TAG = "KnowledgeRetrieval"
-private const val CANDIDATE_LIMIT = 1200
 private const val RESULT_LIMIT = 6
 private const val MAX_CHUNK_CHARS_IN_PROMPT = 2400
 private const val MIN_SEMANTIC_MATCH_SCORE = 0.15f
@@ -48,16 +49,15 @@ class KnowledgeRetrievalTransformer(
         val ragBaseIds = repository.getRagEnabledBaseIds(boundBaseIds)
         if (ragBaseIds.isEmpty()) return@withContext messages
         val bases = repository.getBases(ragBaseIds)
-        val allRows = repository.searchChunks(ragBaseIds, CANDIDATE_LIMIT)
 
         // A knowledge base may be indexed with a model different from the global
         // default. Search every distinct configured model and merge with lexical
         // matches so exact CJK terms are not hidden by weak third-party vectors.
-        val semanticMatches = semanticSearch(ctx.settings, bases, allRows, query)
+        val semanticMatches = semanticSearch(ctx.settings, bases, query, RESULT_LIMIT)
             .filter { (_, score) -> score >= MIN_SEMANTIC_MATCH_SCORE }
         val candidates = mergeMatches(
             semanticMatches = semanticMatches,
-            lexicalMatches = lexicalSearch(allRows, query),
+            lexicalMatches = repository.searchLexicalChunks(ragBaseIds, query, RESULT_LIMIT),
         )
 
         if (candidates.isEmpty()) return@withContext messages
@@ -109,30 +109,31 @@ class KnowledgeRetrievalTransformer(
         val enabledBaseIds = repository.getEnabledBaseIds(baseIds)
         if (enabledBaseIds.isEmpty()) return@withContext emptyList()
         val bases = repository.getBases(enabledBaseIds)
-        val rows = repository.searchChunks(enabledBaseIds, CANDIDATE_LIMIT)
-        val semanticMatches = semanticSearch(settings, bases, rows, query)
+        val resultLimit = limit.coerceIn(1, 100)
+        val semanticMatches = semanticSearch(settings, bases, query, resultLimit)
             .filter { (_, score) -> score >= MIN_SEMANTIC_MATCH_SCORE }
         mergeMatches(
             semanticMatches = semanticMatches,
-            lexicalMatches = lexicalSearch(rows, query),
-        ).take(limit).map { it.first }
+            lexicalMatches = repository.searchLexicalChunks(enabledBaseIds, query, resultLimit),
+        ).take(resultLimit).map { it.first }
     }
 
     private suspend fun semanticSearch(
         settings: Settings,
         bases: List<KnowledgeBaseEntity>,
-        rows: List<KnowledgeChunkSearchRow>,
         query: String,
+        limit: Int,
     ): List<Pair<KnowledgeChunkSearchRow, Float>> {
         // Chunks retain the model that produced their vector. Query those models
         // directly so changing the global default does not make existing vectors
         // unreachable. A base/default model is only used when no indexed model is
         // available yet (for example, while a document is being indexed).
-        val rowsByBase = rows.groupBy(KnowledgeChunkSearchRow::knowledgeBaseId)
+        val rowsByBase = repository.getEmbeddingModels(bases.map { it.id }.toSet())
+            .groupBy { it.knowledgeBaseId }
         val modelIdsByBase = linkedMapOf<String, LinkedHashSet<Uuid>>()
         bases.forEach { base ->
             val indexedIds = rowsByBase[base.id].orEmpty()
-                .mapNotNull { row -> row.embeddingModelId?.let { parseUuidOrNull(it) } }
+                .mapNotNull { row -> parseUuidOrNull(row.embeddingModelId) }
                 .toCollection(linkedSetOf())
             val fallbackIds = if (indexedIds.isEmpty()) {
                 listOfNotNull(
@@ -175,19 +176,21 @@ class KnowledgeRetrievalTransformer(
                     ?.takeIf { it.isNotEmpty() && it.all(Float::isFinite) }
                     ?: error("Empty query embedding")
 
-                repository.searchEmbeddedChunks(
-                    baseIds = baseIds,
-                    modelId = modelId.toString(),
-                    limit = CANDIDATE_LIMIT,
-                ).mapNotNull { row ->
-                    val vector = row.embedding?.toFloatArray() ?: return@mapNotNull null
+                rankKnowledgePages(
+                    limit = limit,
+                    loadPage = { afterId, pageSize ->
+                        repository.searchEmbeddedChunks(baseIds, modelId.toString(), pageSize, afterId)
+                    },
+                ) { row ->
+                    val vector = row.embedding?.toFloatArray() ?: return@rankKnowledgePages 0f
                     if (row.embeddingDimension != null && row.embeddingDimension != vector.size) {
-                        return@mapNotNull null
+                        return@rankKnowledgePages 0f
                     }
                     val score = cosineSimilarity(queryVector, vector)
-                    if (score.isFinite()) row to score else null
+                    if (score.isFinite() && score >= MIN_SEMANTIC_MATCH_SCORE) score else 0f
                 }
             }.onFailure { error ->
+                if (error is CancellationException) throw error
                 Log.w(TAG, "Embedding retrieval failed for ${model.modelId}; using lexical fallback", error)
             }.getOrDefault(emptyList())
         }.flatten().sortedByDescending { it.second }
@@ -207,26 +210,6 @@ class KnowledgeRetrievalTransformer(
             if (current == null || score > current.second) merged[row.id] = row to score
         }
         return merged.values.sortedByDescending { it.second }
-    }
-
-    private fun lexicalSearch(rows: List<KnowledgeChunkSearchRow>, query: String): List<Pair<KnowledgeChunkSearchRow, Float>> {
-        val terms = query.lowercase()
-            .split(Regex("[\\s\\p{Punct}]+"))
-            .filter { it.length >= 2 }
-            .distinct()
-        val cjkTerms = query.lowercase()
-            .filter { it.isCjk() }
-            .windowed(size = 2, step = 1, partialWindows = false)
-        val searchTerms = (terms + cjkTerms).distinct()
-        return rows.map { row ->
-            val text = row.content.lowercase()
-            val score = if (searchTerms.isEmpty()) {
-                if (text.contains(query.lowercase())) 1f else 0f
-            } else {
-                searchTerms.count(text::contains).toFloat() / searchTerms.size
-            }
-            row to score
-        }.filter { it.second > 0f }.sortedByDescending { it.second }.take(RESULT_LIMIT)
     }
 
     private fun buildContextPrompt(citations: List<UIMessageAnnotation.KnowledgeCitation>): String = buildString {
@@ -258,10 +241,6 @@ internal fun List<UIMessage>.currentRequestKnowledgeCitations(): List<UIMessageA
         .filterIsInstance<UIMessageAnnotation.KnowledgeCitation>()
         .distinctBy(UIMessageAnnotation.KnowledgeCitation::chunkId)
         .toList()
-
-private fun Char.isCjk(): Boolean = this in '\u3040'..'\u30ff' ||
-    this in '\u3400'..'\u4dbf' ||
-    this in '\u4e00'..'\u9fff'
 
 private fun ByteArray.toFloatArray(): FloatArray {
     if (size % 4 != 0) return FloatArray(0)

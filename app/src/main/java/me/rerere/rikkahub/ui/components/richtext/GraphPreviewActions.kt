@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.richtext
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.webkit.WebView
@@ -27,6 +29,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 internal fun GraphPreviewActions(html: String, view: WebView?) {
     val preview = rememberWebPreviewLauncher()
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
@@ -48,10 +51,10 @@ internal fun GraphPreviewActions(html: String, view: WebView?) {
                             check(image.compress(Bitmap.CompressFormat.PNG, 100, output))
                         }
                     }
-                    toaster.show(context.getString(R.string.mermaid_export_success), type = ToastType.Success)
+                    toaster.show(appResources.getString(R.string.mermaid_export_success), type = ToastType.Success)
                 } catch (error: Exception) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
-                    toaster.show(context.getString(R.string.mermaid_export_failed), type = ToastType.Error)
+                    toaster.show(appResources.getString(R.string.mermaid_export_failed), type = ToastType.Error)
                 } finally { bitmap?.recycle(); saving = false }
             }
         }
@@ -63,7 +66,7 @@ internal fun GraphPreviewActions(html: String, view: WebView?) {
         IconButton(enabled = view != null && !saving, onClick = {
             val renderer = view ?: return@IconButton
             saving = true
-            renderer.evaluateJavascript("document.readyState === 'complete' && window.__rikkaRenderStatus !== 'loading' && window.__rikkaRenderStatus !== 'error'") { ready ->
+            renderer.evaluateJavascript("(function(){ if (typeof window.rikkaPrepareExport === 'function') window.rikkaPrepareExport(); return document.readyState === 'complete' && window.__rikkaRenderStatus !== 'loading' && window.__rikkaRenderStatus !== 'error'; })()") { ready ->
                 if (ready != "true" || !renderer.isAttachedToWindow) {
                     saving = false
                     toaster.show("图形尚未完成渲染，请稍后重试。", type = ToastType.Error)

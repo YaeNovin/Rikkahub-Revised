@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
@@ -26,28 +27,36 @@ import dev.chrisbanes.haze.blur.hazeBlur
 @Composable
 internal fun GlassBackdropLayer(blurRadius: Float, shape: Shape, glass: Boolean, modifier: Modifier = Modifier,
     sourceOverride: dev.chrisbanes.haze.HazeState? = null) {
-    val backdrop = LocalGlassBackdrop.current ?: return
+    val backdrop = LocalGlassBackdrop.current
     val hazeSource = sourceOverride ?: LocalGlobalBackgroundHazeState.current ?: return
+    if (sourceOverride == null && backdrop == null) return
     val caps = LocalAdvancedAppearanceCapabilities.current
     val options = LocalSettings.current.advancedAppearanceSetting.liquidGlass
     val params = options.parameters()
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
-    val hardware = LocalView.current.isHardwareAccelerated
-    var origin by remember { mutableStateOf(Offset.Zero) }
+    val view = LocalView.current
+    val hardware = view.isHardwareAccelerated
     var dimensions by remember { mutableStateOf(IntSize.Zero) }
+    var sceneVisible by remember { mutableStateOf(false) }
     val areaDp = dimensions.width.toFloat() * dimensions.height / (density.density * density.density)
     val token = remember { Any() }
-    val visible = glassSurfaceVisible(origin, dimensions, backdrop.origin, backdrop.size)
+    // An explicit scene source (the composer) contains messages even without a
+    // wallpaper. Its visibility must not depend on the wallpaper capture's bounds.
+    val visible = sceneVisible
     val participates = hardware && areaDp > 0f && visible && caps.supportsRealtimeBlur &&
         needsGlassRenderSlot(glass, blurRadius, caps.sdkInt, options.renderer, params.refraction, areaDp, GlassRefractionRuntime.failed)
     val potentialRefraction = participates && glass && areaDp <= MAX_REFRACTION_AREA_DP && caps.sdkInt >= 33 && params.refraction > 0f &&
         options.renderer != me.rerere.rikkahub.data.model.LiquidGlassRenderer.STANDARD
-    DisposableEffect(participates) {
-        if (participates) GlassRefractionBudget.surfaces.add(token)
+    DisposableEffect(participates, sourceOverride) {
+        if (participates) {
+            // Keep the input's scene blur available when background cards fill the budget.
+            if (sourceOverride != null) GlassRefractionBudget.surfaces.add(0, token)
+            else GlassRefractionBudget.surfaces.add(token)
+        }
         onDispose { GlassRefractionBudget.surfaces.remove(token) }
     }
-    val busy = LocalGlassBusy.current || backdrop.interacting || LocalAppearanceBackground.current?.gradientInteractionInProgress == true || WindowInsets.isImeVisible
+    val busy = LocalGlassBusy.current || backdrop?.interacting == true || LocalAppearanceBackground.current?.gradientInteractionInProgress == true || WindowInsets.isImeVisible
     val profile = resolveGlassProfile(options, caps.sdkInt, GlassRefractionRuntime.failed, busy,
         LocalGlassPowerSave.current, areaDp, GlassRefractionBudget.surfaces.indexOf(token), caps.maxLiveBlurRadius)
     val size = Size(dimensions.width.toFloat(), dimensions.height.toFloat())
@@ -63,7 +72,17 @@ internal fun GlassBackdropLayer(blurRadius: Float, shape: Shape, glass: Boolean,
     }
     val blur = if (GlassRefractionBudget.surfaces.indexOf(token) in 0 until MAX_REFRACTION_SURFACES) caps.limitLiveBlur(blurRadius).coerceAtMost(profile.blurLimit) else 0f
     Box(modifier
-        .onGloballyPositioned { origin = it.positionOnScreen(); dimensions = it.size }
+        .onGloballyPositioned {
+            dimensions = it.size
+            val bounds = it.boundsInWindow()
+            val onScreen = bounds.width > 0f && bounds.height > 0f && bounds.right > 0f && bounds.bottom > 0f &&
+                bounds.left < view.width && bounds.top < view.height
+            // Haze owns translation. Only publish visibility changes, not every
+            // scroll offset, to avoid recomposing all frosted message bubbles.
+            sceneVisible = onScreen && (sourceOverride != null || backdrop?.let { source ->
+                glassSurfaceVisible(it.positionOnScreen(), it.size, source.origin, source.size)
+            } == true)
+        }
         .clip(shape)
         .graphicsLayer { renderEffect = effect }
         .then(if (blur > 0f || effect != null) Modifier.hazeBlur(

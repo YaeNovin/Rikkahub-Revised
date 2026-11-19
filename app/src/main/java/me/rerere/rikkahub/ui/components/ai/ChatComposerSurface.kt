@@ -35,21 +35,30 @@ internal fun resolveChatComposerStyle(
     // Tint is a cheap static layer, not a performance effect. Turning off blur
     // must not silently make a deliberately transparent composer opaque.
     val opacity = display.inputSurfaceOpacity.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
-    val radius = if (effects && settings.chatComposerMaterial() != ChatComposerMaterial.TRANSLUCENT && blurSupported)
-        display.inputBlurRadius.takeIf { it.isFinite() }?.coerceIn(0f, maxBlur.takeIf { it.isFinite() }?.coerceAtLeast(0f) ?: 0f) ?: 0f else 0f
-    return ChatComposerStyle(opacity, radius)
+    val plan = me.rerere.rikkahub.ui.components.ui.resolveMaterialSurface(settings.chatComposerMaterial(), opacity,
+        display.inputBlurRadius, effects, blurSupported, sourceAvailable = true,
+        maxBlur = maxBlur.takeIf { it.isFinite() } ?: 0f)
+    return ChatComposerStyle(plan.opacity, plan.blurRadius)
 }
 
 /** The tint and optical layer share the real chat scene behind this surface,
  * including messages. Input text and buttons never enter the sampled scene. */
 @Composable
-internal fun ChatComposerSurface(
-    settings: Settings,
-    hazeState: HazeState,
-    shape: Shape,
-    modifier: Modifier = Modifier,
-    content: @Composable BoxScope.() -> Unit,
-) {
+internal fun ChatComposerSurface(settings: Settings, hazeState: HazeState, shape: Shape, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    if (settings.chatComposerMaterial() == ChatComposerMaterial.MICA) {
+        me.rerere.rikkahub.ui.components.ui.MicaMaterialSurface(modifier, shape,
+            opacity = settings.displaySetting.inputSurfaceOpacity, content = content)
+        return
+    }
+    if (settings.chatComposerMaterial() == ChatComposerMaterial.ACRYLIC) {
+        me.rerere.rikkahub.ui.components.ui.AcrylicSurface(
+            opacity = settings.displaySetting.inputSurfaceOpacity,
+            blurRadius = settings.displaySetting.inputBlurRadius,
+            effectsEnabled = settings.advancedAppearanceSetting.enableInputPerformanceEffects,
+            modifier = modifier, shape = shape, scene = hazeState, content = content,
+        )
+        return
+    }
     val capabilities = LocalAdvancedAppearanceCapabilities.current
     val style = resolveChatComposerStyle(settings, capabilities.supportsRealtimeBlur, capabilities.maxLiveBlurRadius)
     val glass = settings.chatComposerMaterial() == ChatComposerMaterial.LIQUID_GLASS &&

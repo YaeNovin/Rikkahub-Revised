@@ -98,6 +98,9 @@ internal enum class SoftwareFailureKind {
 internal fun classifySoftwareFailure(message: String): SoftwareFailureKind {
     val normalized = message.lowercase()
     return when {
+        listOf("responses protocol:", "item_id not found", "chunk type not found", "chunk item not found")
+            .any(normalized::contains) -> SoftwareFailureKind.INVALID_DATA
+
         listOf("no candidates", "without a final image", "empty response", "没有返回可用内容")
             .any(normalized::contains) -> SoftwareFailureKind.EMPTY_RESPONSE
 
@@ -195,7 +198,7 @@ internal fun classifySoftwareFailure(message: String): SoftwareFailureKind {
         listOf("delete", "remove", "删除", "解散")
             .any(normalized::contains) -> SoftwareFailureKind.DELETE
 
-        listOf("not found", "no such file", "file missing", "找不到文件", "文件不存在")
+        listOf("file not found", "filenotfoundexception", "no such file", "file missing", "enoent", "找不到文件", "文件不存在")
             .any(normalized::contains) -> SoftwareFailureKind.FILE_NOT_FOUND
 
         listOf("failed to read", "unable to read", "failed to open", "unable to open", "读取文件失败", "打开文件失败")

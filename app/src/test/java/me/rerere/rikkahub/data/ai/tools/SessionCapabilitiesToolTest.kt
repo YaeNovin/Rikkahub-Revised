@@ -16,6 +16,45 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 class SessionCapabilitiesToolTest {
+    @Test fun `disabled image capability omits all invocation rules even when autonomy is configured`() = runBlocking {
+        val tool = createSessionCapabilitiesTool(Assistant(enableImageGenerationTool = true, autoApproveImageGeneration = true),
+            true, { listOf("ask_user", "get_session_capabilities") })
+        val output = tool.execute(buildJsonObject { put("include_ask_user_details", true) }).single() as UIMessagePart.Text
+        val payload = Json.parseToJsonElement(output.text).jsonObject
+        val image = payload.getValue("image_generation").jsonObject
+        assertEquals(setOf("enabled", "status"), image.keys)
+        assertEquals("false", image.getValue("enabled").jsonPrimitive.content)
+        assertEquals("disabled", image.getValue("status").jsonPrimitive.content)
+        assertEquals("true", payload.getValue("ask_user").jsonObject.getValue("enabled").jsonPrimitive.content)
+        assertFalse(payload.getValue("ask_user").toString().contains(CHAT_IMAGE_TOOL_NAME))
+        assertFalse(payload.getValue("ask_user").toString().contains("image_generation"))
+    }
+
+    @Test fun `models without tool calling cannot advertise configured image tools`() = runBlocking {
+        val tool = createSessionCapabilitiesTool(Assistant(enableImageGenerationTool = true), false,
+            { listOf(CHAT_IMAGE_TOOL_NAME, INSPECT_GENERATED_IMAGE_TOOL_NAME, "ask_user") })
+        val output = tool.execute(buildJsonObject {}).single() as UIMessagePart.Text
+        val payload = Json.parseToJsonElement(output.text).jsonObject
+        assertTrue(payload.getValue("availableTools").jsonArray.isEmpty())
+        assertEquals("disabled", payload.getValue("image_generation").jsonObject.getValue("status").jsonPrimitive.content)
+        assertFalse(output.text.contains(CHAT_IMAGE_TOOL_NAME))
+    }
+
+    @Test fun `image capabilities separate invocation parameter authority and inspection`() = runBlocking {
+        for (automatic in listOf(true, false)) {
+            val tool = createSessionCapabilitiesTool(Assistant(enableImageGenerationTool = true,
+                autoApproveImageGeneration = automatic), true,
+                { listOf(CHAT_IMAGE_TOOL_NAME, INSPECT_GENERATED_IMAGE_TOOL_NAME, "ask_user") })
+            val output = tool.execute(buildJsonObject {}).single() as UIMessagePart.Text
+            val image = Json.parseToJsonElement(output.text).jsonObject.getValue("image_generation").jsonObject
+            assertEquals(CHAT_IMAGE_TOOL_NAME, image.getValue("tool").jsonPrimitive.content)
+            assertEquals((!automatic).toString(), image.getValue("requires_user_confirmation").jsonPrimitive.content)
+            assertEquals("true", image.getValue("parameters_selected_by_user").jsonPrimitive.content)
+            assertEquals("false", image.getValue("ask_user_changes_parameters").jsonPrimitive.content)
+            assertEquals("on_demand", image.getValue("inspection").jsonPrimitive.content)
+        }
+    }
+
     @Test fun `suggestion details are opt in and independent from ask user details`() = runBlocking {
         val tool = createSessionCapabilitiesTool(Assistant(), true, { listOf("ask_user") },
             suggestionCapabilities = { details -> buildJsonObject {

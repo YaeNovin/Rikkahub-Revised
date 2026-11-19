@@ -188,6 +188,17 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
         }
         item {
             ModelSettingItem(
+                title = "默认决策模型",
+                description = "对聊天建议进行评分和排序，不生成聊天文字。留空关闭默认评估；可在聊天建议设置中单独选择。",
+                modelId = settings.decisionModelId,
+                providers = settings.providers.filterIsInstance<ProviderSetting.OpenAI>(),
+                type = ModelType.DECISION,
+                onSelect = { model -> vm.updateSettings { it.copy(decisionModelId = model.id) } },
+                onClear = { vm.updateSettings { it.copy(decisionModelId = null) } },
+            )
+        }
+        item {
+            ModelSettingItem(
                 title = stringResource(R.string.setting_model_page_translate_model),
                 description = stringResource(R.string.setting_model_page_translate_model_desc),
                 modelId = settings.translateModeId,

@@ -1,6 +1,7 @@
 import * as React from "react";
+import { toast } from "sonner";
 
-import api from "~/services/api";
+import api, { ApiError } from "~/services/api";
 import { EVENT_FOLDERS, subscribeToEvent } from "~/services/events";
 import type { FolderDto, FolderListEventDto } from "~/types";
 
@@ -50,7 +51,17 @@ export function useFolders(currentAssistantId: string | null): UseFoldersResult 
   // Reset selection and reload folders whenever the assistant changes.
   React.useEffect(() => {
     setSelectedFolderId(null);
-    void refreshFolders();
+    if (!currentAssistantId) {
+      requestEpochRef.current++;
+      setFolders([]);
+      setLoading(false);
+      return;
+    }
+    void refreshFolders().catch((error: unknown) => {
+      // The global auth gate handles an expired session; do not leave an unhandled rejection.
+      if (error instanceof ApiError && (error.code === 401 || error.code === 403)) return;
+      toast.error(error instanceof Error ? error.message : "文件夹加载失败");
+    });
   }, [currentAssistantId, refreshFolders]);
 
   // Live folder updates for the current assistant (create/rename/delete from any client).

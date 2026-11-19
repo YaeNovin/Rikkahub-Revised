@@ -25,7 +25,6 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.LocalChatBackgroundForeground
-import me.rerere.rikkahub.ui.theme.withBackgroundReadability
 
 @Composable
 fun ChatMessageUserAvatar(
@@ -44,8 +43,7 @@ fun ChatMessageUserAvatar(
         ) {
             Text(
                 text = nickname.ifEmpty { stringResource(R.string.user_default_name) },
-                style = MaterialTheme.typography.labelLargeEmphasized
-                    .withBackgroundReadability(labelColor),
+                style = MaterialTheme.typography.labelLargeEmphasized,
                 color = labelColor,
                 maxLines = 1,
             )
@@ -94,8 +92,7 @@ fun ChatMessageAssistantAvatar(
                     if (settings.displaySetting.showModelName) {
                         Text(
                             text = assistant.name.ifEmpty { stringResource(R.string.assistant_page_default_assistant) },
-                            style = MaterialTheme.typography.labelLargeEmphasized
-                                .withBackgroundReadability(labelColor),
+                            style = MaterialTheme.typography.labelLargeEmphasized,
                             color = labelColor,
                             maxLines = 1,
                         )
@@ -104,7 +101,7 @@ fun ChatMessageAssistantAvatar(
             } else if (model != null) {
                 if (showIcon) {
                     AutoAIIcon(
-                        name = model.modelId,
+                        model = model,
                         modifier = Modifier.size(28.dp),
                         loading = loading
                     )
@@ -117,8 +114,7 @@ fun ChatMessageAssistantAvatar(
                     if (settings.displaySetting.showModelName) {
                         Text(
                             text = model.displayName,
-                            style = MaterialTheme.typography.labelLargeEmphasized
-                                .withBackgroundReadability(labelColor),
+                            style = MaterialTheme.typography.labelLargeEmphasized,
                             color = labelColor,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,

@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -47,6 +49,8 @@ class WebServerManager(
     private val filesManager: FilesManager
 ) {
     private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    /** Serializes start/stop/restart so an async transition cannot overlap another one. */
+    private val lifecycleMutex = Mutex()
     private val nsdRegistrar = NsdServiceRegistrar(context)
 
     private val _state = MutableStateFlow(WebServerState())
@@ -57,57 +61,64 @@ class WebServerManager(
         serviceName: String = DEFAULT_SERVICE_NAME,
         localhostOnly: Boolean = false
     ) {
+        appScope.launch {
+            lifecycleMutex.withLock { startLocked(port, serviceName, localhostOnly) }
+        }
+    }
+
+    private suspend fun startLocked(port: Int, serviceName: String, localhostOnly: Boolean) {
         if (server != null) {
             Log.w(TAG, "Server already running")
             return
         }
 
-        appScope.launch {
-            // 仅本机模式绑定回环地址
-            val host = if (localhostOnly) HOST_LOOPBACK else HOST_ALL_INTERFACES
-            val baseState = WebServerState(
-                port = port,
-                serviceName = serviceName,
-                localhostOnly = localhostOnly
-            )
-            try {
-                _state.value = _state.value.copy(isLoading = true)
-                Log.i(TAG, "Starting web server on $host:$port")
-                if (!isPortAvailable(port)) {
-                    Log.w(TAG, "Port $port is already in use")
-                    _state.value = baseState.copy(
-                        error = context.getString(R.string.error_message_web_server_port_in_use, port)
-                    )
-                    return@launch
-                }
-                server = startWebServer(port = port, host = host) {
-                    configureWebApi(context, chatService, conversationRepo, folderRepo, settingsStore, filesManager)
-                }.start(wait = false)
-
-                _state.value = baseState.copy(isRunning = true)
-                // 仅局域网模式注册 mDNS
-                if (!localhostOnly) {
-                    runCatching {
-                        nsdRegistrar.register(
-                            port = port,
-                            serviceName = serviceName,
-                            onRegistered = { info ->
-                                _state.value = _state.value.copy(
-                                    serviceName = info.serviceName,
-                                    hostname = info.hostname,
-                                    address = info.address.hostAddress
-                                )
-                            }
-                        )
-                    }.onFailure {
-                        Log.w(TAG, "NSD register failed", it)
-                    }
-                }
-                Log.i(TAG, "Web server started successfully on $host:$port")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start web server", e)
-                _state.value = baseState.copy(error = context.formatUserFacingError(e))
+        // 仅本机模式绑定回环地址
+        val host = if (localhostOnly) HOST_LOOPBACK else HOST_ALL_INTERFACES
+        val baseState = WebServerState(
+            port = port,
+            serviceName = serviceName,
+            localhostOnly = localhostOnly
+        )
+        try {
+            _state.value = baseState.copy(isLoading = true)
+            Log.i(TAG, "Starting web server on $host:$port")
+            if (!isPortAvailable(port)) {
+                Log.w(TAG, "Port $port is already in use")
+                _state.value = baseState.copy(
+                    error = context.getString(R.string.error_message_web_server_port_in_use, port)
+                )
+                return
             }
+            server = startWebServer(port = port, host = host) {
+                configureWebApi(context, chatService, conversationRepo, folderRepo, settingsStore, filesManager)
+            }.start(wait = false)
+
+            _state.value = baseState.copy(isRunning = true)
+            // 仅局域网模式注册 mDNS
+            if (!localhostOnly) {
+                runCatching {
+                    nsdRegistrar.register(
+                        port = port,
+                        serviceName = serviceName,
+                        onRegistered = { info ->
+                            _state.value = _state.value.copy(
+                                serviceName = info.serviceName,
+                                hostname = info.hostname,
+                                address = info.address.hostAddress
+                            )
+                        }
+                    )
+                }.onFailure {
+                    Log.w(TAG, "NSD register failed", it)
+                }
+            }
+            Log.i(TAG, "Web server started successfully on $host:$port")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start web server", e)
+            server = null
+            _state.value = baseState.copy(error = context.formatUserFacingError(e))
+        } finally {
+            if (!_state.value.isRunning) _state.value = _state.value.copy(isLoading = false)
         }
     }
 
@@ -120,27 +131,32 @@ class WebServerManager(
     }
 
     fun stop() {
+        appScope.launch {
+            lifecycleMutex.withLock { stopLocked() }
+        }
+    }
+
+    private suspend fun stopLocked(restarting: Boolean = false) {
         _state.value =
             _state.value.copy(isRunning = false, isLoading = true, hostname = null, address = null, error = null)
-        appScope.launch {
-            try {
-                Log.i(TAG, "Stopping web server")
-                server?.stop(1000, 2000)
-                server = null
-                runCatching {
-                    nsdRegistrar.unregister()
-                }.onFailure {
-                    Log.w(TAG, "NSD unregister failed", it)
-                }
-                _state.value = _state.value.copy(isLoading = false)
-                Log.i(TAG, "Web server stopped")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to stop web server", e)
-                _state.value = _state.value.copy(
-                    isLoading = false,
-                    error = context.formatUserFacingError(e),
-                )
+        try {
+            Log.i(TAG, "Stopping web server")
+            server?.stop(1000, 2000)
+            server = null
+            runCatching {
+                nsdRegistrar.unregister()
+            }.onFailure {
+                Log.w(TAG, "NSD unregister failed", it)
             }
+            _state.value = _state.value.copy(isLoading = restarting)
+            Log.i(TAG, "Web server stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop web server", e)
+            server = null
+            _state.value = _state.value.copy(
+                isLoading = false,
+                error = context.formatUserFacingError(e),
+            )
         }
     }
 
@@ -149,8 +165,12 @@ class WebServerManager(
         serviceName: String = _state.value.serviceName,
         localhostOnly: Boolean = _state.value.localhostOnly
     ) {
-        stop()
-        start(port, serviceName, localhostOnly)
+        appScope.launch {
+            lifecycleMutex.withLock {
+                stopLocked(restarting = true)
+                startLocked(port, serviceName, localhostOnly)
+            }
+        }
     }
 
     private fun isPortAvailable(port: Int): Boolean {

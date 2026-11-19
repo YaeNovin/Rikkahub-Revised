@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.chat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,10 +20,20 @@ internal fun ChatSuggestionLayout(
     suggestions: @Composable () -> Unit,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    ChatSuggestionLayout(showSuggestions, PaddingValues(bottom = bottomInset), suggestions, content)
+}
+
+@Composable
+internal fun ChatSuggestionLayout(
+    showSuggestions: Boolean,
+    bottomPadding: PaddingValues,
+    suggestions: @Composable () -> Unit,
+    content: @Composable BoxScope.() -> Unit,
+) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds(), content = content)
         if (showSuggestions) {
-            Box(Modifier.fillMaxWidth().padding(bottom = bottomInset)) {
+            Box(Modifier.fillMaxWidth().padding(bottomPadding)) {
                 suggestions()
             }
         }

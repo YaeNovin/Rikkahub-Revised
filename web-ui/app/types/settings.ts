@@ -140,6 +140,7 @@ export interface SearchServiceOption {
  * @see app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt - Settings
  */
 export interface Settings {
+  webServerJwtEnabled: boolean;
   dynamicColor: boolean;
   themeId: string;
   developerMode: boolean;

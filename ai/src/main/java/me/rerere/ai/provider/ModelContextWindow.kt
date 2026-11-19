@@ -80,14 +80,15 @@ internal fun JsonObject.contextWindowTokensOrNull(
     modelId: String,
     protocol: ModelDiscoveryProtocol,
 ): Int? = contextWindowTokensOrNull() ?: when (protocol) {
-    ModelDiscoveryProtocol.OPENAI -> knownOpenAIContextWindowTokens(modelId)
+    ModelDiscoveryProtocol.OPENAI -> knownModernVendorContext(modelId) ?: knownOpenAIContextWindowTokens(modelId)
         ?: knownGoogleContextWindowTokens(modelId)
         ?: knownAnthropicContextWindowTokens(modelId)
+        ?: (1_000_000.takeIf { Model(modelId = modelId).isMiMo26() })
         ?: knownQwenContextWindowTokens(modelId)
         ?: knownDeepSeekContextWindowTokens(modelId)
         ?: knownDoubaoContextWindowTokens(modelId)
     ModelDiscoveryProtocol.GOOGLE -> knownGoogleContextWindowTokens(modelId)
-    ModelDiscoveryProtocol.ANTHROPIC -> knownAnthropicContextWindowTokens(modelId)
+    ModelDiscoveryProtocol.ANTHROPIC -> knownModernVendorContext(modelId) ?: knownAnthropicContextWindowTokens(modelId)
 }
 
 /** Fills missing capacities without replacing values configured by the user. */
@@ -108,7 +109,8 @@ fun mergeDiscoveredContextWindows(
 
 /** Returns a conservative known capacity for manual model configuration. */
 fun inferContextWindowTokens(modelId: String): Int? =
-    knownOpenAIContextWindowTokens(modelId)
+    knownModernVendorContext(modelId) ?: (if (isDecisionModelId(modelId)) 65_536 else null)
+        ?: knownOpenAIContextWindowTokens(modelId)
         ?: knownGoogleContextWindowTokens(modelId)
         ?: knownAnthropicContextWindowTokens(modelId)
         ?: knownQwenContextWindowTokens(modelId)
@@ -196,6 +198,7 @@ private fun knownQwenContextWindowTokens(modelId: String): Int? {
     val id = modelId.normalizedModelId()
     return when {
         id.startsWith("qwen-long") -> 10_000_000
+        id.startsWith("qwen4-max") || id.startsWith("qwen-4-max") -> 1_000_000
         id.startsWith("qwen3.8-max") || id.startsWith("qwen3-8-max") ||
             id.startsWith("qwen3-8max") || id.startsWith("qwen3.8-flash") ||
             id.startsWith("qwen3-8-flash") || id.startsWith("qwen3-8flash") -> 1_000_000

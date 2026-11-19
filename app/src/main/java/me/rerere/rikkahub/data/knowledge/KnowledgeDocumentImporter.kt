@@ -8,6 +8,10 @@ import android.provider.OpenableColumns
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.EmbeddingImageInput
 import me.rerere.ai.provider.EmbeddingGenerationParams
@@ -27,7 +31,6 @@ import me.rerere.document.PptxParser
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.rikkahub.data.datastore.resolveEmbeddingModel
 import me.rerere.rikkahub.data.db.entity.KnowledgeBaseEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity
 import me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity
@@ -68,7 +71,7 @@ class KnowledgeDocumentImporter(
     private val providerManager: ProviderManager,
     private val settingsStore: SettingsStore,
 ) {
-    suspend fun importDocument(base: KnowledgeBaseEntity, uri: Uri): KnowledgeDocumentEntity = withContext(Dispatchers.IO) {
+    suspend fun prepareDocument(base: KnowledgeBaseEntity, uri: Uri): KnowledgeDocumentEntity = withContext(Dispatchers.IO) {
         val documentId = Uuid.random().toString()
         val now = Clock.System.now().toEpochMilliseconds()
         val title = resolveDisplayName(uri)
@@ -81,22 +84,41 @@ class KnowledgeDocumentImporter(
             mimeType = mimeType,
             // The final hash is written after parsing. This placeholder makes every failed import visible.
             contentHash = sha256("$uri:$now"),
-            status = KnowledgeDocumentEntity.STATUS_INDEXING,
+            status = KnowledgeDocumentEntity.STATUS_QUEUED,
             createdAt = now,
             updatedAt = now,
         )
-        repository.insertDocumentWithChunks(document, emptyList())
-        var temporaryFile: File? = null
-
+        val source = sourceFile(documentId)
         try {
             persistReadPermission(uri)
-            temporaryFile = File.createTempFile("knowledge-", ".source", context.cacheDir)
-            copyToTemporaryFile(uri, temporaryFile)
-            val settings = settingsStore.settingsFlow.value
-            val model = base.embeddingModelId
-                ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
-                ?.let { settings.resolveEmbeddingModel(it) }
-                ?: settings.resolveEmbeddingModel()
+            copyToTemporaryFile(uri, source)
+            currentCoroutineContext().ensureActive()
+            repository.insertDocumentWithChunks(document, emptyList())
+            document
+        } catch (error: Throwable) {
+            source.delete()
+            throw error
+        }
+    }
+
+    suspend fun importDocument(
+        documentId: String,
+        modelId: String?,
+        onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
+    ): KnowledgeDocumentEntity = withContext(Dispatchers.IO) {
+        val document = repository.getDocument(documentId) ?: error("Document was removed")
+        val title = document.title
+        val mimeType = document.mimeType
+        val temporaryFile = sourceFile(documentId)
+        try {
+            require(temporaryFile.isFile) { "导入源文件已不可用，请删除此记录后重新选择文件" }
+            val settings = settingsStore.settingsFlowRaw.first()
+            val model = modelId?.let {
+                requireNotNull(settings.findModelById(Uuid.parse(it))?.takeIf { selected ->
+                    selected.type == me.rerere.ai.provider.ModelType.EMBEDDING &&
+                        selected.findProvider(settings.providers)?.enabled == true
+                }) { "导入所选的嵌入模型已不可用，请检查设置后重试" }
+            }
             val modelProvider = model?.findProvider(settings.providers)
             val useVisionEmbedding = model != null && (
                 model.usesVolcengineMultimodalEmbeddingApi() ||
@@ -119,11 +141,11 @@ class KnowledgeDocumentImporter(
             }
 
             val drafts = chunkContent(content)
-            val chunks = drafts.mapIndexed { index, draft ->
+            val newChunks = drafts.mapIndexed { index, draft ->
                 KnowledgeChunkEntity(
                     id = Uuid.random().toString(),
                     documentId = documentId,
-                    knowledgeBaseId = base.id,
+                    knowledgeBaseId = document.knowledgeBaseId,
                     ordinal = index,
                     content = draft.content,
                     pageStart = draft.pageStart,
@@ -133,17 +155,25 @@ class KnowledgeDocumentImporter(
                     charEnd = draft.charEnd,
                 )
             }
+            val previousChunks = repository.getDocumentChunks(documentId)
+            val reusable = canReuseKnowledgeChunks(previousChunks, newChunks)
+            val chunks = (if (reusable) previousChunks else newChunks).map { chunk ->
+                if (chunk.hasUsableEmbedding(modelId)) chunk
+                else chunk.copy(embedding = null, embeddingModelId = null, embeddingDimension = null)
+            }
             val indexedDocument = document.copy(
                 contentHash = sha256(content),
                 pageCount = drafts.mapNotNull { it.pageEnd }.maxOrNull(),
+                status = KnowledgeDocumentEntity.STATUS_INDEXING,
+                errorMessage = null,
             )
-            repository.insertDocumentWithChunks(indexedDocument, chunks)
+            currentCoroutineContext().ensureActive()
+            repository.saveImportChunks(indexedDocument, chunks, replace = !reusable)
 
             if (model == null) {
-                repository.updateDocumentStatus(
-                    documentId,
-                    KnowledgeDocumentEntity.STATUS_READY_WITHOUT_EMBEDDING,
-                )
+                check(repository.transitionImport(documentId, listOf(KnowledgeDocumentEntity.STATUS_INDEXING),
+                    KnowledgeDocumentEntity.STATUS_READY_WITHOUT_EMBEDDING))
+                temporaryFile.delete()
                 return@withContext indexedDocument.copy(status = KnowledgeDocumentEntity.STATUS_READY_WITHOUT_EMBEDDING)
             }
 
@@ -160,8 +190,12 @@ class KnowledgeDocumentImporter(
                     VOLCENGINE_TEXT_EMBEDDING_BATCH_SIZE
                 else -> EMBEDDING_BATCH_SIZE
             }
-            var embeddingDimension: Int? = null
-            chunks.chunked(embeddingBatchSize).forEach { batch ->
+            val pendingChunks = chunks.filterNot { it.hasUsableEmbedding(modelId) }
+            var completed = chunks.size - pendingChunks.size
+            var embeddingDimension = chunks.firstOrNull { it.hasUsableEmbedding(modelId) }?.embeddingDimension
+            onProgress(completed, chunks.size)
+            pendingChunks.chunked(embeddingBatchSize).forEach { batch ->
+                currentCoroutineContext().ensureActive()
                 val result = provider.generateEmbedding(
                     providerSetting = providerSetting,
                     params = EmbeddingGenerationParams(
@@ -192,27 +226,41 @@ class KnowledgeDocumentImporter(
                 require(result.embeddings.flatten().all(Float::isFinite)) {
                     "Embedding provider returned a non-finite vector"
                 }
-                repository.updateChunks(batch.zip(result.embeddings).map { (chunk, vector) ->
+                currentCoroutineContext().ensureActive()
+                repository.saveImportChunks(indexedDocument, batch.zip(result.embeddings).map { (chunk, vector) ->
                     chunk.copy(
                         embedding = vector.toByteArray(),
                         embeddingModelId = model.id.toString(),
                         embeddingDimension = vector.size,
                     )
-                })
+                }, replace = false)
+                completed += batch.size
+                onProgress(completed, chunks.size)
             }
-            repository.updateDocumentStatus(documentId, KnowledgeDocumentEntity.STATUS_READY)
+            check(repository.transitionImport(documentId, listOf(KnowledgeDocumentEntity.STATUS_INDEXING),
+                KnowledgeDocumentEntity.STATUS_READY))
+            temporaryFile.delete()
             indexedDocument.copy(status = KnowledgeDocumentEntity.STATUS_READY)
+        } catch (cancelled: CancellationException) {
+            // WorkManager resumes interrupted work using the saved source and completed chunks.
+            throw cancelled
         } catch (error: Throwable) {
-            repository.updateDocumentStatus(
+            repository.transitionImport(
                 id = documentId,
+                expected = listOf(KnowledgeDocumentEntity.STATUS_INDEXING),
                 status = KnowledgeDocumentEntity.STATUS_FAILED,
-                errorMessage = error.message?.take(500) ?: error.javaClass.simpleName,
+                error = error.message?.take(500) ?: error.javaClass.simpleName,
             )
             throw error
-        } finally {
-            temporaryFile?.delete()
         }
     }
+
+    internal fun sourceFile(documentId: String): File {
+        val safeId = Uuid.parse(documentId).toString()
+        return File(File(context.filesDir, "knowledge-imports").apply { mkdirs() }, "$safeId.source")
+    }
+
+    fun discardSource(documentId: String) { sourceFile(documentId).delete() }
 
     private fun persistReadPermission(uri: Uri) {
         if (uri.scheme != "content") return
@@ -224,7 +272,7 @@ class KnowledgeDocumentImporter(
         }
     }
 
-    private fun copyToTemporaryFile(uri: Uri, target: File) {
+    private suspend fun copyToTemporaryFile(uri: Uri, target: File) {
         val input = if (uri.scheme == "file") {
             uri.toFile().inputStream()
         } else {
@@ -236,6 +284,7 @@ class KnowledgeDocumentImporter(
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 var totalBytes = 0L
                 while (true) {
+                    currentCoroutineContext().ensureActive()
                     val read = source.read(buffer)
                     if (read <= 0) break
                     totalBytes += read

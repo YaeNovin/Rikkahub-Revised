@@ -16,6 +16,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.dto.ConversationListInvalidateEvent
 import me.rerere.rikkahub.web.dto.FolderListEvent
 import me.rerere.rikkahub.web.dto.toDto
+import me.rerere.rikkahub.web.dto.toWebSettingsDto
+import me.rerere.rikkahub.web.watchWebSession
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -23,7 +25,7 @@ import kotlin.time.Duration.Companion.seconds
  *
  * A single `/api/events` connection carries several event types, distinguished by the
  * SSE `event:` field, so new event kinds can be added without opening a new connection:
- *  - `settings`                     -> full Settings snapshot
+ *  - `settings`                     -> browser settings snapshot (no backend credentials)
  *  - `conversation_list_invalidate` -> the conversation list for an assistant changed
  *  - `folders`                      -> the folder list for an assistant changed
  *
@@ -35,15 +37,17 @@ fun Route.eventsRoutes(
     conversationRepo: ConversationRepository,
     folderRepo: FolderRepository,
     settingsStore: SettingsStore,
+    authStore: SettingsStore = settingsStore,
 ) {
     sse("/events") {
+        watchWebSession { !authStore.settingsFlow.value.webServerJwtEnabled }
         heartbeat {
             period = 15.seconds
         }
 
-        // Full settings snapshot; StateFlow emits the current value immediately on connect.
-        val settingsEvents = settingsStore.settingsFlow.map { settings ->
-            EventPayload(event = "settings", json = JsonInstant.encodeToString(settings))
+        // StateFlow emits a fresh, allowlisted snapshot immediately on every connection.
+        val settingsEvents = combine(settingsStore.settingsFlow, authStore.settingsFlow) { settings, auth ->
+            EventPayload(event = "settings", json = JsonInstant.encodeToString(settings.copy(webServerJwtEnabled = auth.webServerJwtEnabled).toWebSettingsDto()))
         }
 
         // Conversation list invalidation, scoped to the currently selected assistant.

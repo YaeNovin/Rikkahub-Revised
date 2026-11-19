@@ -54,11 +54,15 @@ data class Assistant(
     val deepSeekOptions: DeepSeekGenerationOptions = DeepSeekGenerationOptions(),
     val geminiOptions: GeminiGenerationOptions = GeminiGenerationOptions(),
     val claudeOptions: ClaudeGenerationOptions = ClaudeGenerationOptions(),
+    val miniMaxOptions: me.rerere.ai.provider.MiniMaxGenerationOptions = me.rerere.ai.provider.MiniMaxGenerationOptions(),
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),
     val mcpServers: Set<Uuid> = emptySet(),
     val localTools: List<LocalToolOption> = listOf(LocalToolOption.TimeInfo),
     val enableWebSearch: Boolean = false, // 网络搜索开关(每个助手独立)
+    val enableImageGenerationTool: Boolean = false,
+    /** Explicit user opt-in; the model can invoke, but cannot choose request parameters. */
+    val autoApproveImageGeneration: Boolean = false,
     val workspaceId: Uuid? = null,
     val background: String? = null, // 聊天页背景图地址(本地文件 URI 或网络 URL), 为 null 时无背景
     val backgroundOpacity: Float = 1.0f, // 背景图不透明度(0~1)
@@ -212,6 +216,9 @@ private fun compileRegexCached(pattern: String): Regex? {
     return result.getOrNull()
 }
 
+private data class VisualRegexKey(val text: String, val rules: List<AssistantRegex>, val scope: AssistantAffectScope)
+private val visualRegexResults = LinkedHashMap<VisualRegexKey, String>(32, .75f, true)
+
 fun String.replaceRegexes(
     assistant: Assistant?,
     scope: AssistantAffectScope,
@@ -219,7 +226,9 @@ fun String.replaceRegexes(
 ): String {
     if (assistant == null) return this
     if (assistant.regexes.isEmpty()) return this
-    return assistant.regexes.fold(this) { acc, regex ->
+    val cacheKey = if (visual && length <= 256 * 1024) VisualRegexKey(this, assistant.regexes, scope) else null
+    cacheKey?.let { synchronized(visualRegexResults) { visualRegexResults[it] } }?.let { return it }
+    val result = assistant.regexes.fold(this) { acc, regex ->
         if (regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)) {
             val compiled = compileRegexCached(regex.findRegex) ?: return@fold acc
             try {
@@ -235,6 +244,16 @@ fun String.replaceRegexes(
             acc
         }
     }
+    if (cacheKey != null && result.length <= 256 * 1024) synchronized(visualRegexResults) {
+        visualRegexResults[cacheKey] = result
+        var chars = visualRegexResults.entries.sumOf { it.key.text.length + it.value.length }
+        while (visualRegexResults.size > 48 || chars > 1024 * 1024) {
+            val oldest = visualRegexResults.entries.first()
+            chars -= oldest.key.text.length + oldest.value.length
+            visualRegexResults.remove(oldest.key)
+        }
+    }
+    return result
 }
 
 /**

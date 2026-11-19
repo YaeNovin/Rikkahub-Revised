@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="setting_advanced_appearance_preview_background">Глобальный фон полноэкранного предпросмотра</string>
+  <string name="setting_advanced_appearance_preview_background_desc">Использует глобальный фон, его непрозрачность, размытие и стиль страницы в полноэкранных диаграммах. Непрозрачный стиль страницы скрывает фон. При отключении используется фон темы.</string>
+  <string name="webview_preview_background_enable">Включить глобальный фон предпросмотра</string>
+  <string name="webview_preview_background_disable">Отключить глобальный фон предпросмотра</string>
+  <string name="assistant_page_background_blur">Размытие фона</string>
+  <string name="assistant_page_background_blur_desc">Применять настраиваемое гауссово размытие к фону этого ассистента</string>
+  <string name="assistant_page_background_blur_off">Размытие: выкл.</string>
+  <string name="assistant_page_background_blur_value">Размытие: %1$d dp</string>
+  <string name="assistant_page_background_global_override_title">Фон ассистента отключён</string>
+  <string name="assistant_page_background_global_override_desc">Глобальный фон перекрывает основной экран чата. Изображения и градиенты ассистента сохраняются, но недоступны для изменения и отображения, пока глобальное переопределение не будет отключено.</string>
+  <string name="assistant_request_overview_title">Маршрут и область запроса</string>
+  <string name="assistant_request_current_model">Текущая модель: %1$s</string>
+  <string name="assistant_request_no_model">Не настроено</string>
+  <string name="assistant_request_no_route">Нет подходящего маршрута запроса. Пользовательские значения будут сохранены, но не применятся, пока не будет настроена чат-модель.</string>
+  <string name="assistant_request_scope_desc">Значения уровня ассистента применяются только к чат-запросам этого ассистента. Значения уровня модели также применяются к фоновым функциям, использующим эту модель.</string>
+  <string name="assistant_request_priority_desc">Порядок: значения приложения → ассистента → модели. Для одинакового ключа используется более позднее значение; объекты JSON объединяются рекурсивно.</string>
+  <string name="assistant_request_diagnostics_title">Проверки конфигурации</string>
+  <string name="assistant_request_tools_title">Массовая настройка</string>
+  <string name="assistant_request_import_desc">Импортировать полный объект JSON как пользовательские поля тела верхнего уровня. Существующие поля с тем же ключом заменяются.</string>
+  <string name="assistant_request_import_json">Импортировать объект JSON</string>
+  <string name="assistant_request_import_invalid">Введите корректный объект JSON. Массивы и примитивные корневые значения не поддерживаются.</string>
+  <string name="assistant_request_official_templates">Шаблоны текущего официального API</string>
+  <string name="assistant_request_template_desc">Шаблоны фильтруются по выбранной модели, протоколу и официальной конечной точке. Новые записи отключены, пока вы их не проверите и не включите.</string>
+  <string name="assistant_request_template_added">%1$s (добавлено)</string>
+  <string name="assistant_request_preview_title">Итоговая пользовательская конфигурация</string>
+  <string name="assistant_request_preview_desc">Предпросмотр после объединения значений ассистента и модели. Недействительные или отключённые записи скрываются, конфиденциальные значения маскируются. Поля запроса, созданные приложением, не отображаются.</string>
+  <string name="assistant_request_entry_enabled">Включено</string>
+  <string name="assistant_request_unnamed_field">Поле без имени</string>
+  <string name="assistant_page_memory_context_sources">Другие источники контекста</string>
+  <string name="setting_advanced_appearance_performance_section">Совместимость и производительность</string>
+</resources>

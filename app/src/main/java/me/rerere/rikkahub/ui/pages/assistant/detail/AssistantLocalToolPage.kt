@@ -185,6 +185,14 @@ private fun AssistantLocalToolContent(
                 }
             )
             item(
+                headlineContent = { Text("调用图片生成模型") },
+                supportingContent = { Text("可通过 ask_user 澄清需求。参数及模型自行调用开关统一在聊天的手动生图设置中调整，原有手动生图保持可用。") },
+                trailingContent = {
+                    Switch(checked = assistant.enableImageGenerationTool,
+                        onCheckedChange = { onUpdate(assistant.copy(enableImageGenerationTool = it)) })
+                },
+            )
+            item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_ask_user_title))
                 },

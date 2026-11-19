@@ -134,6 +134,25 @@ class OpenAIOptionsRequestTest {
     }
 
     @Test
+    fun `GPT 6 model families expose documented reasoning levels`() {
+        assertEquals(
+            listOf(ReasoningLevel.OFF, ReasoningLevel.AUTO, ReasoningLevel.LOW, ReasoningLevel.MEDIUM,
+                ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX),
+            resolveOpenAIReasoningLevels("gpt-6-sol"),
+        )
+        assertEquals(
+            listOf(ReasoningLevel.AUTO, ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH,
+                ReasoningLevel.XHIGH, ReasoningLevel.MAX),
+            resolveOpenAIReasoningLevels("gpt-6.1-sol"),
+        )
+        assertEquals(
+            listOf(ReasoningLevel.OFF, ReasoningLevel.AUTO, ReasoningLevel.LOW, ReasoningLevel.MEDIUM,
+                ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX),
+            resolveOpenAIReasoningLevels("gpt-6.1-terra"),
+        )
+    }
+
+    @Test
     fun `official-only GPT 5 6 reasoning fields are omitted for compatible endpoints`() {
         val params = gpt56Params().copy(
             openAIOptions = gpt56Params().openAIOptions.copy(

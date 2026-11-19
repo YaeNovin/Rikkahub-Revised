@@ -286,7 +286,10 @@
   <string name="chat_page_history">채팅 기록</string>
   <string name="chat_page_menu_ai_translator">AI 번역기</string>
   <string name="chat_page_menu_image_generation">이미지 생성</string>
-  <string name="chat_page_message_count">%d개 메시지</string>
+  <plurals name="chat_page_message_count">
+    <item quantity="one">%d개 메시지</item>
+    <item quantity="other">%d개 메시지</item>
+  </plurals>
   <string name="chat_page_move_to_assistant">어시스턴트로 이동</string>
   <string name="chat_page_new_chat">새 채팅</string>
   <string name="chat_page_new_message">새 메시지</string>
@@ -300,7 +303,10 @@
   <string name="chat_page_yesterday">어제</string>
   <string name="chat_size_dialog_content">현재 메시지 수: %1$d. 이로 인해 앱이 강제 종료되거나 느려질 수 있으며, 대화 데이터가 손실될 수도 있습니다. 계속 대화하려면 새 대화를 만들어 주세요.</string>
   <string name="chat_size_dialog_title">이 대화 데이터가 너무 큽니다</string>
-  <string name="citations_count">%1$d 출처</string>
+  <plurals name="citations_count">
+    <item quantity="one">%1$d 출처</item>
+    <item quantity="other">%1$d 출처</item>
+  </plurals>
   <string name="code_block_collapse">접기</string>
   <string name="code_block_copy">코드 복사</string>
   <string name="code_block_expand">펼치기</string>
@@ -699,9 +705,9 @@
   <string name="setting_files_page_clean_action">정리</string>
   <string name="setting_files_page_clean_confirmation">이 카테고리의 모든 파일이 영구적으로 삭제됩니다. 이 작업은 실행 취소할 수 없습니다.</string>
   <string name="setting_files_page_clean_content_description">파일 정리</string>
-  <string name="setting_files_page_clean_failed_toast">일부 파일을 정리하지 못했습니다</string>
+  <string name="setting_files_page_clean_failed_toast">파일 %1$d개를 삭제했습니다. 파일 %2$d개는 삭제하지 못했습니다.</string>
   <string name="setting_files_page_clean_title">파일을 정리할까요?</string>
-  <string name="setting_files_page_cleaned_toast">파일을 정리했습니다</string>
+  <string name="setting_files_page_cleaned_toast">파일 %1$d개를 삭제했습니다. 채팅 첨부 파일 %2$d개, 생성된 이미지 %3$d개입니다.</string>
   <string name="setting_files_page_delete_action">삭제</string>
   <string name="setting_files_page_delete_content_description">삭제</string>
   <string name="setting_files_page_delete_failed_toast">삭제 실패</string>

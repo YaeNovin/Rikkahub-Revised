@@ -21,6 +21,19 @@ val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 
 val DEFAULT_PROVIDERS = listOf(
     ProviderSetting.OpenAI(
+        id = Uuid.parse("a2bafe83-eaf8-47bf-a8c7-3dd82d89f637"),
+        name = "MIMO", baseUrl = "https://api.xiaomimimo.com/v1", enabled = false, builtIn = true,
+        models = listOf(
+            Model(id = Uuid.parse("34d92cab-72d7-46ca-ae26-f37a1b6ded62"), modelId = "mimo-v2.6-pro", displayName = "MiMo V2.6 Pro",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE, Modality.VIDEO), abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING), contextWindowTokens = 1_000_000),
+            Model(id = Uuid.parse("4ed6894f-3e44-4e8f-b272-1b212d012620"), modelId = "mimo-v2.6-flash", displayName = "MiMo V2.6 Flash",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE, Modality.VIDEO), abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING), contextWindowTokens = 1_000_000),
+            Model(id = Uuid.parse("2311d1b5-2184-43e0-b8bb-a91d264d54a2"), modelId = "mimo-v2.6-pro-ultraspeed", displayName = "MiMo V2.6 Pro Ultraspeed",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE, Modality.VIDEO), abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING), contextWindowTokens = 1_000_000),
+        ),
+        description = { Text("小米 MiMo 官方服务。V2.6 支持多模态理解、工具调用、思考和 JSON 输出；V2.5 已于 2026 年 10 月 21 日退役。") },
+    ),
+    ProviderSetting.OpenAI(
         id = Uuid.parse("8ea9ce7d-b9a4-4510-b536-ded739f7e102"),
         name = "可灵 AI",
         baseUrl = "https://api-singapore.klingai.com/v1",
@@ -58,7 +71,47 @@ val DEFAULT_PROVIDERS = listOf(
         name = "OpenAI",
         baseUrl = "https://api.openai.com/v1",
         apiKey = "",
-        builtIn = true
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("cc4018a3-0722-4a7b-acbe-b6ffb65bb271"),
+                modelId = "gpt-6.1-sol",
+                displayName = "GPT-6.1 Sol",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                contextWindowTokens = 1_050_000,
+            ),
+            Model(
+                id = Uuid.parse("fe99a23c-236a-47db-b5e6-92172db93312"),
+                modelId = "gpt-6.2-astra", displayName = "GPT-6.2 Astra",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                contextWindowTokens = 1_050_000,
+            ),
+            Model(
+                id = Uuid.parse("5b350a0b-9cd9-44c6-9db2-c3662a48adb0"),
+                modelId = "gpt-6.2-sol", displayName = "GPT-6.2 Sol",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                contextWindowTokens = 1_050_000,
+            ),
+            Model(
+                id = Uuid.parse("1751419b-a36b-497b-b5d5-69e2f9bb83b8"),
+                modelId = "gpt-6.1-terra",
+                displayName = "GPT-6.1 Terra",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                contextWindowTokens = 1_050_000,
+            ),
+            Model(
+                id = Uuid.parse("d1120270-d20d-46f0-9f75-706b49d396f7"),
+                modelId = "gpt-6-sol",
+                displayName = "GPT-6 Sol",
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                contextWindowTokens = 1_050_000,
+            ),
+        ),
     ),
     ProviderSetting.Google(
         id = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa6d"),
@@ -74,6 +127,13 @@ val DEFAULT_PROVIDERS = listOf(
         apiKey = "",
         enabled = true,
         builtIn = true,
+        models = listOf(Model(
+            id = Uuid.parse("f82935bd-38f8-4905-a38c-377a68f72ab2"),
+            modelId = "decision-model-preview",
+            type = me.rerere.ai.provider.ModelType.DECISION,
+            displayName = "Decision Model Preview（建议评估）",
+            contextWindowTokens = 65_536,
+        )),
         description = {
             Text(
                 text = buildAnnotatedString {
@@ -225,7 +285,20 @@ val DEFAULT_PROVIDERS = listOf(
         baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         apiKey = "",
         enabled = false,
-        builtIn = true
+        builtIn = true,
+        models = listOf(Model(
+            id = Uuid.parse("e6fcb4ce-4380-46a6-9e85-6eed30c38354"),
+            modelId = "decision-model-preview",
+            type = me.rerere.ai.provider.ModelType.DECISION,
+            displayName = "Decision Model Preview（建议评估）",
+            contextWindowTokens = 65_536,
+        ), Model(
+            id = Uuid.parse("174fc7c6-13a4-4a53-a4ab-7f0bf0aa2a9a"),
+            modelId = "qwen4-max", displayName = "Qwen4 Max",
+            inputModalities = listOf(Modality.TEXT, Modality.IMAGE, Modality.VIDEO),
+            abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+            contextWindowTokens = 1_000_000,
+        )),
     ),
     ProviderSetting.OpenAI(
         id = Uuid.parse("3dfd6f9b-f9d9-417f-80c1-ff8d77184191"),
@@ -318,14 +391,6 @@ val DEFAULT_PROVIDERS = listOf(
         id = Uuid.parse("b4deabea-20fb-4101-a74c-65679c7e4754"),
         name = "MiniMax",
         baseUrl = "https://api.minimaxi.com/anthropic/v1",
-        apiKey = "",
-        enabled = false,
-        builtIn = true,
-    ),
-    ProviderSetting.OpenAI(
-        id = Uuid.parse("a2bafe83-eaf8-47bf-a8c7-3dd82d89f637"),
-        name = "MIMO",
-        baseUrl = "https://api.xiaomimimo.com/v1",
         apiKey = "",
         enabled = false,
         builtIn = true,

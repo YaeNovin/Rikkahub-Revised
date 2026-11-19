@@ -75,7 +75,8 @@ class InteractiveCodeBlockTest {
         assertTrue(html.contains("compactViewport"))
         assertTrue(html.contains("containLabel: true"))
         assertTrue(html.contains("overflow: 'break'"))
-        assertTrue(html.contains("confine: true"))
+        assertTrue(html.contains("tip.confine = true"))
+        assertTrue(html.contains("tip.renderMode = 'richText'"))
         assertTrue(html.contains("radius: '58%'"))
         assertTrue(html.contains("devicePixelRatio: Math.min"))
     }
@@ -99,24 +100,27 @@ class InteractiveCodeBlockTest {
             code = "<svg viewBox=\"0 0 800 200\"><text x=\"790\">title</text></svg>",
             language = "svg",
         )
-        assertTrue(html.contains("background: transparent"))
-        assertTrue(html.contains("svg.getBBox()"))
-        assertTrue(html.contains("preserveAspectRatio"))
-        assertTrue(html.contains("svg.removeAttribute('width')"))
-        assertTrue(html.contains("svg.style.width = '100%'"))
+        assertTrue(html.contains("background:transparent"))
+        assertTrue(html.contains("static-preview.js"))
+        val script = java.io.File("src/main/assets/html/static-preview.js").readText()
+        assertTrue(script.contains("svg.getBBox()"))
+        assertTrue(script.contains("preserveAspectRatio"))
+        assertTrue(script.contains("svg.removeAttribute('width')"))
+        assertTrue(script.contains("svg.style.width = '100%'"))
     }
 
     @Test
-    fun `html preview adds transparent mobile media constraints`() {
+    fun `html preview is static with readable mobile paper and no active canvas app`() {
         val html = buildCodePreviewHtml(
             code = "<html><body><canvas width=\"1200\" height=\"600\"></canvas></body></html>",
             language = "html",
         )
 
-        assertTrue(html.contains("rikkahub-responsive-preview"))
+        assertTrue(html.contains("static-safe"))
         assertTrue(html.contains("width=device-width"))
-        assertTrue(html.contains("background: transparent"))
-        assertTrue(html.contains("canvas, iframe"))
+        assertTrue(html.contains("background:#ffffff"))
+        assertFalse(html.contains("<canvas"))
+        assertFalse(html.contains("<iframe"))
     }
 
     @Test

@@ -9,7 +9,7 @@ import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
 fun Modifier.heroAnimation(
     key: Any,
 ): Modifier {
-    val sharedTransitionScope = LocalSharedTransitionScope.current
+    val sharedTransitionScope = LocalSharedTransitionScope.current ?: return this
     val animatedVisibilityScope = LocalNavAnimatedContentScope.current
     return with(sharedTransitionScope) {
         this@heroAnimation.sharedElement(

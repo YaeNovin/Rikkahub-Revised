@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.backup.tabs
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
@@ -79,6 +81,7 @@ fun S3Tab(
     val backupItemsState by vm.s3BackupItems.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val scope = rememberCoroutineScope()
     var showBackupFiles by remember { mutableStateOf(false) }
     var restoringItemId by remember { mutableStateOf<String?>(null) }
@@ -268,7 +271,7 @@ fun S3Tab(
                         try {
                             vm.testS3()
                             toaster.show(
-                                context.getString(R.string.backup_page_connection_success),
+                                appResources.getString(R.string.backup_page_connection_success),
                                 type = ToastType.Success
                             )
                         } catch (e: Exception) {
@@ -300,7 +303,7 @@ fun S3Tab(
                             vm.backupToS3()
                             vm.loadS3BackupFileItems()
                             toaster.show(
-                                context.getString(R.string.backup_page_backup_success),
+                                appResources.getString(R.string.backup_page_backup_success),
                                 type = ToastType.Success
                             )
                         }.onFailure {
@@ -368,7 +371,7 @@ fun S3Tab(
                                         runCatching {
                                             vm.deleteS3BackupFile(item)
                                             toaster.show(
-                                                context.getString(R.string.backup_page_delete_success),
+                                                appResources.getString(R.string.backup_page_delete_success),
                                                 type = ToastType.Success
                                             )
                                             vm.loadS3BackupFileItems()
@@ -387,7 +390,7 @@ fun S3Tab(
                                         runCatching {
                                             vm.restoreFromS3(item = restoreItem)
                                             toaster.show(
-                                                context.getString(R.string.backup_page_restore_success),
+                                                appResources.getString(R.string.backup_page_restore_success),
                                                 type = ToastType.Success
                                             )
                                             showBackupFiles = false

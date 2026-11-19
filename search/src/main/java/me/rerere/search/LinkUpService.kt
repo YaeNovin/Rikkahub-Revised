@@ -83,7 +83,7 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
                 .addHeader("Content-Type", "application/json")
                 .build()
 
-            Log.i(TAG, "search: $query")
+            // Network content is captured only by the private, opt-in diagnostic interceptor.
 
             val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {

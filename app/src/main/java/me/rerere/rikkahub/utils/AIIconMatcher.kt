@@ -1,5 +1,11 @@
 package me.rerere.rikkahub.utils
 
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.matchingModelId
+
+fun computeAIIcon(model: Model): String? = computeAIIconByName(model.displayName)
+    ?: computeAIIconByName(model.matchingModelId()) ?: computeAIIconByName(model.modelId)
+
 private val iconCache = mutableMapOf<String, String>()
 
 // https://lobehub.com/zh/icons

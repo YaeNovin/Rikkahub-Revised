@@ -15,11 +15,13 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.inferParameterFamily
 import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.registry.ModelRegistry
+import me.rerere.ai.provider.providers.google.isGemini4Model
 
 internal fun JsonObjectBuilder.applyCompatibleGeminiChatOptions(params: TextGenerationParams) {
     if (params.model.inferParameterFamily() != ModelParameterFamily.GEMINI) return
     val options = params.geminiOptions
-    val rejectsPenalties = ModelRegistry.GEMINI_3_8_FLASH.match(params.model.parameterModelId())
+    val rejectsPenalties = ModelRegistry.GEMINI_3_8_FLASH.match(params.model.parameterModelId()) ||
+        params.model.isGemini4Model()
 
     options.seed?.let { put("seed", it) }
     putStopSequences(options.stopSequences, maxCount = 5)

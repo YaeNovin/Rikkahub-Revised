@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
+import me.rerere.rikkahub.ui.hooks.rememberAppResources
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -81,6 +83,7 @@ fun TextArea(
     onImportError: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val appResources by rememberAppResources()
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     var isFullScreen by remember { mutableStateOf(false) }
@@ -97,7 +100,7 @@ fun TextArea(
                             ?: error("Failed to read file")
                     }
                     state.setTextAndPlaceCursorAtEnd(content)
-                    toaster.show(context.getString(R.string.text_area_import_success), type = ToastType.Success)
+                    toaster.show(appResources.getString(R.string.text_area_import_success), type = ToastType.Success)
                 } catch (e: Exception) {
                     e.printStackTrace()
                     val errorMessage = context.formatUserFacingError(e)

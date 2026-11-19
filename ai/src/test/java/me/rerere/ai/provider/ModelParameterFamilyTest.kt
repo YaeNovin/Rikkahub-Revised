@@ -66,7 +66,7 @@ class ModelParameterFamilyTest {
         val model = Model(modelId = "deployment-42", displayName = "Claude Sonnet 4.6")
 
         assertEquals(ModelParameterFamily.CLAUDE, model.inferParameterFamily())
-        assertEquals("Claude Sonnet 4.6", model.parameterModelId())
+        assertEquals("claude-sonnet-4.6", model.parameterModelId())
         assertEquals("deployment-42", model.modelId)
     }
 

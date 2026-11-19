@@ -9,6 +9,7 @@ import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.hugeicons.stroke.StopCircle
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,10 +28,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +81,23 @@ fun SettingWebPage() {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val toaster = LocalToaster.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var ignoringBatteryOptimizations by remember { mutableStateOf(false) }
+    var backgroundRestricted by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycleOwner, context) {
+        fun refresh() {
+            ignoringBatteryOptimizations = context.getSystemService(android.os.PowerManager::class.java)
+                .isIgnoringBatteryOptimizations(context.packageName)
+            backgroundRestricted = Build.VERSION.SDK_INT >= 28 &&
+                context.getSystemService(android.app.ActivityManager::class.java).isBackgroundRestricted
+        }
+        refresh()
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val copiedText = stringResource(R.string.copied)
     var portText by remember(settings.webServerPort) {
         mutableStateOf(settings.webServerPort.toString())
@@ -194,6 +214,40 @@ fun SettingWebPage() {
             contentPadding = innerPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("后台 Web 访问", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "服务运行期间保持后台通知与 CPU 唤醒，停止服务后释放。持续访问会增加耗电。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        if (backgroundRestricted) "系统已限制此应用后台运行，请先解除限制。"
+                        else if (ignoringBatteryOptimizations) "Android 电池优化已豁免；厂商后台限制仍需单独确认。"
+                        else "Android 电池优化未豁免；请检查下方电池与后台设置。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        if (Build.MANUFACTURER.equals("vivo", true) || Build.MANUFACTURER.equals("iQOO", true))
+                            "vivo / iQOO：应用信息 → 电量 → 后台耗电管理 → 允许后台耗电。“智能控制”可能在退到后台后冻结整个服务，普通电池优化豁免并不能替代此设置。"
+                        else "若退到后台即超时，请在应用信息中允许后台运行，将电池策略设为不受限制。部分厂商还需要允许自启动或锁定后台。前台通知存在不代表系统不会冻结服务。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = {
+                        runCatching {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:${context.packageName}")))
+                        }.onFailure { toaster.show("无法打开应用信息，请从系统设置进入。") }
+                    }) { Text("打开应用后台与电池设置") }
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                            .onFailure { toaster.show("无法打开电池优化设置，请从系统设置进入。") }
+                    }) { Text("Android 电池优化设置") }
+                }
+            }
             item {
                 CardGroup(
                     modifier = Modifier

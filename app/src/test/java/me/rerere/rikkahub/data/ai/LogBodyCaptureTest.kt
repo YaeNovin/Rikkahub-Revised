@@ -8,6 +8,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LogBodyCaptureTest {
+    @Test fun `completion observer distinguishes EOF from early close and calls once`() {
+        val events = mutableListOf<String>()
+        val body = "stream".toResponseBody().observeLogCompletion { phase, _ -> events += phase }
+        assertEquals("stream", body.string())
+        body.close()
+        assertEquals(listOf("body_complete"), events)
+        events.clear()
+        "partial".toResponseBody().observeLogCompletion { phase, _ -> events += phase }.close()
+        assertEquals(listOf("closed"), events)
+    }
     private fun gzip(text: String): ByteArray {
         val buffer = Buffer()
         GzipSink(buffer).buffer().use { it.writeUtf8(text) }

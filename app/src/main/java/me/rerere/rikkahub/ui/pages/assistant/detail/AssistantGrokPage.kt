@@ -36,6 +36,7 @@ import me.rerere.ai.provider.GrokServiceTier
 import me.rerere.ai.provider.GrokToolChoice
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.parameterModelId
 import me.rerere.ai.provider.supportsReasoningCapability
 import me.rerere.ai.provider.providers.openai.isValidGrokJsonSchema
 import me.rerere.ai.provider.providers.openai.resolveGrokModelParameterSupport
@@ -58,7 +59,7 @@ fun AssistantGrokPage(id: String) {
     val providers by vm.providers.collectAsStateWithLifecycle()
     val model = providers.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val provider = model?.findProvider(providers) as? ProviderSetting.OpenAI
-    val support = resolveGrokModelParameterSupport(model?.modelId.orEmpty())
+    val support = resolveGrokModelParameterSupport(model?.parameterModelId().orEmpty())
     val enabled = provider != null && support.available
     val isResponses = provider?.useResponseApi == true
     val isReasoningModel = support.reasoningModel ||

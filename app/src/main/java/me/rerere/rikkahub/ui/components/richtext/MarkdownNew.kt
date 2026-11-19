@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,31 +99,39 @@ private val flavour by lazy {
 private val parser by lazy { MarkdownParser(flavour) }
 private val htmlParserLock = Any()
 private const val MARKDOWN_HTML_CACHE_ENTRIES = 24
-private data class MarkdownHtmlCacheKey(
-    val content: String,
-    val renderMode: MarkdownRenderMode,
-)
+private data class MarkdownHtmlCacheKey(val content: String, val renderMode: MarkdownRenderMode)
 
-private val markdownHtmlCache = object : LinkedHashMap<MarkdownHtmlCacheKey, Document>(
+internal data class HtmlRenderBlock(val html: String, val node: Node)
+internal data class HtmlRenderSnapshot(val document: Document, val blocks: List<HtmlRenderBlock>)
+
+/** Reuse only exact rendered HTML, including attributes and resolved reference links.
+ * Documents remain immutable after preparation; never reparent old live nodes. */
+internal fun htmlRenderSnapshot(document: Document, previous: List<HtmlRenderBlock> = emptyList()): HtmlRenderSnapshot =
+    HtmlRenderSnapshot(document, document.body().childNodes().mapIndexed { index, node ->
+        val html = node.outerHtml()
+        // A detached clone prevents an unchanged paragraph from retaining its
+        // old full Document (and every previous streamed document) via parent.
+        previous.getOrNull(index)?.takeIf { it.html == html } ?: HtmlRenderBlock(html,
+            node.clone().also { if (it.parent() != null) it.remove() })
+    })
+
+private val markdownHtmlCache = object : LinkedHashMap<MarkdownHtmlCacheKey, HtmlRenderSnapshot>(
     MARKDOWN_HTML_CACHE_ENTRIES,
     0.75f,
     true,
 ) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MarkdownHtmlCacheKey, Document>?): Boolean =
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MarkdownHtmlCacheKey, HtmlRenderSnapshot>?): Boolean =
         size > MARKDOWN_HTML_CACHE_ENTRIES
 }
 
-private fun cachedMarkdownDocument(
-    content: String,
-    renderMode: MarkdownRenderMode,
-): Document? = synchronized(markdownHtmlCache) {
-    markdownHtmlCache[MarkdownHtmlCacheKey(content, renderMode)]
-}
+private fun cachedMarkdownDocument(content: String, renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD): Document? =
+    cachedHtmlSnapshot(content, renderMode)?.document
 
-internal fun isMarkdownDocumentCached(
-    content: String,
-    renderMode: MarkdownRenderMode,
-): Boolean = cachedMarkdownDocument(content, renderMode) != null
+private fun cachedHtmlSnapshot(content: String, renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD): HtmlRenderSnapshot? =
+    synchronized(markdownHtmlCache) { markdownHtmlCache[MarkdownHtmlCacheKey(content, renderMode)] }
+
+internal fun isMarkdownDocumentCached(content: String, renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD): Boolean =
+    cachedMarkdownDocument(content, renderMode) != null
 
 internal fun textNodeContent(
     node: TextNode,
@@ -135,15 +147,17 @@ internal fun textNodeContent(
     }
 }
 
-internal fun preloadMarkdownDocument(
-    content: String,
-    renderMode: MarkdownRenderMode,
-): Document {
-    val cacheKey = MarkdownHtmlCacheKey(content, renderMode)
+internal fun preloadMarkdownDocument(content: String, renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD): Document {
     cachedMarkdownDocument(content, renderMode)?.let { return it }
     val document = buildMarkdownDocument(content, renderMode)
-    synchronized(markdownHtmlCache) {
-        markdownHtmlCache[cacheKey] = document
+    if (content.length <= 256 * 1024) synchronized(markdownHtmlCache) {
+        markdownHtmlCache[MarkdownHtmlCacheKey(content, renderMode)] = htmlRenderSnapshot(document)
+        var chars = markdownHtmlCache.keys.sumOf { it.content.length }
+        while (chars > 1024 * 1024) {
+            val oldest = markdownHtmlCache.keys.first()
+            chars -= oldest.content.length
+            markdownHtmlCache.remove(oldest)
+        }
     }
     return document
 }
@@ -157,7 +171,16 @@ internal fun buildMarkdownDocument(
     // The library writes <pre> as raw HTML but passes <code> through its tag
     // renderer. Mark that source node, then pass completion to the block wrapper.
     val html = HtmlGenerator(preprocessed, tree, flavour).generateHtml { node, tag, attributes ->
-        if (tag.toString() == "code" &&
+        if (tag.toString() == "a" && node.type == org.intellij.markdown.MarkdownElementTypes.INLINE_LINK &&
+            node.children.any { it.type == org.intellij.markdown.MarkdownElementTypes.AUTOLINK }
+        ) {
+            val destination = markdownLinkDestination(node, preprocessed)
+            // Retain useSafeLinks behaviour for authored schemes. The angle
+            // destination fix is limited to web/mail links.
+            if (destination.substringBefore(':').lowercase() in setOf("https", "http", "mailto")) {
+                attributes.filterNot { it?.startsWith("href=") == true } + "href=\"${org.jsoup.nodes.Entities.escape(destination)}\""
+            } else attributes
+        } else if (tag.toString() == "code" &&
             node.type == org.intellij.markdown.MarkdownElementTypes.CODE_FENCE &&
             node.children.none { it.type == org.intellij.markdown.MarkdownTokenTypes.CODE_FENCE_END }
         ) {
@@ -186,61 +209,81 @@ fun MarkdownNew(
     onClickCitation: (String) -> Unit = {},
     renderMode: MarkdownRenderMode = MarkdownRenderMode.STANDARD,
 ) {
-    var document by remember(content, renderMode) {
-        mutableStateOf(cachedMarkdownDocument(content, renderMode))
+    val display = LocalSettings.current.displaySetting
+    val prose = LocalChatProseDecorationsEnabled.current
+    CompositionLocalProvider(LocalChatInlineOptions provides ChatInlineOptions(
+        hexSwatches = prose && display.showHexColorSwatches,
+        quotedText = prose && display.highlightQuotedText,
+    ),
+        LocalPreserveSoftLineBreaks provides (renderMode == MarkdownRenderMode.USER_MESSAGE),
+        LocalMarkdownRenderMode provides renderMode,
+    ) {
+        MarkdownNewBody(content, modifier, style, onClickCitation, renderMode)
     }
+}
+
+@Composable
+private fun MarkdownNewBody(content: String, modifier: Modifier, style: TextStyle, onClickCitation: (String) -> Unit, renderMode: MarkdownRenderMode) {
+    var snapshot by remember(renderMode) { mutableStateOf(cachedHtmlSnapshot(content, renderMode)) }
+    val latestCitationHandler = rememberUpdatedState(onClickCitation)
+    val citationHandler = remember { { target: String -> latestCitationHandler.value(target) } }
     var parseFailed by remember(content, renderMode) { mutableStateOf(false) }
     var parseRetry by remember(content, renderMode) { mutableStateOf(0) }
-    val repositoryCards = LocalGitHubCardsEnabled.current && !LocalRichTextStreaming.current
+    val streaming = LocalRichTextStreaming.current
+    val repositoryCards = LocalGitHubCardsEnabled.current && !LocalRichTextStreaming.current && content.contains("github.com", ignoreCase = true)
 
-    LaunchedEffect(content, renderMode, parseRetry, repositoryCards) {
+    LaunchedEffect(content, renderMode, parseRetry, repositoryCards, streaming) {
         parseFailed = false
-        cachedMarkdownDocument(content, renderMode)?.takeUnless { repositoryCards }?.let {
-            document = it
-            return@LaunchedEffect
-        }
-        delay(STREAMING_MARKDOWN_PARSE_INTERVAL_MS)
+        if (streaming && cachedHtmlSnapshot(content, renderMode) == null) delay(STREAMING_MARKDOWN_PARSE_INTERVAL_MS)
         try {
-            document = withContext(RichTextParsingDispatcher) {
-                preloadMarkdownDocument(content, renderMode).let {
-                    if (repositoryCards) withGitHubRepositoryCards(it) else it
-                }
+            val previous = snapshot?.blocks.orEmpty()
+            snapshot = withContext(RichTextParsingDispatcher) {
+                val document = preloadMarkdownDocument(content, renderMode).let { if (repositoryCards) withGitHubRepositoryCards(it) else it }
+                htmlRenderSnapshot(document, previous)
             }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (exception: Exception) {
-            exception.printStackTrace()
+            me.rerere.rikkahub.data.render.RenderDiagnostics.report("Markdown HTML", "parse", exception.javaClass.simpleName, exception)
             parseFailed = true
         }
     }
 
-    CompositionLocalProvider(
-        LocalPreserveSoftLineBreaks provides (renderMode == MarkdownRenderMode.USER_MESSAGE),
-        LocalMarkdownRenderMode provides renderMode,
-    ) {
-        ProvideTextStyle(style) {
-            val parsedDocument = document
-            ReportRichTextLayoutLoading(parsedDocument == null && !parseFailed)
-            me.rerere.rikkahub.ui.components.ui.AwaitExportRender(parsedDocument == null && !parseFailed)
-            if (parseFailed) {
-                Column(modifier) {
-                    Text("HTML 内容解析失败，可重试或查看原始消息。")
-                    androidx.compose.material3.TextButton(onClick = { parseRetry++ }) { Text("重试") }
-                }
-            } else if (parsedDocument == null) {
-                Box(
-                    modifier = modifier
-                        .fillMaxWidth()
-                        .height(markdownLoadingPlaceholderHeightDp(content).dp)
-                        .padding(start = 4.dp)
-                        .padding(vertical = 4.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
-                )
-            } else {
-                Column(modifier = modifier.padding(start = 4.dp)) {
-                    parsedDocument.body().childNodes().fastForEach { node ->
-                        HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+    // Mount bounded groups on successive real frames; a long response may
+    // contain thousands of Text layouts. Completed blocks retain identity.
+    val blocks = snapshot?.blocks.orEmpty()
+    var mounted by remember { mutableStateOf(16) }
+    LaunchedEffect(blocks) {
+        while (mounted < blocks.size) {
+            withFrameNanos { }
+            mounted = (mounted + 32).coerceAtMost(blocks.size)
+        }
+    }
+    ProvideTextStyle(style) {
+        val parsedDocument = snapshot?.document
+        val loading = !parseFailed && (parsedDocument == null || mounted < blocks.size)
+        ReportRichTextLayoutLoading(loading)
+        me.rerere.rikkahub.ui.components.ui.AwaitExportRender(loading)
+        if (parseFailed) {
+            Column(modifier) {
+                Text("HTML 内容解析失败，可重试或查看原始消息。")
+                androidx.compose.material3.TextButton(onClick = { parseRetry++ }) { Text("重试") }
+            }
+        } else if (parsedDocument == null) {
+            Box(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .height(markdownLoadingPlaceholderHeightDp(content).dp)
+                    .padding(start = 4.dp)
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)),
+            )
+        } else {
+            Column(modifier = modifier.padding(start = 4.dp)) {
+                blocks.take(mounted).forEachIndexed { index, block ->
+                    key(index) {
+                        HtmlBodyNode(node = block.node, onClickCitation = citationHandler, hasNextBlock = index < blocks.lastIndex)
                     }
                 }
             }
@@ -275,12 +318,12 @@ private fun HtmlStyledElement(
 }
 
 @Composable
-private fun HtmlBodyNode(node: Node, onClickCitation: (String) -> Unit) {
+private fun HtmlBodyNode(node: Node, onClickCitation: (String) -> Unit, hasNextBlock: Boolean = false) {
     when (node) {
-        is Element -> HtmlBlockElement(element = node, onClickCitation = onClickCitation)
+        is Element -> HtmlBlockElement(element = node, onClickCitation = onClickCitation, hasNextBlock = hasNextBlock)
         is TextNode -> {
             val text = textNodeContent(node, LocalPreserveSoftLineBreaks.current).trim()
-            if (text.isNotEmpty()) Text(text = text)
+            if (text.isNotEmpty()) LinkText(text = AnnotatedString(text))
         }
     }
 }
@@ -290,13 +333,14 @@ private fun HtmlBlockElement(
     element: Element,
     onClickCitation: (String) -> Unit,
     listLevel: Int = 0,
+    hasNextBlock: Boolean = false,
 ) {
     if (LocalGitHubCardsEnabled.current && element.gitHubCardName() != null) {
         GitHubRepositoryCard(me.rerere.rikkahub.data.github.GitHubRepositoryUrl.url(requireNotNull(element.gitHubCardName())), linkLabel = element.text())
         return
     }
     rawSvgSource(element)?.let { svg ->
-        HighlightCodeBlock(svg.source, "svg", Modifier.fillMaxWidth(), completeCodeBlock = svg.complete)
+        HighlightCodeBlock(svg.source, svg.language, Modifier.fillMaxWidth(), completeCodeBlock = svg.complete)
         return
     }
     when (element.tagName().lowercase()) {
@@ -304,7 +348,7 @@ private fun HtmlBlockElement(
         "p" -> HtmlParagraph(
             element = element,
             onClickCitation = onClickCitation,
-            modifier = if (element.nextElementSibling() != null)
+            modifier = if (hasNextBlock || element.nextElementSibling() != null)
                 Modifier.padding(bottom = markdownParagraphSpacing())
             else Modifier,
         )
@@ -499,7 +543,7 @@ private fun HtmlParagraphContent(
         text to contents
     }
 
-    Text(
+    LinkText(
         text = annotatedString,
         inlineContent = inlineContents,
         softWrap = true,
@@ -665,7 +709,7 @@ private fun HtmlCodeBlock(element: Element) {
         ?.find { it.startsWith("language-") }
         ?.removePrefix("language-")
         ?: "plaintext"
-    val code = codeElement?.wholeText()?.trimEnd('\n') ?: element.wholeText().trimEnd('\n')
+    val code = rawHtmlSource(element) ?: codeElement?.wholeText()?.trimEnd('\n') ?: element.wholeText().trimEnd('\n')
 
     HighlightCodeBlock(
         code = code,
@@ -790,7 +834,16 @@ private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
         outerBorder = null,
         shape = MaterialTheme.shapes.medium,
         columnMinWidths = List(columnCount) { 80.dp },
-        columnMaxWidths = List(columnCount) { 200.dp },
+        columnMaxWidths = List(columnCount) { 240.dp },
+        columnTextAlignments = List(columnCount) { column ->
+            val header = headerElements.getOrNull(column)
+            val align = header?.attr("align").orEmpty().ifBlank {
+                header?.attr("style").orEmpty().substringAfter("text-align:", "").substringBefore(';').trim()
+            }
+            markdownTableAlignment(align)
+        },
+        zebraStriping = true,
+        alternateRowBackground = richContent.toolbar.copy(alpha = .22f),
         columnAlignments = columnAlignments,
     )
 }
@@ -943,7 +996,7 @@ internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Uni
     }
 
     if (annotatedString.isNotEmpty()) {
-        Text(text = annotatedString, inlineContent = inlineContents, modifier = modifier)
+        LinkText(text = annotatedString, inlineContent = inlineContents, modifier = modifier)
     }
 }
 
@@ -966,7 +1019,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
     when (node) {
         is TextNode -> {
             val text = textNodeContent(node, LocalPreserveSoftLineBreaks.current)
-            if (text.isNotEmpty()) Text(text = text)
+            if (text.isNotEmpty()) LinkText(text = AnnotatedString(text))
         }
 
         is Element -> {
@@ -1013,7 +1066,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         }
                         text to contents
                     }
-                    Text(text = annotated, inlineContent = inlineContents)
+                    LinkText(text = annotated, inlineContent = inlineContents)
                 }
             }
         }
@@ -1022,7 +1075,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
 
 // ---- Inline AnnotatedString building ----
 
-private fun AnnotatedString.Builder.appendHtmlInlineNode(
+internal fun AnnotatedString.Builder.appendHtmlInlineNode(
     node: Node,
     colorScheme: androidx.compose.material3.ColorScheme,
     inlineContents: MutableMap<String, InlineTextContent>,
@@ -1143,7 +1196,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             ),
         )
 
-        "code" -> withStyle(
+        "code", "samp" -> withStyle(
             SpanStyle(
                 fontFamily = JetbrainsMono,
                 fontSize = 0.9.em,
@@ -1152,9 +1205,11 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                 background = colorScheme.secondaryContainer.copy(alpha = 1f),
             ).merge(cssStyle ?: SpanStyle())
         ) {
-            append(' ')
-            append(element.wholeText())
-            append(' ')
+            withChatLiteral {
+                append(' ')
+                append(element.wholeText())
+                append(' ')
+            }
         }
 
         "kbd" -> withStyle(
@@ -1166,53 +1221,15 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                 background = colorScheme.secondaryContainer,
             ).merge(cssStyle ?: SpanStyle())
         ) {
-            append(" "); recurseChildren(element, style); append(" ")
+            withChatLiteral { append(" "); recurseChildren(element, style); append(" ") }
         }
 
         "a" -> {
             val href = element.attr("href")
             val text = element.text()
+            val citations = markdownCitations(text, href)
             when {
-                text.startsWith("citation,") -> {
-                    // Citation link: [citation,domain](id)
-                    val domain = text.substringAfter("citation,")
-                    val id = href
-                    if (id.length == 6) {
-                        inlineContents.putIfAbsent(
-                            "citation:$id",
-                            InlineTextContent(
-                                placeholder = Placeholder(
-                                    width = (domain.length * 7).sp,
-                                    height = 1.em,
-                                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
-                                ),
-                                children = {
-                                    Box(
-                                        modifier = Modifier
-                                            .clickable { onClickCitation(id.trim()) }
-                                            .fillMaxSize()
-                                            .clip(CircleShape)
-                                            .background(colorScheme.tertiaryContainer.copy(0.2f)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            text = domain,
-                                            modifier = Modifier.wrapContentSize(),
-                                            style = TextStyle(
-                                                fontSize = 10.sp,
-                                                lineHeight = 10.sp,
-                                                fontFamily = JetbrainsMono,
-                                                color = colorScheme.onTertiaryContainer,
-                                                fontWeight = FontWeight.Thin,
-                                            ),
-                                        )
-                                    }
-                                },
-                            ),
-                        )
-                        appendInlineContent("citation:$id")
-                    }
-                }
+                citations.isNotEmpty() -> citations.forEach { appendCitationBadge(it, inlineContents, colorScheme, onClickCitation) }
 
                 href.isNotEmpty() -> {
                     val linkStyle = SpanStyle(
@@ -1259,12 +1276,12 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                         )
                     } else {
                         withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.95.em)) {
-                            append(latexReadableFallback(formula))
+                            withChatLiteral { append(latexReadableFallback(formula)) }
                         }
                     }
                 } else {
                     withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.95.em)) {
-                        append(formula)
+                        withChatLiteral { append(formula) }
                     }
                 }
             } else {

@@ -470,6 +470,8 @@ private class ChunkedBase64InputStream(
 internal fun String.toImageMimeType(): String = when (lowercase().substringBefore(';')) {
     "jpg", "jpeg", "image/jpg", "image/jpeg" -> "image/jpeg"
     "webp", "image/webp" -> "image/webp"
+    "gif", "image/gif" -> "image/gif"
+    "svg", "image/svg+xml" -> "image/svg+xml"
     else -> "image/png"
 }
 

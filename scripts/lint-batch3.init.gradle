@@ -1,0 +1,14 @@
+// Opt-in third-batch checks; full Lint remains unchanged without this script.
+def batchChecks = ['EmptySuperCall', 'UnnecessaryArrayInit', 'Typos',
+                   'UnusedResources', 'IconDuplicates', 'IconLocation', 'ObsoleteSdkInt']
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.plugins.withId(pluginId) {
+            def lint = project.extensions.getByName('android').lint
+            lint.checkOnly.addAll(batchChecks)
+            lint.xmlOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch3.xml')
+            lint.htmlOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch3.html')
+            lint.textOutput = new File(project.layout.buildDirectory.get().asFile, 'reports/lint-batch3.txt')
+        }
+    }
+}

@@ -71,14 +71,14 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 .addHeader("Content-Type", "application/json")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(request).await()
             if (response.isSuccessful) {
                 val bodyRaw = response.body.string()
                 val bochaResponse = runCatching {
                     json.decodeFromString<BochaResponse>(bodyRaw)
                 }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
+                    // Failure propagates to the structured application diagnostics.
+                    // Raw network content is not written to stdout.
                     error("Failed to decode response: $bodyRaw")
                 }.getOrThrow()
 
@@ -98,7 +98,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                     )
                 )
             } else {
-                println(response.body.string())
+                // Raw network content is not written to stdout.
                 error("response failed #${response.code}")
             }
         }

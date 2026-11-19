@@ -13,17 +13,18 @@ class AppearanceSettingsPolicyTest {
         val assistant = Assistant(useGradientBackground = true)
         val settings = Settings(assistants = listOf(assistant), assistantId = assistant.id)
         assertTrue(canAdjustCardOpacity(settings, capabilities))
-        assertTrue(canAdjustOverlayEffects(settings))
+        assertTrue(canAdjustOverlayEffects(settings.copy(advancedAppearanceSetting = settings.advancedAppearanceSetting.copy(overlaySurfaceStyle = BackgroundSurfaceStyle.ACRYLIC))))
     }
     @Test fun `hidden global image does not enable card slider but can back isolated dialogs`() {
         val settings = Settings(advancedAppearanceSetting = AdvancedAppearanceSetting(enableGlobalBackground = true,
             globalBackground = "file:///image.jpg", pageSurfaceStyle = BackgroundSurfaceStyle.OPAQUE))
         assertFalse(canAdjustCardOpacity(settings, capabilities))
-        assertTrue(canAdjustOverlayEffects(settings))
+        assertFalse(canAdjustOverlayEffects(settings))
     }
-    @Test fun `missing backgrounds disable ineffectual controls`() {
-        assertFalse(canAdjustCardOpacity(Settings(), capabilities))
+    @Test fun `missing backgrounds do not disable material controls`() {
+        assertTrue(canAdjustCardOpacity(Settings(), capabilities))
         assertFalse(canAdjustOverlayEffects(Settings()))
+        assertTrue(canAdjustOverlayEffects(Settings(advancedAppearanceSetting = AdvancedAppearanceSetting(overlaySurfaceStyle = BackgroundSurfaceStyle.ACRYLIC))))
     }
     @Test fun `late acknowledgment cannot overwrite a more recent slider commit`() {
         assertFalse(shouldSyncAppearanceSlider(false, .8f, .6f, true))
