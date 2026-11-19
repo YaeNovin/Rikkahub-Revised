@@ -2,7 +2,7 @@
 
 核对日期：2026-09-09。以下是代码中已经接入的渲染能力，并非可由用户自行安装的插件商店。
 
-2026-09-23 开发增补（未发布）：新增[聊天内只读终端展示](chat-terminal-preview.md)，
+2026-09-23 开发增补（收入 `2.4.8-revised.10`）：新增[聊天内只读终端展示](chat-terminal-preview.md)，
 使用本地 xterm 6.0.0 与 FitAddon 0.11.0，识别 `ansi` / `terminal` / `xterm` /
 `console-output` 代码块，并复用于已有工具结果的 stdout/stderr。不提供交互式终端或 PTY。
 

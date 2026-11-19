@@ -6,13 +6,25 @@ This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.9`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.10`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
 
-## 2026-11-19 未发布源码整合
+## 2026-11-19 正式版 2.4.8-revised.10 / Release 2.4.8-revised.10
+
+将整合后的源码递增至 `2.4.8-revised.10`，版本码 186，沿用原有正式签名和应用 ID。
+本次发布 ARM64 APK 与 SHA-256 校验文件，保留此前版本的标签和资产。
+面向用户的中英双语[更新说明](release-notes-2.4.8-revised.10.md)与
+[发布验证](release-verification-2.4.8-revised.10.md)分别维护。
+
+The integrated source is released as `2.4.8-revised.10`, version code 186,
+using the existing signing identity and application ID. This release provides
+an ARM64 APK and SHA-256 checksums; earlier tags and assets remain unchanged.
+User-facing bilingual notes and the verification record are maintained separately.
+
+## 2026-11-19 源码整合（随后收入 .10）
 
 整合后续模型协议与搜索工具、聊天取消与恢复、日志规范化、外观取色、
 富文本引用和原生表格等开发改动，并保留远端组件分支的用户消息与抽屉修复。

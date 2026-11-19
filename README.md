@@ -30,7 +30,7 @@ Later upstream releases are not automatically included.
 | --- | --- |
 | Distribution name | `Rikkahub Revised` |
 | Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`2.4.8-revised.9`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.9) |
+| Current release | [`2.4.8-revised.10`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.10) |
 | Minimum Android version | Android 8.0 (API 26) |
 | Source repository | `YaeNovin/Rikkahub-Revised` |
 | License | GNU Affero General Public License v3.0 |
@@ -46,13 +46,13 @@ Official Rikkahub Revised APKs are published only through this repository's
 
 | APK | Intended devices |
 | --- | --- |
-| `app-arm64-v8a-release-2.4.8-revised.9.apk` | ARM64 Android phones and tablets |
+| `app-arm64-v8a-release-2.4.8-revised.10.apk` | ARM64 Android phones and tablets |
 | `SHA256SUMS.txt` | SHA-256 checksum for the published APK |
 
-The `2.4.8-revised.9` release publishes an ARM64 APK with the version in its
+The `2.4.8-revised.10` release publishes an ARM64 APK with the version in its
 filename. The updater detects the device ABI from the name. x86_64 and Universal
 packages from older releases remain available on their original release pages;
-they are not `.9` builds. The in-app updater reads the latest public release from this repository and
+they are not `.10` builds. The in-app updater reads the latest public release from this repository and
 offers an APK compatible with the device ABI. Release descriptions contain only
 user-facing updates and fixes; package integrity and signing continuity are
 verified separately during publication.
@@ -77,7 +77,23 @@ repository.
 Rikkahub Revised keeps the upstream Android client as its foundation and adds
 or changes the following areas:
 
-### Current Formal Release: 2.4.8-revised.9
+### Current Formal Release: 2.4.8-revised.10
+
+- Expanded model-name matching, provider parameters, image-generation settings,
+  search services, and Gemini tools, with dedicated decision-model settings.
+- Fixed delayed sent messages, stop controls, prompt-editor crashes, and
+  navigation issues; improved scrolling, startup, and background recovery.
+- Improved wallpaper-derived text colors and dark-mode readability, with
+  optional HEX swatches and quotation highlighting.
+- Enhanced native tables and search citations while preserving pasted source
+  and literal code; improved logs, web settings, and image generation.
+
+Version code 186 retains the existing release certificate for in-place updates.
+See the [bilingual release notes](docs/release-notes-2.4.8-revised.10.md),
+[verification record](docs/release-verification-2.4.8-revised.10.md), and
+[documentation index](docs/README.md).
+
+### Previous Formal Release: 2.4.8-revised.9
 
 - Expanded world-book imports, recursion, source bindings, entry editing, tests,
   and tutorials, with explicit SillyTavern compatibility limits.
@@ -92,7 +108,7 @@ Version code 185 uses the existing release certificate for in-place updates
 from previous Revised releases. See the complete
 [bilingual release notes](docs/release-notes-2.4.8-revised.9.md),
 [source update](docs/changes-2026-09-15.md), and [documentation index](docs/README.md).
-The chat-model-driven image-generation/confirmation flow remains a proposal.
+The image-generation flow was expanded in the subsequent `.10` release.
 
 ### Earlier Revised changes (through 2.4.8-revised.8)
 

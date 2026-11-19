@@ -28,7 +28,7 @@
 | --- | --- |
 | 发行名称 | `Rikkahub Revised` |
 | Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`2.4.8-revised.9`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.9) |
+| 当前版本 | [`2.4.8-revised.10`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.10) |
 | 最低 Android 版本 | Android 8.0（API 26） |
 | 源码仓库 | `YaeNovin/Rikkahub-Revised` |
 | 开源协议 | GNU Affero General Public License v3.0 |
@@ -44,11 +44,11 @@ Rikkahub Revised 的正式 APK 仅通过本仓库的
 
 | APK | 适用设备 |
 | --- | --- |
-| `app-arm64-v8a-release-2.4.8-revised.9.apk` | ARM64 Android 手机和平板电脑 |
+| `app-arm64-v8a-release-2.4.8-revised.10.apk` | ARM64 Android 手机和平板电脑 |
 | `SHA256SUMS.txt` | 已发布 APK 的 SHA-256 校验值 |
 
-`2.4.8-revised.9` 发布带版本号文件名的 ARM64 安装包，应用内更新功能会根据文件名识别设备 ABI。
-旧版的 x86_64 与通用包仍保留在对应历史 Release 页面，不属于 `.9` 安装包。
+`2.4.8-revised.10` 发布带版本号文件名的 ARM64 安装包，应用内更新功能会根据文件名识别设备 ABI。
+旧版的 x86_64 与通用包仍保留在对应历史 Release 页面，不属于 `.10` 安装包。
 应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
 APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
 流程中单独核验。
@@ -69,7 +69,18 @@ APK。Release 说明仅包含面向用户的更新与修复；安装包完整性
 
 Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
 
-### 当前正式版：2.4.8-revised.9
+### 当前正式版：2.4.8-revised.10
+
+- 扩展按模型名称识别、供应商参数、图片生成设置、搜索服务及 Gemini 工具，并增加独立决策模型配置。
+- 修复发送消息显示、停止按钮、提示词弹窗及页面切换问题，改善滚动、冷启动与后台恢复。
+- 优化壁纸文字取色及深色模式可读性，增加可关闭的 HEX 色块和正文引号高亮。
+- 增强原生表格与搜索引用，保留粘贴源码和代码块原文，完善日志、网页版设置与图片生成。
+
+版本码为 186，沿用原有正式版签名，支持覆盖更新。
+详见[双语发行说明](docs/release-notes-2.4.8-revised.10.md)、
+[验证记录](docs/release-verification-2.4.8-revised.10.md)及[文档索引](docs/README.md)。
+
+### 上一正式版：2.4.8-revised.9
 
 - 完善世界书导入、递归、来源绑定、条目编辑、测试和教程，并明确 SillyTavern 兼容边界。
 - 修复 Gemini 问答参数及内置工具与函数工具混用问题。
@@ -80,7 +91,7 @@ Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了
 版本码为 185，沿用原有正式版签名，支持从旧版 Revised 覆盖更新。
 完整内容见[双语发行说明](docs/release-notes-2.4.8-revised.9.md)、
 [源码更新记录](docs/changes-2026-09-15.md)及[文档索引](docs/README.md)。
-聊天模型调用图片模型并通过问答确认的流程仍是讨论方案。
+图片生成流程在后续 `.10` 版本中进一步扩展。
 
 ### 历史 Revised 改动（截至 2.4.8-revised.8）
 
