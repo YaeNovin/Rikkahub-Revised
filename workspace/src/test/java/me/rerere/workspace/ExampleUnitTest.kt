@@ -72,6 +72,7 @@ class ExampleUnitTest {
         val installer = RootfsInstaller(manager)
         val archive = tarGz(
             TarTestEntry("bin/", type = '5'),
+            TarTestEntry("bin/sh", content = "#!/bin/sh\n".toByteArray(), mode = 493),
             TarTestEntry("bin/hello", content = "echo hello\n".toByteArray(), mode = 493),
             TarTestEntry("usr/bin/hello-link", type = '2', linkName = "../../bin/hello"),
         )
@@ -86,6 +87,7 @@ class ExampleUnitTest {
             installer.install(root, "http://127.0.0.1:${server.address.port}/rootfs.tar.gz")
 
             val linuxDir = manager.linuxDir(root)
+            assertTrue(manager.hasRootfs(root))
             assertEquals("echo hello\n", File(linuxDir, "bin/hello").readText())
             assertTrue(File(linuxDir, "bin/hello").canExecute())
             assertTrue(Files.isSymbolicLink(File(linuxDir, "usr/bin/hello-link").toPath()))
