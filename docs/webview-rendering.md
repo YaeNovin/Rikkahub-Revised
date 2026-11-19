@@ -60,7 +60,9 @@
 - 连续视图更新只合并最新操作，不反复取消并把创建任务放回消息队列尾部。Markdown/HTML 原生解析异常显示可重试提示，不一直保留占位状态。
 - 验证：`HtmlLoadingRegressionTest` 和 `scripts/verify-html-loading.cjs`，覆盖离线、缺库、旧数组 API、无效 Mermaid、原文保留及超时归属。浏览器测试不等同于 Android 原生超时和触摸测试。
 
-## 普通 HTML 中的图形依赖
+## 普通 HTML 中的图形依赖（历史行为，已停用）
+
+2026-09-23 起，普通 HTML 默认源码、手动预览仅允许静态内容，不再自动补齐或执行作者脚本。请使用专用格式或 `render_content`，见[当前策略](rendering-tools-and-html-policy.md)。以下保留为历史修复记录；当前依赖回归脚本检查的是脚本不会恢复执行。
 
 控制台中的 `vegaEmbed is not defined`、`opensheetmusicdisplay is not defined`、`SmilesDrawer is not defined` 暴露出普通 HTML 预览与专用图形代码块之间的加载缺口。渲染库已在安装包内，之前普通 HTML 仅添加手机布局样式，未接入这些依赖。
 
@@ -79,7 +81,9 @@
 - 流式输出自动跟随在延迟校正前后都会重新确认用户仍位于底部。只要用户开始上下滑动，旧校正立即失效；回到底部后才重新接管。回答完成时保留同一条消息的内容树和代码块状态，不再因启用文本选择或 `animateContentSize` 让消息闪现并把视口拉到开头。
 - 这些变更不会替换用户明确声明的非图形 JSON 语言，也不会把任意 JavaScript 当作地图或图表执行。`StreamingSelectionRegressionTest` 和 `ChatPreviewReturnRegressionTest` 是 Android 设备回归用例；当前仅完成编译，未替代真机滑动测试。
 
-## Graphviz HTML 兼容
+## Graphviz HTML 兼容（历史行为，已停用）
+
+当前使用 `dot` / `graphviz` 专用渲染或统一工具，不在普通 HTML 中激活此兼容层。
 
 普通 HTML 直接使用旧版 `hpccWasm.graphviz.layout()` 或 `.dot()` 时，页面会因当前模块版 Graphviz 只导出 `Graphviz` 而出现 `hpccWasm is not defined`。HTML 依赖扫描现在识别该调用并注入本地 `graphviz-compat.js`，提供同名兼容外观，首次调用时再动态加载现有 `graphviz.min.js` WASM 模块。模块脚本、未知版本和任意外部 Graphviz 包仍保持原样；兼容层只接受字符串 DOT 和有限的布局参数，不执行页面任意代码。
 

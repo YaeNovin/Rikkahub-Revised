@@ -1,6 +1,6 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-09-15
+Notice date: 2026-11-19
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
@@ -11,6 +11,13 @@ upstream `2.4.8` tag at commit
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2026-11-19 未发布源码整合
+
+整合后续模型协议与搜索工具、聊天取消与恢复、日志规范化、外观取色、
+富文本引用和原生表格等开发改动，并保留远端组件分支的用户消息与抽屉修复。
+统一自有源码换行规则，排除本机资料与安装包，清理失效文档和无引用图片。
+范围及验证记录见[源码同步说明](source-sync-20261119.md)。本次不发布正式版安装包。
 
 ## 2026-09-15 正式版 2.4.8-revised.9
 

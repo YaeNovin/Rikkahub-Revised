@@ -2,11 +2,23 @@
 
 核对日期：2026-09-09。以下是代码中已经接入的渲染能力，并非可由用户自行安装的插件商店。
 
+2026-09-23 开发增补（未发布）：新增[聊天内只读终端展示](chat-terminal-preview.md)，
+使用本地 xterm 6.0.0 与 FitAddon 0.11.0，识别 `ansi` / `terminal` / `xterm` /
+`console-output` 代码块，并复用于已有工具结果的 stdout/stderr。不提供交互式终端或 PTY。
+
+同日增补：[统一渲染工具与 HTML 安全策略](rendering-tools-and-html-policy.md)。HTML 默认源码，点击后只显示静态安全预览；裸 HTML 不再按原生 HTML 排版。下文中更早的任意 HTML 脚本加载说明属于历史行为，专用图表入口继续保留。
+
 ## 当前已有能力
+
+2026-09-24 增补：[数理绘图与法阵](math-plot-and-sigil.md)。新增 `math_plot`（含 `math_plan` 别名）的 JSXGraph 受限表达式绘图，以及 SVG 参数化 `sigil`，不是任意 JSXGraph/HTML 脚本运行入口。
+
+后续增补：[程序化纹样](procedural-patterns.md)。新增 `pattern` 专用 p5.js Canvas 2D 渲染，支持曼陀罗、玫瑰线、分形及共享径向图层；只接受预设 JSON，不执行作者 p5 脚本。
+
+动态增补：[法阵/纹样特效与 Android 性能](decorative-effects-and-performance.md)。共享星尘、粒子拖尾、逐层展开和旋转，保留屏幕硬件/导出软件路径并实现有界缓存和自适应降质。
 
 | 能力 | 当前实现 | 入口 / 输入与边界 |
 | --- | --- | --- |
-| Markdown、表格、任务列表、引用与基础 HTML | JetBrains Markdown、Jsoup、Compose 原生组件 | 普通聊天正文；表格等复用富内容表面 |
+| Markdown、表格、任务列表、引用与基础 HTML | JetBrains Markdown、Jsoup、Compose 原生组件 | 普通聊天正文；表格支持列对齐、换行与宽表滑动，见[表格指南](markdown-tables.md) |
 | 流程图、时序图、思维导图等 | 本地 Mermaid 10.9.8 | `mermaid` 代码块；支持的图形语法受打包版本限制 |
 | 折线、柱状、雷达、蜡烛、散点等图表 | 本地 Apache ECharts 5.5.0 | `echarts` / `chart`；也可识别特定 JSON/JS 配置；这些图表不是各自独立的插件 |
 | 地理图与 GeoJSON | 本地 Leaflet 1.9.4；ECharts 也有地图能力 | `leaflet` / `map` / `geojson`；默认本地世界轮廓底图，无需联网，不含街道。可显式指定在线 `tileUrl`，失败回退离线概览；`basemap: false` 关闭底图 |
@@ -91,3 +103,13 @@ CC(=O)Oc1ccccc1C(=O)O
 - 徽章依然需要首次联网获取，库离线打包并不等于任意远程徽章可以在离线首次显示。
 
 `AdditionalRendererTest` 覆盖入口识别和徽章策略，`verify-additional-renderers.cjs` 使用项目内置库在浏览器中检查渲染及错误路径；`BadgeDecoderTest` 提供 Android SVG 尺寸和预览像素测试，须在设备上执行。只编译此用例不等于已完成真机验证。
+
+### Markdown 代码块内的徽章（2026-10-02）
+
+- `markdown` / `md` / `gfm` / `text/markdown` 围栏闭合后，可在原代码块内选择性显示已知徽章服务的 Markdown 图片。支持直接图片、带链接图片、引用式图片及同行多个徽章。
+- 保留外框、语言标题、行号、折叠和换行设置；只替换徽章表达式的视觉显示。注释、普通文字、标题语法、其他图片、参考链接定义和内层代码仍然是源码，不把整块内容变为 Markdown 正文。
+- 复用工具栏的预览/源码切换；复制和保存始终使用完整原文。图片使用已有 Coil/SVG、链接操作、错误重试和日志链路，聊天图片导出继续等待加载完成。
+- 反引号、内层围栏、缩进代码和 HTML 注释中的示例不触发；原始 HTML `<img>` 不触发，其他语言不受影响。不创建 WebView、不执行脚本，也不放宽 HTML 策略。
+- 后台解析，最多 64 Ki 字符、32 个徽章；超过范围的内容仍保留源码。结果缓存最多 24 条 / 512 Ki 原文字符。首次显示远程徽章仍需网络，不能识别或加载失败时可切回完整源码。
+- `MarkdownFenceBadgesTest` 覆盖 11 个解析/原文/边界用例；`MarkdownFenceBadgesDeviceTest` 使用模拟 HTTP 响应，检验真实 SVG 解码、紧凑尺寸、浅深色、源码切换和横向滚动。模拟响应测试不代表真实徽章服务的网络可用性。
+- 本轮验证：41 项相关 JVM 测试通过；vivo V2301A / API 36 独立界面用例通过，浅色预览、源码和深色不换行截图已检查。报告与截图位于 `app/build/outputs/markdown-badges/`。没有覆盖安装用户 QA。

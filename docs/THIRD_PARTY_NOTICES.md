@@ -131,3 +131,77 @@ and `markdown-it-katex-1.1.2.txt`.
 and `--alias:katex=./scripts/katex-browser-global.cjs`. The adapter shares the
 page's KaTeX instance so the mhchem extension remains available. Its SHA-256 is
 `a3beaaf7c426689b8d600f266ef6bb70591a38e8a2cbdd0a14573955eacf653e`.
+
+## Read-only terminal preview (2026-09-23)
+
+These unchanged, pinned npm distributions are packaged for the Android chat's
+read-only terminal renderer. They are not automatically injected into arbitrary
+HTML previews, and no socket/PTY attachment addon is included. The previously
+shared `xterm.min.js` 5.3.0 file is not the bundled runtime.
+
+| Local asset under `html/renderers` | Component/version | Fixed source | SHA-256 |
+| --- | --- | --- | --- |
+| `xterm-6.0.0.js` | @xterm/xterm 6.0.0 | `https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.js` | `14903579ff54664cd72f8e8699e6961a6272c21863ec1c3b118cdc8af5d4a972` |
+| `xterm-6.0.0.css` | @xterm/xterm 6.0.0 | `https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css` | `854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6` |
+| `xterm-addon-fit-0.11.0.js` | @xterm/addon-fit 0.11.0 | `https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.js` | `ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527` |
+
+Both packages use the MIT license. Full notices are packaged in
+`html/licenses/xterm-6.0.0-MIT.txt` and
+`html/licenses/xterm-addon-fit-0.11.0-MIT.txt`, taken from the respective npm
+package's `LICENSE` file. They retain attribution to the xterm.js authors,
+SourceLair Private Company and Christopher Jeffrey as specified upstream.
+The project's `terminal-preview.js` adapter is separate from these vendor files.
+`TerminalPreviewTest` checks all three vendor hashes and the license presence.
+
+## JSXGraph math renderer (2026-09-24)
+
+The dedicated `math_plot` renderer packages the unchanged JSXGraph 1.13.3
+browser distribution. JSXGraph is dual-licensed MIT / LGPL-3.0-or-later; this
+distribution uses the MIT option and retains the original bundle header and
+full `LICENSE.MIT` text at `html/licenses/jsxgraph-1.13.3-MIT.txt`.
+It is not injected into arbitrary HTML and the JSXGraph/JessieCode scripting
+interfaces are not exposed to model input. No npm install or recursive package
+dependencies are needed at runtime.
+
+| Local asset under `html/renderers` | Fixed source | SHA-256 |
+| --- | --- | --- |
+| `jsxgraph-1.13.3.js` | `https://cdn.jsdelivr.net/npm/jsxgraph@1.13.3/distrib/jsxgraphcore.js` | `4e196b10dc77e22ec0eda897e0271636edf8dadd91d76cc2cf2e136c61c35537` |
+| `jsxgraph-1.13.3.css` | `https://cdn.jsdelivr.net/npm/jsxgraph@1.13.3/distrib/jsxgraph.css` | `86e8f917ba2b4bc1b979375808cc4d1aeda8b0fddb4b23a96cfee9ccc870b8b8` |
+
+The MIT notice comes from `https://cdn.jsdelivr.net/npm/jsxgraph@1.13.3/LICENSE.MIT`.
+Upstream source and documentation: [JSXGraph repository](https://github.com/jsxgraph/jsxgraph)
+and [API reference](https://jsxgraph.org/docs/). Package metadata was checked at
+`https://registry.npmjs.org/jsxgraph/1.13.3`. The project's mathematical AST,
+sampling code, SVG sigil generator and `geometry-preview.js` controller are
+separate from the vendor distribution. `GeometryPreviewTest` checks the vendor
+hashes and packaged license.
+
+## p5.js decorative patterns
+
+The dedicated `pattern` renderer bundles the unmodified **p5.js 1.11.11**
+browser distribution, licensed LGPL-2.1. It is not injected into author HTML,
+math_plot or sigil. Only app-owned Canvas 2D drawing code invokes it; user p5
+sketches, p5.sound, camera/microphone access and WebGL are not enabled.
+The previously shared temporary p5.js 1.9.0 file is not used.
+
+| Local asset under `html/renderers` | Fixed source | SHA-256 |
+| --- | --- | --- |
+| `p5-1.11.11.min.js` | `https://unpkg.com/p5@1.11.11/lib/p5.min.js` | `1343f616bf9914da8253faae00201ea5f72772916998bc6add4c2a07e00a662c` |
+
+Version and license metadata were checked at
+`https://registry.npmjs.org/p5/1.11.11`. The original version header is retained.
+The full license from `https://unpkg.com/p5@1.11.11/license.txt` and provenance
+notice are packaged as `html/licenses/p5-1.11.11-LGPL-2.1.txt` and
+`html/licenses/p5-1.11.11-NOTICE.txt`. The jsDelivr download timed out; the
+successful file is from unpkg's fixed version of the same npm package.
+
+Corresponding upstream source and build instructions are available at
+[p5.js v1.11.11](https://github.com/processing/p5.js/tree/v1.11.11), with a
+[source archive](https://github.com/processing/p5.js/archive/refs/tags/v1.11.11.tar.gz).
+The [readable browser bundle](https://unpkg.com/p5@1.11.11/lib/p5.js) is also
+available. Redistributors must retain the LGPL notices and fulfill the
+corresponding-source and library-modification requirements when publishing
+binary packages; listing an upstream URL alone is not a substitute for those
+distribution obligations. The library remains a separate asset, not merged
+into application-owned scripts. `PatternPreviewTest` checks its pinned hash
+and license presence. App adapters and shared geometry code are separate files.
