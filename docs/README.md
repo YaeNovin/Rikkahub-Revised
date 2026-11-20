@@ -1,6 +1,6 @@
 # 文档索引
 
-更新：2026-11-19。当前正式版为 `2.4.8-revised.10`，见[发行说明](release-notes-2.4.8-revised.10.md)和[验证记录](release-verification-2.4.8-revised.10.md)。后续审阅和未完成事项见 [开发状态与文档范围](development-status.md)。
+更新：2026-11-20。当前正式版为 `2.4.8-revised.11`，见[发行说明](release-notes-2.4.8-revised.11.md)和[验证记录](release-verification-2.4.8-revised.11.md)。后续审阅和未完成事项见 [开发状态与文档范围](development-status.md)。
 
 本次源码整合、换行规则及旧文档/图片删除范围见[同步与清理记录](source-sync-20261119.md)。
 
@@ -38,6 +38,7 @@
 
 ## 发行、归属与历史
 
+- [2.4.8-revised.11 发行说明](release-notes-2.4.8-revised.11.md)及[验证边界](release-verification-2.4.8-revised.11.md)
 - [2.4.8-revised.10 发行说明](release-notes-2.4.8-revised.10.md)及[验证边界](release-verification-2.4.8-revised.10.md)
 - [2.4.8-revised.9 发行说明](release-notes-2.4.8-revised.9.md)及[验证边界](release-verification-2.4.8-revised.9.md)
 - [2.4.8-revised.8](release-notes-2.4.8-revised.8.md)、[2.4.8-revised.7](release-notes-2.4.8-revised.7.md)

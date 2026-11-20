@@ -32,6 +32,7 @@ Feature availability depends on the model, protocol, and preview surface. See th
 <details>
 <summary>📚 Release history and upstream baseline</summary>
 
+- [2.4.8-revised.11 release notes](docs/release-notes-2.4.8-revised.11.md) and [verification record](docs/release-verification-2.4.8-revised.11.md)
 - [2.4.8-revised.10 release notes](docs/release-notes-2.4.8-revised.10.md) and [verification record](docs/release-verification-2.4.8-revised.10.md)
 - [All releases](https://github.com/YaeNovin/Rikkahub-Revised/releases) and [modification record](docs/MODIFICATIONS.md)
 - The upstream baseline for this release line is [RikkaHub 2.4.8 at `8824e0e8`](https://github.com/rikkahub/rikkahub/commit/8824e0e841f2008b322ca8214a27a978e4b4abaa).

@@ -1,6 +1,6 @@
 # 开发状态与文档范围
 
-更新：2026-11-19。当前正式版本为 [2.4.8-revised.10](release-notes-2.4.8-revised.10.md)，其发布验证见[验证记录](release-verification-2.4.8-revised.10.md)。带日期的审阅仍保留未完成事项，不能将其中的建议视为已实现功能。
+更新：2026-11-20。当前正式版本为 [2.4.8-revised.11](release-notes-2.4.8-revised.11.md)，其发布验证见[验证记录](release-verification-2.4.8-revised.11.md)。带日期的审阅仍保留未完成事项，不能将其中的建议视为已实现功能。
 
 ## 当前维护入口
 

@@ -32,6 +32,7 @@
 <details>
 <summary>📚 版本记录与上游基线</summary>
 
+- [2.4.8-revised.11 发行说明](docs/release-notes-2.4.8-revised.11.md)和[验证记录](docs/release-verification-2.4.8-revised.11.md)
 - [2.4.8-revised.10 发行说明](docs/release-notes-2.4.8-revised.10.md)和[验证记录](docs/release-verification-2.4.8-revised.10.md)
 - [完整发行记录](https://github.com/YaeNovin/Rikkahub-Revised/releases)和[修改声明](docs/MODIFICATIONS.md)
 - 本发行系列的上游基线为 [RikkaHub 2.4.8 的 `8824e0e8`](https://github.com/rikkahub/rikkahub/commit/8824e0e841f2008b322ca8214a27a978e4b4abaa)。

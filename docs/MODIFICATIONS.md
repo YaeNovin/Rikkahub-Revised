@@ -1,16 +1,30 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-11-19
+Notice date: 2026-11-20
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.10`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.11`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2026-11-20 正式版 2.4.8-revised.11 / Release 2.4.8-revised.11
+
+将 Android 富文本、链接交互、曲谱和终端预览等后续改动收入 `2.4.8-revised.11`，
+版本码 187，沿用现有正式应用 ID 和签名。发布 ARM64 APK 与 SHA-256 校验文件，
+Desktop 和 Three.js 本地实验不包含在发布源码与安装包中。
+面向用户的中英双语[更新说明](release-notes-2.4.8-revised.11.md)与
+[发布验证](release-verification-2.4.8-revised.11.md)分别维护。
+
+This release includes subsequent Android rich-text, link-interaction, music-score,
+and terminal-preview changes as `2.4.8-revised.11`, version code 187, using the
+existing application ID and signing identity. It provides an ARM64 APK and
+SHA-256 checksums, excluding local Desktop and Three.js experiments. Bilingual
+user-facing notes and verification results are maintained separately.
 
 ## 2026-11-19 正式版 2.4.8-revised.10 / Release 2.4.8-revised.10
 
