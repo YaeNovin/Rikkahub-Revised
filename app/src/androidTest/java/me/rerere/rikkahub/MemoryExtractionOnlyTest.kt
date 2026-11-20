@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.ConversationMemoryMode
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.memoryAssistant
+import me.rerere.rikkahub.data.model.memoryEmbeddingKey
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -88,7 +89,35 @@ class MemoryExtractionOnlyTest {
         }
     }
 
-    private inner class Harness(cancelDuringRequest: Boolean = false) : AutoCloseable {
+    @Test fun assistantClearDiscardsLateExtractionButAllowsAFreshRequest() = runBlocking {
+        Harness(clearDuringRequest = true).use { h ->
+            val effective = h.conversation.memoryAssistant(h.assistant, h.settings)
+            assertTrue(runCatching { h.extractor.extractAndPersist(h.settings, effective, h.conversation.id.toString(), h.messages) }.exceptionOrNull() is CancellationException)
+            assertTrue(h.repository.getMemoriesOfAssistant(h.assistant.id.toString()).isEmpty())
+            val next = h.extractor.extractAndPersist(h.settings, effective, h.conversation.id.toString(), h.messages)
+            assertTrue(next is MemoryExtractionOutcome.Saved)
+            assertEquals(1, h.repository.getMemoriesOfAssistant(h.assistant.id.toString()).size)
+        }
+    }
+
+    @Test fun slowEmbeddingQueryUsesLexicalMemoryWithinTheSharedBudget() = runBlocking {
+        Harness(slowQuery = true).use { h ->
+            val memory = h.repository.addMemory(h.assistant.id.toString(), "Prefers short answers")
+            val provider = h.settings.providers.single()
+            val key = memoryEmbeddingKey(h.embedding, provider)
+            h.repository.prepareEmbedding(memory, key)
+            h.repository.updateEmbedding(memory.id, ByteArray(8), h.embedding.id.toString(), 2, memory.content, key)
+            val query = listOf(UIMessage.user("short answers"))
+            val start = System.nanoTime()
+            val transformed = MemoryRetrievalTransformer(h.repository, h.providers, h.indexer).transform(
+                TransformerContext(context, h.chat, h.assistant, h.settings, conversationId = h.conversation.id, conversationMessages = query), query)
+            assertTrue("Slow vector request must not consume the provider's full timeout", (System.nanoTime() - start) / 1_000_000 < 3_000)
+            assertEquals(1, h.vectorCalls.get())
+            assertTrue(transformed.any { it.toText().contains("Prefers short answers") })
+        }
+    }
+
+    private inner class Harness(cancelDuringRequest: Boolean = false, clearDuringRequest: Boolean = false, slowQuery: Boolean = false) : AutoCloseable {
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         val chat = Model(modelId = "test-extractor", type = ModelType.CHAT)
         val embedding = Model(modelId = "test-embedding", type = ModelType.EMBEDDING)
@@ -104,9 +133,15 @@ class MemoryExtractionOnlyTest {
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val body = if (chain.request().url.encodedPath.endsWith("/embeddings")) {
                 vectorCalls.incrementAndGet()
+                if (slowQuery) {
+                    val deadline = System.nanoTime() + 4_000_000_000L
+                    while (!chain.call().isCanceled() && System.nanoTime() < deadline) Thread.sleep(10)
+                    if (chain.call().isCanceled()) throw java.io.IOException("Cancelled fixture query")
+                }
                 """{"data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"model":"test-embedding","usage":{"prompt_tokens":5,"total_tokens":5}}"""
             } else {
-                chatCalls.incrementAndGet()
+                val call = chatCalls.incrementAndGet()
+                if (clearDuringRequest && call == 1) runBlocking { repository.deleteMemoriesOfAssistant(assistant.id.toString()) }
                 if (cancelDuringRequest) allowed.set(false)
                 buildJsonObject {
                     put("id", "test-completion")

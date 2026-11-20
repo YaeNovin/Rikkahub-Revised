@@ -4,8 +4,6 @@ import kotlinx.coroutines.CancellationException
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -31,7 +29,7 @@ import me.rerere.rikkahub.data.model.MemoryLifecycleState
 import me.rerere.rikkahub.data.model.MemoryType
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
+import me.rerere.rikkahub.data.repository.MemoryWriteEpoch
 
 private const val TAG = "MemoryExtraction"
 private const val MAX_CONTEXT_MESSAGES = 8
@@ -136,7 +134,7 @@ class MemoryExtractionService(
     private val conversationMemoryDAO: ConversationMemoryDAO,
     private val json: Json,
 ) {
-    private val conversationLocks = ConcurrentHashMap<String, Mutex>()
+    private val conversationLocks = MemoryTaskLocks()
 
     internal suspend fun processPending(
         settings: Settings,
@@ -148,8 +146,10 @@ class MemoryExtractionService(
         isAllowed: () -> Boolean = { true },
         onStarted: () -> Unit,
     ): MemoryExtractionProcessResult = withContext(Dispatchers.IO) {
-        conversationLocks.getOrPut(conversationId) { Mutex() }.withLock {
-            if (!isAllowed()) return@withLock MemoryExtractionProcessResult.Skipped
+        val owner = if (assistant.useGlobalMemory) MemoryRepository.GLOBAL_MEMORY_ID else assistant.id.toString()
+        val writeEpoch = memoryRepository.captureWriteEpoch(owner)
+        conversationLocks.withLock(conversationId) {
+            if (!isAllowed() || !memoryRepository.isWriteEpochCurrent(writeEpoch)) return@withLock MemoryExtractionProcessResult.Skipped
             val now = System.currentTimeMillis()
             val checkpoint = conversationMemoryDAO.getExtractionCheckpoint(conversationId)
             val assistantId = assistant.id.toString()
@@ -191,14 +191,16 @@ class MemoryExtractionService(
                 )
                 is MemoryExtractionPlan.Run -> {
                     val previous = checkpoint?.takeIf { it.assistantId == assistant.id.toString() }
-                    conversationMemoryDAO.upsertExtractionCheckpoint(
-                        previous?.copy(lastAttemptAt = now)
-                            ?: MemoryExtractionCheckpointEntity(
-                                conversationId = conversationId,
-                                assistantId = assistant.id.toString(),
-                                lastAttemptAt = now,
-                            )
-                    )
+                    memoryRepository.withCurrentWriteEpoch(writeEpoch) {
+                        conversationMemoryDAO.upsertExtractionCheckpoint(
+                            previous?.copy(lastAttemptAt = now)
+                                ?: MemoryExtractionCheckpointEntity(
+                                    conversationId = conversationId,
+                                    assistantId = assistant.id.toString(),
+                                    lastAttemptAt = now,
+                                )
+                        )
+                    }
                     onStarted()
                     val outcome = extractAndPersist(
                         settings = settings,
@@ -206,19 +208,22 @@ class MemoryExtractionService(
                         conversationId = conversationId,
                         messages = plan.messages,
                         isAllowed = isAllowed,
+                        expectedWriteEpoch = writeEpoch,
                     )
-                    if (!isAllowed()) return@withLock MemoryExtractionProcessResult.Skipped
+                    if (!isAllowed() || !memoryRepository.isWriteEpochCurrent(writeEpoch)) return@withLock MemoryExtractionProcessResult.Skipped
                     val completedAt = System.currentTimeMillis()
-                    conversationMemoryDAO.upsertExtractionCheckpoint(
-                        MemoryExtractionCheckpointEntity(
-                            conversationId = conversationId,
-                            assistantId = assistant.id.toString(),
-                            lastUserMessageId = plan.latestUserMessageId,
-                            lastUserContentHash = plan.latestUserContentHash,
-                            lastAttemptAt = now,
-                            lastCompletedAt = completedAt,
+                    memoryRepository.withCurrentWriteEpoch(writeEpoch) {
+                        conversationMemoryDAO.upsertExtractionCheckpoint(
+                            MemoryExtractionCheckpointEntity(
+                                conversationId = conversationId,
+                                assistantId = assistant.id.toString(),
+                                lastUserMessageId = plan.latestUserMessageId,
+                                lastUserContentHash = plan.latestUserContentHash,
+                                lastAttemptAt = now,
+                                lastCompletedAt = completedAt,
+                            )
                         )
-                    )
+                    }
                     MemoryExtractionProcessResult.Processed(outcome)
                 }
             }
@@ -231,8 +236,11 @@ class MemoryExtractionService(
         conversationId: String?,
         messages: List<UIMessage>,
         isAllowed: () -> Boolean = { true },
+        expectedWriteEpoch: MemoryWriteEpoch = memoryRepository.captureWriteEpoch(
+            if (assistant.useGlobalMemory) MemoryRepository.GLOBAL_MEMORY_ID else assistant.id.toString()),
     ): MemoryExtractionOutcome = withContext(Dispatchers.IO) {
-        val writeEpoch = memoryRepository.captureWriteEpoch()
+        val writeEpoch = expectedWriteEpoch
+        if (!isAllowed() || !memoryRepository.isWriteEpochCurrent(writeEpoch)) throw CancellationException("Memory was cleared")
         check(assistant.enableMemory) { "Memory extraction is disabled for this assistant" }
         val model = settings.resolveMemoryExtractionModel()
             ?: error("No enabled chat model is configured for background memory extraction")
@@ -362,6 +370,7 @@ class MemoryExtractionService(
                                         state = MemoryLifecycleState.COMPLETED,
                                         conversationId = conversationId,
                                         expectedRevision = existingMemories.firstOrNull { it.id == id }?.revision,
+                                        expectedWriteEpoch = writeEpoch,
                                     ) != null
                                 ) {
                                     lifecycleChanges++
@@ -403,6 +412,7 @@ class MemoryExtractionService(
                                             supersededByMemoryId = replacementId,
                                             conversationId = conversationId,
                                             expectedRevision = existingMemories.firstOrNull { it.id == id }?.revision,
+                                            expectedWriteEpoch = writeEpoch,
                                         ) != null
                                     ) {
                                         lifecycleChanges++

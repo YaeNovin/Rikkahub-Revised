@@ -61,7 +61,8 @@ class MemoryRetrievalTransformer(
         } else {
             ctx.assistant.id.toString()
         }
-        val records = (if (ctx.assistant.enableMemory) repository.getRecordsForConversation(assistantId, ctx.conversationId?.toString())
+        val records = (if (ctx.assistant.enableMemory) repository.getRecordsForConversation(assistantId, ctx.conversationId?.toString(),
+                activeOnly = true, includeEpisodic = ctx.assistant.enableEpisodicMemory)
             else emptyList())
             .filter { record ->
                 record.memory.content.isNotBlank() &&
@@ -89,9 +90,9 @@ class MemoryRetrievalTransformer(
                 record.embedding?.let { record.embeddingModelId?.let(::parseUuidOrNull) }
             }
         }
-        val queryVectors = vectorModelIds.associateWith { modelId ->
+        val queryVectors = collectMemoryQueryVectors(vectorModelIds) { modelId ->
             generateQueryVector(ctx, modelId, query)
-        }.filterValues { it != null }
+        }
 
         val semanticMatches = semanticSearch(records, queryVectors)
             .filter { (_, score) -> score >= MIN_SEMANTIC_MATCH_SCORE }

@@ -24,6 +24,7 @@
 以下文件保留当时的代码结论和待办，需结合后续实现核对：
 
 - [记忆与对话分支审阅](memory-branch-review-20261120.md)
+- [记忆清除、提取与检索首轮优化](memory-optimization-20261120.md)
 - [AI 模块](ai-module-review-and-roadmap-20261115.md)
 - [日志链路](logging-review-and-roadmap-20261115.md)
 - [Material3 与 Web](material3-web-review-and-roadmap-20261116.md)

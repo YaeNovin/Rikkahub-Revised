@@ -20,6 +20,17 @@ interface MemoryDAO {
     @Query("SELECT * FROM memoryentity WHERE assistant_id = :assistantId")
     suspend fun getMemoriesOfAssistant(assistantId: String): List<MemoryEntity>
 
+    @Query("""
+        SELECT * FROM memoryentity
+        WHERE assistant_id = :assistantId
+          AND (:activeOnly = 0 OR lifecycle_state COLLATE NOCASE NOT IN ('completed', 'superseded', 'superseded_by_newer'))
+          AND (:includeEpisodic = 1 OR memory_type COLLATE NOCASE != 'episodic')
+          AND ((scope_type COLLATE NOCASE IN ('assistant', 'global') AND memory_type COLLATE NOCASE != 'episodic')
+            OR (scope_type = 'conversation' COLLATE NOCASE AND :conversationId IS NOT NULL AND :conversationId != '' AND scope_id = :conversationId))
+    """)
+    suspend fun getMemoriesForConversation(assistantId: String, conversationId: String?, activeOnly: Boolean,
+        includeEpisodic: Boolean): List<MemoryEntity>
+
     @Query("SELECT * FROM memoryentity")
     fun getAllMemoriesFlow(): Flow<List<MemoryEntity>>
 
@@ -35,7 +46,7 @@ interface MemoryDAO {
     @Query(
         "SELECT * FROM memoryentity " +
             "WHERE assistant_id = :assistantId AND memory_type = :memoryType " +
-            "AND (:memoryType = 'fact' OR (scope_type = 'conversation' AND scope_id = :conversationId) OR (scope_type = 'unassigned' AND :conversationId IS NULL)) " +
+            "AND (:memoryType = 'fact' OR (scope_type = 'conversation' COLLATE NOCASE AND scope_id = :conversationId) OR (scope_type = 'unassigned' AND :conversationId IS NULL)) " +
             "AND content = :content COLLATE NOCASE LIMIT 1"
     )
     suspend fun findMemoryByContent(

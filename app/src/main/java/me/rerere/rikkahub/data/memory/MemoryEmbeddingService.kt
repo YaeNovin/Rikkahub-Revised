@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.model.MemoryLifecycleState
 import me.rerere.rikkahub.data.model.MemoryType
 import me.rerere.rikkahub.data.model.memoryEmbeddingKey
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.MemoryWriteEpoch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -62,7 +63,7 @@ class MemoryEmbeddingService(
         lifecycleState: MemoryLifecycleState = MemoryLifecycleState.ACTIVE,
         indexMemory: Boolean = true,
         isAllowed: () -> Boolean = { true },
-        expectedWriteEpoch: Long? = null,
+        expectedWriteEpoch: MemoryWriteEpoch? = null,
         sourceMessageIds: List<String> = emptyList(),
         runId: String? = null,
     ): AssistantMemory? {
@@ -79,7 +80,9 @@ class MemoryEmbeddingService(
                 runId = runId,
             )
         } ?: return null
-        if (indexMemory && isAllowed()) index(memory, settings, isAllowed)
+        if (indexMemory && isAllowed()) index(memory, settings, {
+            isAllowed() && (expectedWriteEpoch == null || repository.isWriteEpochCurrent(expectedWriteEpoch))
+        }, expectedWriteEpoch ?: repository.captureWriteEpoch(assistantId))
         return memory
     }
 
@@ -104,7 +107,8 @@ class MemoryEmbeddingService(
         return memory
     }
 
-    private suspend fun index(memory: AssistantMemory, settings: Settings, isAllowed: () -> Boolean = { true }) {
+    private suspend fun index(memory: AssistantMemory, settings: Settings, isAllowed: () -> Boolean = { true },
+        writeEpoch: MemoryWriteEpoch = repository.captureWriteEpoch()) {
         if (memory.content.isBlank() || !isAllowed()) return
         runCatching {
             val model = settings.resolveEmbeddingModel() ?: return
@@ -112,7 +116,7 @@ class MemoryEmbeddingService(
                 ?.takeIf { it.enabled }
                 ?: error("Embedding provider not found for ${model.modelId}")
             val embeddingKey = memoryEmbeddingKey(model, providerSetting)
-            repository.prepareEmbedding(memory, embeddingKey)
+            repository.withCurrentWriteEpoch(writeEpoch) { repository.prepareEmbedding(memory, embeddingKey) }
             repository.trackRun(memory.sourceConversationId, model.id.toString(), "memory_embedding", memory.contentHash) { runId ->
             val result = providerManager.getProviderByType(providerSetting).generateEmbedding(
                 providerSetting = providerSetting,
@@ -129,14 +133,16 @@ class MemoryEmbeddingService(
                 ?.takeIf { it.isNotEmpty() && it.all(Float::isFinite) }
                 ?: error("Embedding provider returned an empty or invalid vector")
             if (!isAllowed()) throw CancellationException("Memory settings changed")
-            repository.updateEmbedding(
-                id = memory.id,
-                embedding = vector.toByteArray(),
-                modelId = model.id.toString(),
-                dimension = vector.size,
-                expectedContent = memory.content,
-                expectedKey = embeddingKey,
-            )
+            repository.withCurrentWriteEpoch(writeEpoch) {
+                repository.updateEmbedding(
+                    id = memory.id,
+                    embedding = vector.toByteArray(),
+                    modelId = model.id.toString(),
+                    dimension = vector.size,
+                    expectedContent = memory.content,
+                    expectedKey = embeddingKey,
+                )
+            }
             }
         }.onFailure { error ->
             if (error is CancellationException) throw error

@@ -15,19 +15,35 @@ import kotlin.time.Clock
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
+
+class MemoryWriteEpoch internal constructor(
+    internal val global: Long,
+    internal val assistantId: String?,
+    internal val assistant: Long,
+)
 
 class MemoryRepository(private val memoryDAO: MemoryDAO) {
     private val mutationMutex = Mutex()
     private val writeEpoch = AtomicLong()
-    fun captureWriteEpoch(): Long = writeEpoch.get()
-    fun isWriteEpochCurrent(epoch: Long): Boolean = writeEpoch.get() == epoch
-    suspend fun <T> withCurrentWriteEpoch(epoch: Long, action: suspend () -> T): T = mutationMutex.withLock {
+    private val assistantEpochs = ConcurrentHashMap<String, Long>()
+    fun captureWriteEpoch(assistantId: String? = null): MemoryWriteEpoch =
+        MemoryWriteEpoch(writeEpoch.get(), assistantId, assistantId?.let(assistantEpochs::get) ?: 0L)
+    fun isWriteEpochCurrent(epoch: MemoryWriteEpoch): Boolean =
+        writeEpoch.get() == epoch.global && (epoch.assistantId == null || (assistantEpochs[epoch.assistantId] ?: 0L) == epoch.assistant)
+    suspend fun <T> withCurrentWriteEpoch(epoch: MemoryWriteEpoch, action: suspend () -> T): T = mutationMutex.withLock {
         if (!isWriteEpochCurrent(epoch)) throw kotlinx.coroutines.CancellationException("Memory was cleared")
         action()
     }
     suspend fun withBulkDeletion(action: suspend () -> Unit) = mutationMutex.withLock {
-        writeEpoch.incrementAndGet()
-        action()
+        try {
+            action()
+        } finally {
+            // Tasks starting during deletion must also become stale. Writers
+            // wait on mutationMutex until this version is published.
+            writeEpoch.incrementAndGet()
+            assistantEpochs.clear()
+        }
     }
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
@@ -59,10 +75,13 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         }
 
     suspend fun getMemoriesForConversation(assistantId: String, conversationId: String?): List<AssistantMemory> =
-        getMemoriesOfAssistant(assistantId).filter { it.isVisibleInConversation(conversationId) }
+        memoryDAO.getMemoriesForConversation(assistantId, conversationId?.takeUnless(String::isBlank), false, true).map(MemoryEntity::toAssistantMemory)
 
-    suspend fun getRecordsForConversation(assistantId: String, conversationId: String?): List<MemorySearchRecord> =
-        getMemoryRecordsOfAssistant(assistantId).filter { it.memory.isVisibleInConversation(conversationId) }
+    suspend fun getRecordsForConversation(assistantId: String, conversationId: String?, activeOnly: Boolean = false,
+        includeEpisodic: Boolean = true): List<MemorySearchRecord> =
+        memoryDAO.getMemoriesForConversation(assistantId, conversationId?.takeUnless(String::isBlank), activeOnly, includeEpisodic).map { entity ->
+            MemorySearchRecord(entity.toAssistantMemory(), entity.embedding, entity.embeddingModelId, entity.embeddingDimension, entity.embeddingKey)
+        }
 
     suspend fun getSources(uid: String) = memoryDAO.getSources(uid)
     suspend fun getRun(id: String) = memoryDAO.getRun(id)
@@ -99,8 +118,14 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
             .map(MemoryEntity::toAssistantMemory)
     }
 
-    suspend fun deleteMemoriesOfAssistant(assistantId: String) {
-        memoryDAO.deleteMemoriesOfAssistant(assistantId)
+    suspend fun deleteMemoriesOfAssistant(assistantId: String) = mutationMutex.withLock {
+        // Fence already-running/queued extraction for this owner, without
+        // cancelling unrelated assistants or allowing a newly generated UID back in.
+        try {
+            memoryDAO.deleteMemoriesOfAssistant(assistantId)
+        } finally {
+            assistantEpochs.merge(assistantId, 1L, Long::plus)
+        }
     }
 
     suspend fun updateContent(id: Int, content: String): AssistantMemory {
@@ -248,7 +273,7 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         type: MemoryType = MemoryType.FACT,
         sourceConversationId: String? = null,
         lifecycleState: MemoryLifecycleState = MemoryLifecycleState.ACTIVE,
-        expectedWriteEpoch: Long? = null,
+        expectedWriteEpoch: MemoryWriteEpoch? = null,
         sourceMessageIds: List<String> = emptyList(),
         runId: String? = null,
     ): AssistantMemory? = mutationMutex.withLock {
@@ -286,15 +311,17 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         supersededByMemoryId: Int? = null,
         conversationId: String? = null,
         expectedRevision: Long? = null,
-    ): AssistantMemory? {
-        val memory = memoryDAO.getMemoryByIdOfAssistant(id, assistantId)?.toAssistantMemory() ?: return null
-        if (expectedRevision != null && memory.revision != expectedRevision) return null
+        expectedWriteEpoch: MemoryWriteEpoch? = null,
+    ): AssistantMemory? = mutationMutex.withLock {
+        if (expectedWriteEpoch != null && !isWriteEpochCurrent(expectedWriteEpoch)) throw kotlinx.coroutines.CancellationException("Memory was cleared")
+        val memory = memoryDAO.getMemoryByIdOfAssistant(id, assistantId)?.toAssistantMemory() ?: return@withLock null
+        if (expectedRevision != null && memory.revision != expectedRevision) return@withLock null
         if (conversationId != null) {
-            if (!memory.isVisibleInConversation(conversationId)) return null
+            if (!memory.isVisibleInConversation(conversationId)) return@withLock null
         }
         if (supersededByMemoryId != null) {
-            val replacement = memoryDAO.getMemoryByIdOfAssistant(supersededByMemoryId, assistantId)?.toAssistantMemory() ?: return null
-            if (replacement.scopeType != memory.scopeType || replacement.scopeId != memory.scopeId || replacement.id == memory.id) return null
+            val replacement = memoryDAO.getMemoryByIdOfAssistant(supersededByMemoryId, assistantId)?.toAssistantMemory() ?: return@withLock null
+            if (replacement.scopeType != memory.scopeType || replacement.scopeId != memory.scopeId || replacement.id == memory.id) return@withLock null
         }
         val updated = memoryDAO.updateEpisodicLifecycle(
             assistantId = assistantId,
@@ -305,8 +332,8 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
                 .takeIf { state == MemoryLifecycleState.SUPERSEDED },
             expectedRevision = memory.revision,
         )
-        if (updated == 0) return null
-        return memoryDAO.getMemoryByIdOfAssistant(id, assistantId)?.toAssistantMemory()
+        if (updated == 0) return@withLock null
+        memoryDAO.getMemoryByIdOfAssistant(id, assistantId)?.toAssistantMemory()
     }
 
     suspend fun deleteMemory(id: Int): Boolean = memoryDAO.deleteMemory(id) > 0

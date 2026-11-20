@@ -4,6 +4,9 @@ import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.entity.*
 import me.rerere.rikkahub.data.memory.MemoryMaintenanceService
@@ -13,6 +16,84 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MemoryIdentityRegressionTest {
+    @Test fun assistantClearFencesSuspendedWorkWithoutCancellingOtherOwners() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java).build()
+        try {
+            val repo = MemoryRepository(db.memoryDao())
+            repo.addMemory("a", "delete me")
+            val a = repo.captureWriteEpoch("a")
+            val b = repo.captureWriteEpoch("b")
+            val global = repo.captureWriteEpoch(MemoryRepository.GLOBAL_MEMORY_ID)
+            val resume = CompletableDeferred<Unit>()
+            val oldExtraction = async(start = CoroutineStart.UNDISPATCHED) {
+                resume.await()
+                runCatching { repo.addMemoryIfAbsent("a", "late new UID", expectedWriteEpoch = a) }.exceptionOrNull()
+            }
+            repo.deleteMemoriesOfAssistant("a")
+            resume.complete(Unit)
+            assertTrue(oldExtraction.await() is CancellationException)
+            assertTrue(repo.getMemoriesOfAssistant("a").isEmpty())
+            assertTrue(repo.isWriteEpochCurrent(b))
+            assertTrue(repo.isWriteEpochCurrent(global))
+            assertNotNull(repo.addMemoryIfAbsent("b", "unrelated work", expectedWriteEpoch = b))
+            val fresh = repo.captureWriteEpoch("a")
+            val event = repo.addMemoryIfAbsent("a", "new event", MemoryType.EPISODIC, "chat", expectedWriteEpoch = fresh)!!
+            assertTrue(runCatching { repo.updateEpisodicLifecycle("a", event.id, MemoryLifecycleState.COMPLETED,
+                expectedWriteEpoch = a) }.exceptionOrNull() is CancellationException)
+            assertEquals(MemoryLifecycleState.ACTIVE, repo.getMemoriesOfAssistant("a").single().lifecycleState)
+            repo.withBulkDeletion { db.memoryDao().deleteAllMemories() }
+            assertFalse(repo.isWriteEpochCurrent(fresh))
+            assertFalse(repo.isWriteEpochCurrent(b))
+            assertFalse(repo.isWriteEpochCurrent(global))
+        } finally { db.close() }
+    }
+
+    @Test fun sqlRetrievalMatchesScopeRulesAndFiltersLifecycleBeforeLoadingVectors() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java).build()
+        try {
+            val repo = MemoryRepository(db.memoryDao())
+            repo.addMemory("a", "shared fact")
+            repo.addMemory("a", "event A", MemoryType.EPISODIC, "chat-a")
+            repo.addMemory("a", "completed A", MemoryType.EPISODIC, "chat-a", MemoryLifecycleState.COMPLETED)
+            repo.addMemory("a", "event B", MemoryType.EPISODIC, "chat-b")
+            repo.addMemory("a", "unassigned", MemoryType.EPISODIC)
+            repo.addMemory("b", "other assistant")
+            repo.addMemory(MemoryRepository.GLOBAL_MEMORY_ID, "global fact")
+            db.memoryDao().insertMemory(MemoryEntity(assistantId = "a", content = "uppercase event", memoryType = "EPISODIC",
+                scopeType = "CONVERSATION", scopeId = "chat-a", lifecycleState = "ACTIVE"))
+            db.memoryDao().insertMemory(MemoryEntity(assistantId = "a", content = "legacy lifecycle", memoryType = "fact",
+                lifecycleState = "superseded_by_newer"))
+            for (chat in listOf("chat-a", "chat-b", null, " ")) {
+                val expected = repo.getMemoriesOfAssistant("a").filter { it.isVisibleInConversation(chat) }.map { it.id }.toSet()
+                assertEquals(expected, repo.getRecordsForConversation("a", chat).map { it.memory.id }.toSet())
+            }
+            val active = repo.getRecordsForConversation("a", "chat-a", activeOnly = true)
+            assertEquals(setOf("shared fact", "event A", "uppercase event"), active.map { it.memory.content }.toSet())
+            assertEquals(listOf("shared fact"), repo.getRecordsForConversation("a", "chat-a", activeOnly = true, includeEpisodic = false).map { it.memory.content })
+            assertEquals(listOf("global fact"), repo.getRecordsForConversation(MemoryRepository.GLOBAL_MEMORY_ID, "chat-a", activeOnly = true).map { it.memory.content })
+        } finally { db.close() }
+    }
+
+    @Test fun workStartedDuringBulkDeletionCannotWriteAfterItFinishes() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java).build()
+        try {
+            val repo = MemoryRepository(db.memoryDao())
+            val finish = CompletableDeferred<Unit>()
+            val deleting = async(start = CoroutineStart.UNDISPATCHED) {
+                repo.withBulkDeletion {
+                    finish.await()
+                    db.memoryDao().deleteAllMemories()
+                }
+            }
+            val duringClear = repo.captureWriteEpoch("a")
+            finish.complete(Unit)
+            deleting.await()
+            assertFalse(repo.isWriteEpochCurrent(duringClear))
+            assertTrue(runCatching { repo.addMemoryIfAbsent("a", "started while clearing", expectedWriteEpoch = duringClear) }.exceptionOrNull() is CancellationException)
+            assertNotNull(repo.addMemoryIfAbsent("a", "started after clearing", expectedWriteEpoch = repo.captureWriteEpoch("a")))
+        } finally { db.close() }
+    }
+
     @Test fun stableIdentityRevisionSourcesAndDeletionWorkTogether() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java).build()
         try {

@@ -63,7 +63,7 @@ class ConversationMemoryIndexService(
         conversation: Conversation,
         isAllowed: () -> Boolean = { true },
     ) = withContext(Dispatchers.IO) {
-        val writeEpoch = memoryRepository.captureWriteEpoch()
+        val writeEpoch = memoryRepository.captureWriteEpoch(conversation.assistantId.toString())
         if (!isAllowed()) return@withContext
         val drafts = filterExcludedConversationChunks(buildConversationMemoryDrafts(
             conversationId = conversation.id.toString(),
@@ -143,17 +143,19 @@ class ConversationMemoryIndexService(
                     "Embedding provider returned ${result.embeddings.size} vectors for ${batch.size} conversation chunks"
                 }
                 if (!isAllowed() || !memoryRepository.isWriteEpochCurrent(writeEpoch)) throw CancellationException("Memory settings changed or memory was cleared")
-                batch.zip(result.embeddings).forEach { (draft, vector) ->
-                    require(vector.isNotEmpty() && vector.all(Float::isFinite)) {
-                        "Embedding provider returned an empty or invalid conversation vector"
+                memoryRepository.withCurrentWriteEpoch(writeEpoch) {
+                    batch.zip(result.embeddings).forEach { (draft, vector) ->
+                        require(vector.isNotEmpty() && vector.all(Float::isFinite)) {
+                            "Embedding provider returned an empty or invalid conversation vector"
+                        }
+                        dao.updateVectorIfCurrent(
+                            conversationId = draft.conversationId, id = draft.id, contentHash = draft.contentHash,
+                            embedding = vector.toByteArray(),
+                            modelId = modelId,
+                            dimension = vector.size,
+                            expectedKey = embeddingKey,
+                        )
                     }
-                    dao.updateVectorIfCurrent(
-                        conversationId = draft.conversationId, id = draft.id, contentHash = draft.contentHash,
-                        embedding = vector.toByteArray(),
-                        modelId = modelId,
-                        dimension = vector.size,
-                        expectedKey = embeddingKey,
-                    )
                 }
                 }
             }.onFailure { error ->
