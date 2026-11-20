@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
@@ -76,12 +75,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
-import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
 import org.jsoup.Jsoup
@@ -180,6 +178,13 @@ internal fun buildMarkdownDocument(
             if (destination.substringBefore(':').lowercase() in setOf("https", "http", "mailto")) {
                 attributes.filterNot { it?.startsWith("href=") == true } + "href=\"${org.jsoup.nodes.Entities.escape(destination)}\""
             } else attributes
+        } else if (tag.toString() == "li" && node.type == org.intellij.markdown.MarkdownElementTypes.LIST_ITEM) {
+            // The generator emits no input for an empty task item, so keep its own state on the list item.
+            val task = node.children.firstOrNull { it.type == GFMTokenTypes.CHECK_BOX }
+            if (task == null) attributes else {
+                val checked = preprocessed.substring(task.startOffset, task.endOffset).trim().equals("[x]", ignoreCase = true)
+                attributes + "data-rikka-task=\"$checked\""
+            }
         } else if (tag.toString() == "code" &&
             node.type == org.intellij.markdown.MarkdownElementTypes.CODE_FENCE &&
             node.children.none { it.type == org.intellij.markdown.MarkdownTokenTypes.CODE_FENCE_END }
@@ -612,8 +617,13 @@ private fun HtmlListItem(
     level: Int,
 ) {
     val isTaskItem = item.hasClass("task-list-item")
-    val checkboxInput = item.selectFirst("input[type=checkbox]")
-    val isChecked = checkboxInput?.hasAttr("checked") == true
+    val checkboxInput = item.children().firstNotNullOfOrNull { child ->
+        when {
+            child.`is`("input[type=checkbox]") -> child
+            child.normalName() == "p" -> child.children().firstOrNull { it.`is`("input[type=checkbox]") }
+            else -> null
+        }
+    }
 
     HtmlStyledElement(element = item) {
         Column {
@@ -621,28 +631,10 @@ private fun HtmlListItem(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.padding(vertical = 2.dp),
             ) {
-                if (isTaskItem && checkboxInput != null) {
-                    // Checkbox indicator
-                    Surface(
-                        shape = RoundedCornerShape(2.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        modifier = Modifier.padding(end = 4.dp, top = 2.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(2.dp)
-                                .size(LocalTextStyle.current.fontSize.toDp() * 0.8f),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isChecked) {
-                                Icon(
-                                    imageVector = HugeIcons.Tick01,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
+                if (isTaskItem) {
+                    val checked = item.attr("data-rikka-task").toBooleanStrictOrNull()
+                        ?: (checkboxInput?.hasAttr("checked") == true)
+                    MarkdownTaskMarker(checked)
                 } else {
                     Text(
                         text = bulletText,

@@ -33,8 +33,7 @@ private fun htmlSourceBlock(source: String): String {
     return "<pre $RAW_HTML_SOURCE_ATTRIBUTE=\"$encoded\"><code class=\"language-html\">${original.escapeHtml()}</code></pre>\n"
 }
 
-/** Run after protectRawSvg, before generated math/Markdown HTML. Author HTML is
- * source, not native markup. Fenced/indented/inline code is left byte-for-byte intact. */
+/** Preserve plain typographic tag pairs and protect other author HTML as source. */
 internal fun protectRawHtml(content: String): String {
     if ('<' !in content) return content
     // A complete document should not be split into independent head/script/body
@@ -43,11 +42,13 @@ internal fun protectRawHtml(content: String): String {
         return htmlSourceBlock(content)
     }
     val tree = MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
+    val typographyOffsets = plainTypographyTagOffsets(content)
     val replacements = mutableListOf<Pair<IntRange, String>>()
     fun visit(node: ASTNode) {
         if (node.type == MarkdownElementTypes.CODE_SPAN || node.type == MarkdownElementTypes.CODE_FENCE ||
             node.type == MarkdownElementTypes.CODE_BLOCK) return
         if (node.type == MarkdownElementTypes.HTML_BLOCK || node.type == MarkdownTokenTypes.HTML_TAG) {
+            if (node.type == MarkdownTokenTypes.HTML_TAG && node.startOffset in typographyOffsets) return
             val source = content.substring(node.startOffset, node.endOffset)
             // SVG is a separate typed renderer; its WebView input is sanitized as well.
             if (svgPlaceholder.containsMatchIn(source) && '<' !in svgPlaceholder.replace(source, "")) return

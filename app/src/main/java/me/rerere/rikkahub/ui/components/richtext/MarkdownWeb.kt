@@ -29,6 +29,6 @@ internal fun buildMarkdownPreviewHtml(htmlTemplate: String, markdown: String, co
         .replace("{{PRIMARY_COLOR}}", colorScheme.primary.toCssHex())
         .replace("{{OUTLINE_COLOR}}", colorScheme.outline.toCssHex())
         .replace("{{OUTLINE_VARIANT_COLOR}}", colorScheme.outlineVariant.toCssHex())
-        .replace("{{MARKDOWN_BASE64}}", markdown.base64Encode())
+        .replace("{{MARKDOWN_BASE64}}", normalizeMarkdownProseLinks(markdown, linkEmails = false).base64Encode())
         .replace("{{MARKDOWN_FALLBACK}}", markdown.escapeHtml())
 }

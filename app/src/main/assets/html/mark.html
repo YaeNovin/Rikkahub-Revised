@@ -181,6 +181,14 @@
             margin-right: 8px;
         }
 
+        .markdown-alert {
+            border-inline-start-color: {{PRIMARY_COLOR}};
+        }
+        .markdown-alert-title {
+            color: {{PRIMARY_COLOR}};
+            font-weight: 600;
+        }
+
         /* Theme colors are dynamically replaced by the Android app */
     </style>
 </head>
@@ -259,10 +267,89 @@
         md.use(vscodemarkdownItKatex, { katex });
 
         md.use(markdownItTaskLists, {
-            enabled: true,
-            label: true,
-            labelAfter: true
+            enabled: false
         });
+
+        // Recognize plain typography pairs without enabling author HTML.
+        md.inline.ruler.before('html_inline', 'plain_typography', function(state, silent) {
+            if (state.src[state.pos] !== '<') return false;
+            const match = /^<(sup|sub|kbd)>([^<>\\\x60\r\n]+)<\/\1>/i.exec(state.src.slice(state.pos, state.posMax));
+            if (!match) return false;
+            if (!silent) {
+                const tag = match[1].toLowerCase();
+                state.push('typography_open', tag, 1);
+                state.push('text', '', 0).content = md.utils.unescapeAll(match[2]);
+                state.push('typography_close', tag, -1);
+            }
+            state.pos += match[0].length;
+            return true;
+        });
+
+        // Each delimiter run is one token. Pair one and two tildes separately.
+        const strikeMarkers = { 1: 0x7E, 2: 0x17E };
+        md.inline.ruler.at('strikethrough', function(state, silent) {
+            if (silent || state.src[state.pos] !== '~') return false;
+            let scan = state.scanDelims(state.pos, true);
+            if (scan.length === 1) scan = state.scanDelims(state.pos, false);
+            const marker = strikeMarkers[scan.length];
+            if (marker === undefined) {
+                state.pending += '~'.repeat(scan.length);
+            } else {
+                state.push('text', '', 0).content = '~'.repeat(scan.length);
+                state.delimiters.push({ marker, length: 0, token: state.tokens.length - 1,
+                    end: -1, open: scan.can_open, close: scan.can_close });
+            }
+            state.pos += scan.length;
+            return true;
+        });
+        md.inline.ruler2.at('strikethrough', function(state) {
+            function apply(delimiters) {
+                for (const start of delimiters) {
+                    if ((start.marker !== strikeMarkers[1] && start.marker !== strikeMarkers[2]) || start.end < 0) continue;
+                    const opening = state.tokens[start.token];
+                    const closing = state.tokens[delimiters[start.end].token];
+                    Object.assign(opening, { type: 's_open', tag: 's', nesting: 1, markup: opening.content, content: '' });
+                    Object.assign(closing, { type: 's_close', tag: 's', nesting: -1, markup: closing.content, content: '' });
+                }
+            }
+            apply(state.delimiters);
+            for (const meta of state.tokens_meta) {
+                if (meta && meta.delimiters) apply(meta.delimiters);
+            }
+        });
+
+        md.core.ruler.after('inline', 'blockquote_alerts', function(state) {
+            for (let index = 0; index + 2 < state.tokens.length; index++) {
+                const quote = state.tokens[index];
+                if (quote.type !== 'blockquote_open') continue;
+                const paragraph = state.tokens[index + 1];
+                const inline = state.tokens[index + 2];
+                if (paragraph.type !== 'paragraph_open' || inline.type !== 'inline') continue;
+                const match = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\r?\n|$)/i.exec(inline.content);
+                if (!match) continue;
+                const name = match[1].toLowerCase();
+                quote.attrJoin('class', 'markdown-alert');
+                quote.meta = { alertTitle: name[0].toUpperCase() + name.slice(1) };
+                inline.content = inline.content.slice(match[0].length);
+                inline.children = [];
+                state.md.inline.parse(inline.content, state.md, state.env, inline.children);
+            }
+        });
+        md.renderer.rules.blockquote_open = function(tokens, index, options, env, renderer) {
+            const tag = renderer.renderToken(tokens, index, options);
+            const title = tokens[index].meta?.alertTitle;
+            return title ? tag + '<div class="markdown-alert-title">' + md.utils.escapeHtml(title) + '</div>' : tag;
+        };
+
+        md.renderer.rules.link_open = function(tokens, index, options, env, renderer) {
+            const link = tokens[index];
+            const next = tokens[index + 1];
+            const href = link.attrGet('href');
+            if (link.markup === 'linkify' && /^http:\/\/www\./i.test(href || '') && /^www\./i.test(next?.content || '')) {
+                link.attrSet('href', href.replace(/^http:/i, 'https:'));
+            }
+            return renderer.renderToken(tokens, index, options);
+        };
 
         // Add custom renderer for mermaid
         const defaultFenceRenderer = md.renderer.rules.fence || function(tokens, idx, options, env, renderer) {

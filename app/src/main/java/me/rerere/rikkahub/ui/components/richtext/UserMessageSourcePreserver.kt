@@ -17,7 +17,7 @@ internal fun preprocessMarkdownContent(
         rawSvgProtected
     }
     val safeSource = if (renderMode == MarkdownRenderMode.USER_MESSAGE) sourceProtected else protectRawHtml(sourceProtected)
-    return normalizeMarkdownLatex(normalizeMarkdownCitations(safeSource))
+    return normalizeMarkdownLatex(normalizeMarkdownCitations(normalizeMarkdownProseLinks(safeSource)))
 }
 
 /**
@@ -68,6 +68,8 @@ private val SOURCE_ONLY_DELIMITER_REGEX = Regex(
 private val SOURCE_CONTEXT_PREFIX_REGEX = Regex("""^(?://|/\*|\*|#|--|;|<!--|@\w|\[\w|[-+>]\s|\d+[.)]\s)""")
 private val SOURCE_FENCE_REGEX = Regex("^ {0,3}(`{3,}|~{3,})(.*)$")
 private val SOURCE_BACKTICK_RUN_REGEX = Regex("`+")
+private val ALERT_QUOTE_START = Regex("""^ {0,3}>[ \t]*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)](?:[ \t]|$)""", RegexOption.IGNORE_CASE)
+private val BLOCKQUOTE_LINE = Regex("^ {0,3}>")
 
 private data class SourceSignal(
     val score: Int,
@@ -132,6 +134,15 @@ private fun fenceProbableSourceBlocks(content: String): String {
     if (lines.isEmpty()) return normalized
 
     val protected = fencedLines(lines)
+    var inAlert = false
+    for ((index, line) in lines.withIndex()) {
+        if (protected[index]) {
+            inAlert = false
+        } else {
+            inAlert = ALERT_QUOTE_START.containsMatchIn(line) || (inAlert && BLOCKQUOTE_LINE.containsMatchIn(line))
+            if (inAlert) protected[index] = true
+        }
+    }
     val signals = lines.mapIndexed { index, line ->
         if (protected[index]) SourceSignal(0, false) else sourceSignal(line)
     }

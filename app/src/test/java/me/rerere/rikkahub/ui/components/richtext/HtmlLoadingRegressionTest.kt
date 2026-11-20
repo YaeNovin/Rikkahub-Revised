@@ -30,8 +30,21 @@ class HtmlLoadingRegressionTest {
         val markdown = """
             # Offline 中文预览
 
-            - [x] Ready
+            - [X] Ready
             - [ ] Pending
+
+            H<sub>2</sub>O and x<sup>2</sup>, press <kbd>K</kbd>.
+
+            ~single~ ~~double~~ ~~~literal~~~ H~2~O
+
+            > [!WARNING]
+            > Check **this**.
+
+            www.example.org
+
+            Alpha[^note].
+
+            [^note]: example
 
             Inline ${'$'} x^2 + y^2 = z^2 ${'$'}.
 

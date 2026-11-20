@@ -64,6 +64,11 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -708,31 +713,6 @@ private fun MarkdownNode(
             )
         }
 
-        // Checkbox
-        GFMTokenTypes.CHECK_BOX -> {
-            val isChecked = node.getTextInNode(content).trim() == "[x]"
-            Surface(
-                shape = RoundedCornerShape(2.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                modifier = modifier,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .padding(2.dp)
-                        .size(LocalTextStyle.current.fontSize.toDp() * 0.8f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isChecked) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-        }
-
         // 引用块
         MarkdownElementTypes.BLOCK_QUOTE -> {
             ProvideTextStyle(LocalTextStyle.current.copy(fontStyle = FontStyle.Italic)) {
@@ -1020,17 +1000,23 @@ private fun ListItemNode(
         val (directContent, nestedLists) = separateContentAndLists(node)
         // directContent 渲染处理
         if (directContent.isNotEmpty()) {
+            val task = directContent.firstOrNull { it.type == GFMTokenTypes.CHECK_BOX }
             Row {
-                Text(
-                    text = bulletText,
-                    modifier = Modifier.alignByBaseline(),
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                if (task != null) {
+                    MarkdownTaskMarker(task.getTextInNode(content).trim().equals("[x]", ignoreCase = true))
+                } else {
+                    Text(
+                        text = bulletText,
+                        modifier = Modifier.alignByBaseline(),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
                     directContent.fastForEach { contentChild ->
+                        if (contentChild === task) return@fastForEach
                         MarkdownNode(
                             node = contentChild,
                             content = content,
@@ -1046,6 +1032,27 @@ private fun ListItemNode(
             MarkdownNode(
                 node = nestedList, content = content, onClickCitation = onClickCitation, listLevel = level + 1 // 增加层级
             )
+        }
+    }
+}
+
+@Composable
+internal fun MarkdownTaskMarker(checked: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(2.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+        modifier = Modifier.padding(end = 4.dp, top = 2.dp).semantics {
+            role = Role.Checkbox
+            toggleableState = ToggleableState(checked)
+        },
+    ) {
+        Box(
+            modifier = Modifier.padding(2.dp).size(LocalTextStyle.current.fontSize.toDp() * 0.8f),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) {
+                Icon(HugeIcons.Tick01, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }
@@ -1305,7 +1312,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
 
         node.type == GFMTokenTypes.GFM_AUTOLINK -> {
             val link = node.getTextInNode(content)
-            withLink(LinkAnnotation.Url(link)) {
+            withLink(LinkAnnotation.Url(normalizeMarkdownLinkDestination(link))) {
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                     append(link)
                 }

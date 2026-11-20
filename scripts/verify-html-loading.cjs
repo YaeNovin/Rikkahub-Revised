@@ -7,7 +7,8 @@ const file = path.join(root, 'app/build/reports/html-loading/preview.html');
 const html = fs.readFileSync(file, 'utf8');
 
 async function main() {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const executablePath = process.env.MARKDOWN_TEST_BROWSER;
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : { channel: 'msedge' }) });
   let passed = 0;
   try {
     for (const test of [
@@ -51,11 +52,26 @@ async function main() {
         } else {
           assert.equal(await page.locator('h1').innerText(), 'Offline 中文预览');
           assert.equal(await page.locator('input[type=checkbox]').count(), 2);
+          const tasks = page.locator('input[type=checkbox]');
+          assert.ok(await tasks.first().isChecked());
+          assert.ok(await tasks.first().isDisabled());
+          assert.ok(await tasks.last().isDisabled());
+          assert.ok(!(await tasks.last().isChecked()));
+          assert.equal(await page.locator('p > sub').innerText(), '2');
+          assert.equal(await page.locator('p > sup').innerText(), '2');
+          assert.equal(await page.locator('p > kbd').innerText(), 'K');
+          assert.deepEqual(await page.locator('p > s').allTextContents(), ['single', 'double']);
+          assert.equal(await page.locator('.markdown-alert-title').innerText(), 'Warning');
+          assert.equal(await page.getByRole('link', { name: 'www.example.org', exact: true }).getAttribute('href'), 'https://www.example.org');
+          const text = await page.locator('#content').innerText();
+          assert.ok(text.includes('~~~literal~~~ H~2~O'));
+          assert.ok(text.includes('[^note]: example'));
+          assert.equal(await page.locator('a[href="example"]').count(), 0);
           assert.ok(await page.locator('.katex').count() >= 2);
           assert.equal(await page.locator('.katex-error').count(), 0);
           assert.ok(await page.locator('code .hljs-keyword').count() > 0);
           assert.ok(await page.locator('.mermaid svg').isVisible());
-          assert.ok((await page.locator('#content').innerText()).includes('HTML preserved'));
+          assert.ok(text.includes('HTML preserved'));
         }
         assert.deepEqual(external, []);
         assert.deepEqual(failures, []);
