@@ -6,10 +6,11 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const directory = path.join(root, 'app/build/reports/webview-renderers');
 async function main() {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const executablePath = process.env.RENDERER_TEST_BROWSER;
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : { channel: 'msedge' }) });
   let count = 0;
   async function scenario(name, source, check, options = {}) {
-    const page = await browser.newPage({ viewport: { width: 360, height: 560 } });
+    const page = await browser.newPage({ viewport: { width: 360, height: 560 }, isMobile: true, hasTouch: true });
     const errors = [], external = [], consoleErrors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', event => { if (event.type() === 'error') consoleErrors.push(event.text()); });
@@ -51,6 +52,43 @@ async function main() {
     } finally { await page.close(); }
   }
   try {
+    await scenario('JIANPU', undefined, async page => {
+      const stats = () => page.evaluate(() => {
+        const svg = document.querySelector('#renderer svg');
+        const note = [...svg.querySelectorAll('[data-score-system] text')].find(n => n.textContent === '1');
+        const scale = note.getScreenCTM().a;
+        return { font: parseFloat(note.getAttribute('font-size')) * scale, width: svg.getBoundingClientRect().width,
+          rows: svg.querySelectorAll('[data-score-system]').length, sharps: [...svg.querySelectorAll('text')].some(n => n.textContent === '♯'),
+          dots: svg.querySelectorAll('circle').length, lyrics: svg.textContent.includes('排版和长谱换行') };
+      });
+      const portrait = await stats();
+      assert.ok(portrait.rows > 4 && portrait.font >= 22 && portrait.width <= 360, JSON.stringify(portrait));
+      assert.ok(portrait.sharps && portrait.dots > 0 && portrait.lyrics);
+      await page.setViewportSize({ width: 740, height: 460 });
+      await page.waitForFunction(() => document.querySelector('#renderer svg').getBoundingClientRect().width > 650);
+      const landscape = await stats();
+      assert.ok(landscape.rows < portrait.rows);
+      assert.equal(landscape.font, portrait.font);
+    });
+    await scenario('JIANPU', 'There are 7 words, not notes', null, { error: true });
+    await scenario('JIANPU', '1 '.repeat(1601), null, { error: true });
+    await scenario('scores/JIANPU-fullscreen', undefined, async page => {
+      assert.equal(await page.locator('body').getAttribute('data-score-fullscreen'), '');
+      assert.equal(await page.locator('#rikkahub-fullscreen-pan-script').count(), 0);
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForFunction(() => window.scrollY > 400);
+      const finalLyric = await page.getByText('测试歌词 14', { exact: true }).boundingBox();
+      assert.ok(finalLyric && finalLyric.y >= 0 && finalLyric.y + finalLyric.height <= 560);
+    });
+    await scenario('ABC', undefined, async page => {
+      const before = await page.locator('#renderer svg').first().boundingBox();
+      assert.ok(await page.locator('.abcjs-note').count() >= 80);
+      await page.setViewportSize({ width: 740, height: 460 });
+      await page.waitForFunction(width => document.querySelector('#renderer svg').getBoundingClientRect().width > width + 100, before.width);
+      const after = await page.locator('#renderer svg').first().boundingBox();
+      assert.ok(after.height < before.height);
+    });
+    await scenario('ABC', 'X:1\nK:C\n', null, { error: true });
     await scenario('WAVEFORM');
     await scenario('WAVEFORM', JSON.stringify({ reg: [{ bits: 8, name: 'DATA' }, { bits: 1, name: 'EN' }], config: { bits: 9 } }));
     await scenario('GRAPHVIZ');
@@ -59,6 +97,7 @@ async function main() {
       assert.equal(await page.evaluate(() => SmilesDrawer.Version), '2.4.1');
     });
     await scenario('MUSICXML');
+    await scenario('MUSICXML', '<score-partwise><part-list/></score-partwise>', null, { error: true });
     for (const name of ['WAVEFORM','GRAPHVIZ','VEGA','MOLECULE','MUSICXML']) await scenario(name, 'invalid input (', null, { error: true });
     await scenario('VEGA', JSON.stringify({ mark:'bar', data:{url:'https://example.com/private'}, encoding:{} }), null, { error:true });
     await scenario('WAVEFORM', undefined, null, { error:true, missing:'wavedrom-skin.js' });

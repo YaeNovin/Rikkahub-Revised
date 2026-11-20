@@ -56,12 +56,10 @@ class InteractiveCodeBlockTest {
             colorScheme = androidx.compose.material3.lightColorScheme(),
         )
 
-        assertTrue(html.contains("overflow: auto"))
         assertTrue(html.contains("body { background: transparent"))
+        assertTrue(me.rerere.rikkahub.ui.pages.webview.isMusicScorePreview(html))
         assertTrue(html.contains("ABCJS.renderAbc"))
-        assertTrue(html.contains("root.clientWidth - 16"))
-        assertTrue(html.contains("#renderer svg { display: block; max-width: 100%"))
-        assertTrue(html.contains("preserveAspectRatio"))
+        assertTrue(html.contains("preferredMeasuresPerLine: 4"))
     }
 
     @Test
@@ -172,13 +170,12 @@ class InteractiveCodeBlockTest {
             colorScheme = androidx.compose.material3.lightColorScheme(),
         )
 
-        assertTrue(html.contains("Jianpu numbered musical notation"))
-        assertTrue(html.contains("tokenPattern"))
-        assertTrue(html.contains("replace(/\\r/g, '').split('\\n')"))
-        assertTrue(html.contains("/^\\/key\\(/i"))
-        assertFalse(html.contains("/^\\\\/key\\\\(/i"))
-        assertTrue(html.contains("replaceChildren") || html.contains("appendChild(svg)"))
-        assertTrue(html.contains("preserveAspectRatio"))
+        assertEquals(
+            "https://rikkahub.local/assets/html/renderers/jianpu-preview.js",
+            org.jsoup.Jsoup.parse(html).selectFirst("script[src]")?.attr("src"),
+        )
+        assertTrue(me.rerere.rikkahub.ui.pages.webview.isMusicScorePreview(html))
+        assertTrue(html.contains("title: Little Star\\n/key(C)\\nbpm: 96"))
     }
 
     @Test

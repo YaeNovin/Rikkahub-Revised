@@ -4,6 +4,9 @@ import androidx.compose.material3.lightColorScheme
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
+import me.rerere.rikkahub.ui.pages.webview.isMusicScorePreview
+import me.rerere.rikkahub.ui.pages.webview.prepareFullscreenPreviewHtml
+import org.jsoup.Jsoup
 
 class WebRendererRegressionTest {
     @Test fun `mixed HTML leaves streaming diagram unrendered until its closing fence`() {
@@ -48,8 +51,10 @@ class WebRendererRegressionTest {
             val sample = when(renderer) {
                 InteractiveCodeRenderer.ECHARTS -> "{\"series\":[]}"
                 InteractiveCodeRenderer.LEAFLET -> "{\"markers\":[{\"lat\":30,\"lng\":120}]}"
-                InteractiveCodeRenderer.ABC -> "X:1\nK:C\nC D E F|"
-                InteractiveCodeRenderer.JIANPU -> "1 2 3 4 | 5 6 7 1'"
+                InteractiveCodeRenderer.ABC -> "X:1\nT:Scrolling score\nM:4/4\nL:1/4\nK:C\n" +
+                    "C D E F | G A B c | ".repeat(10) + "]"
+                InteractiveCodeRenderer.JIANPU -> "title: 手机谱面\n1=C\n" +
+                    "1 2_ #3. 4 | 5= 6, 7 1' | ".repeat(12) + "\nw: 排版和长谱换行\n0 1 – 2 |]"
                 InteractiveCodeRenderer.RAILROAD -> "{\"type\":\"terminal\",\"text\":\"word\"}"
                 InteractiveCodeRenderer.WAVEFORM -> """{"signal":[{"name":"clk","wave":"p....."},{"name":"data","wave":"x.345x","data":["A","B","C"]}]}"""
                 InteractiveCodeRenderer.GRAPHVIZ -> "digraph G { A -> B; A -> C; }"
@@ -80,5 +85,21 @@ class WebRendererRegressionTest {
             me.rerere.rikkahub.ui.pages.webview.prepareFullscreenPreviewHtml(buildCodePreviewHtml(rawMap, "html")),
         )
         assertEquals(InteractiveCodeRenderer.entries.size + 2, dir.listFiles()!!.count { it.extension == "html" })
+    }
+
+    @Test fun `music scores retain native scrolling in fullscreen`() {
+        val dir = File("build/reports/webview-renderers/scores").apply { mkdirs() }
+        for (renderer in listOf(InteractiveCodeRenderer.JIANPU, InteractiveCodeRenderer.ABC, InteractiveCodeRenderer.MUSICXML)) {
+            val html = buildInteractiveRendererHtml(renderer, "score", lightColorScheme())
+            assertTrue(isMusicScorePreview(html))
+            val fullscreen = prepareFullscreenPreviewHtml(html, useGlobalBackground = true)
+            assertTrue(Jsoup.parse(fullscreen).body().hasAttr("data-score-fullscreen"))
+            assertFalse(fullscreen.contains("fullscreen-pan.js"))
+        }
+        val source = (1..14).joinToString("\n") { "1 2_ #3. 4 | 5= 6, 7 1'\nw: 测试歌词 $it" }
+        val fullscreen = prepareFullscreenPreviewHtml(
+            buildInteractiveRendererHtml(InteractiveCodeRenderer.JIANPU, source, androidx.compose.material3.darkColorScheme())
+        )
+        File(dir, "JIANPU-fullscreen.html").writeText(fullscreen)
     }
 }

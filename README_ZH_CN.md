@@ -1,221 +1,58 @@
 <div align="center">
-  <img src="docs/icon.png" alt="Rikkahub Revised 应用图标" width="100" />
+  <img src="docs/icon.png" alt="Rikkahub Revised 应用图标" width="88" />
   <h1>Rikkahub Revised</h1>
-
-  <p>基于 RikkaHub、由社区独立维护的 Android AI 聊天客户端。</p>
-
-  [English](README.md) | 简体中文
-
-  [![最新版本](https://img.shields.io/github/v/release/YaeNovin/Rikkahub-Revised?display_name=tag&sort=semver)](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)
-  [![许可证：AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-  [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg)](https://developer.android.com/about/versions/oreo)
-  [![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a)
+  <p>基于 <a href="https://github.com/rikkahub/rikkahub">RikkaHub</a> 独立维护的 Android AI 聊天应用。</p>
+  <p><a href="README.md">English</a> · 简体中文</p>
+  <p>
+    <a href="https://github.com/YaeNovin/Rikkahub-Revised/releases/latest"><img alt="最新正式版" src="https://img.shields.io/github/v/release/YaeNovin/Rikkahub-Revised?label=Release" /></a>
+    <a href="https://developer.android.com/about/versions/oreo"><img alt="Android 8.0 或更高版本" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&amp;logoColor=white" /></a>
+    <a href="https://github.com/YaeNovin/Rikkahub-Revised/stargazers"><img alt="GitHub 星标数" src="https://img.shields.io/github/stars/YaeNovin/Rikkahub-Revised?style=flat&amp;logo=github" /></a>
+    <a href="LICENSE"><img alt="AGPL-3.0 许可证" src="https://img.shields.io/badge/License-AGPL--3.0-blue" /></a>
+    <a href="https://trendshift.io/"><img alt="在 Trendshift 浏览 GitHub 趋势" src="https://img.shields.io/badge/Trendshift-Explore-6F42C1" /></a>
+  </p>
 </div>
 
-> [!IMPORTANT]
-> Rikkahub Revised 是 [RikkaHub](https://github.com/rikkahub/rikkahub)
-> 的独立修改发行版，不是 RikkaHub 官方版本，也不由上游维护者认可或提供支持。
-> 与 Revised 有关的问题应提交到本仓库，不应提交给上游项目。
+## 📲 下载安装
 
-## 项目身份
+**[在 GitHub Releases 下载最新版 APK](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)**
 
-本仓库提供 Rikkahub Revised 的完整源码。当前发行分支基于上游 RikkaHub
-`2.4.8`，对应提交
-[`8824e0e8`](https://github.com/rikkahub/rikkahub/commit/8824e0e841f2008b322ca8214a27a978e4b4abaa)。
-后续上游版本不会自动包含在本项目中。
+当前正式版提供带版本号的 ARM64 APK 和 `SHA256SUMS.txt` 校验文件。旧版本可在[发行归档](https://github.com/YaeNovin/Rikkahub-Revised/releases)中找到。Revised 使用独立的应用 ID `me.rerere.rikkahub.revised`，可与上游 RikkaHub 同时安装，两者分别保存数据。覆盖更新需要匹配 [Revised 签名证书](docs/RELEASE_SIGNING.md)。
 
-| 项目 | 内容 |
-| --- | --- |
-| 发行名称 | `Rikkahub Revised` |
-| Android 应用 ID | `me.rerere.rikkahub.revised` |
-| 当前版本 | [`2.4.8-revised.10`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.10) |
-| 最低 Android 版本 | Android 8.0（API 26） |
-| 源码仓库 | `YaeNovin/Rikkahub-Revised` |
-| 开源协议 | GNU Affero General Public License v3.0 |
+## ✨ 你可以用它做什么
 
-独立的应用 ID 允许 Rikkahub Revised 与上游 RikkaHub 在同一台设备上并存。
-两个应用的数据相互隔离，本项目不会自动导入上游应用的数据。
+- **用自己的供应商和模型聊天。** 接入 OpenAI、Gemini 或 Claude 兼容服务，使用流式回答、图片与文档输入、网页搜索和助手配置。
+- **管理长对话的上下文。** 从任意消息创建分支，自动总结历史，为助手绑定本地知识库、记忆或世界书。
+- **在对话中查看富文本和交互内容。** 浏览 Markdown 表格、搜索引用、公式、代码高亮、图表、关系图、曲谱和只读 ANSI 终端预览。
+- **按自己的习惯使用界面。** 可从壁纸提取文字颜色，开启 HEX 色块和引号高亮，使用语音服务或内置 Web 界面。
 
-## 下载
+功能覆盖随模型、协议和预览入口而异。当前源码的详细说明见[文档索引](docs/README.md)与[渲染支持清单](docs/rendering-roadmap-20261120.md)。
 
-Rikkahub Revised 的正式 APK 仅通过本仓库的
-[GitHub Releases](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)
-发布。
+<details>
+<summary>📚 版本记录与上游基线</summary>
 
-| APK | 适用设备 |
-| --- | --- |
-| `app-arm64-v8a-release-2.4.8-revised.10.apk` | ARM64 Android 手机和平板电脑 |
-| `SHA256SUMS.txt` | 已发布 APK 的 SHA-256 校验值 |
+- [2.4.8-revised.10 发行说明](docs/release-notes-2.4.8-revised.10.md)和[验证记录](docs/release-verification-2.4.8-revised.10.md)
+- [完整发行记录](https://github.com/YaeNovin/Rikkahub-Revised/releases)和[修改声明](docs/MODIFICATIONS.md)
+- 本发行系列的上游基线为 [RikkaHub 2.4.8 的 `8824e0e8`](https://github.com/rikkahub/rikkahub/commit/8824e0e841f2008b322ca8214a27a978e4b4abaa)。
 
-`2.4.8-revised.10` 发布带版本号文件名的 ARM64 安装包，应用内更新功能会根据文件名识别设备 ABI。
-旧版的 x86_64 与通用包仍保留在对应历史 Release 页面，不属于 `.10` 安装包。
-应用内更新功能读取本仓库公开的最新 Release，并根据设备 ABI 提供兼容的
-APK。Release 说明仅包含面向用户的更新与修复；安装包完整性和签名连续性在发布
-流程中单独核验。
+</details>
 
-后续 Revised 正式版本必须继续使用同一签名证书。使用其他密钥签名的构建无法覆盖
-安装现有的 Rikkahub Revised。公开证书信息与签名连续性要求见
-[RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md)。私有签名材料不会存放在本仓库中。
+<details>
+<summary>🛠️ 从源码构建</summary>
 
-## 供应商推广
-
-> **注意：** 以下供应商为顺便推广，属于第三方供应商，与本项目无关，请注意。
-
-| 供应商名称 | 供应商概述 |
-| --- | --- |
-| [OrcaRouter](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a) | 亚洲最大的大模型 API 网关，安全的零加价推理，按量付费或订阅皆可，除了付费模型，还长期提供免费模型供调用。智能路由、安全上线、更省成本。 |
-
-## Revised 的主要改动
-
-Rikkahub Revised 以上游 Android 客户端为基础，主要增加或调整了以下内容：
-
-### 当前正式版：2.4.8-revised.10
-
-- 扩展按模型名称识别、供应商参数、图片生成设置、搜索服务及 Gemini 工具，并增加独立决策模型配置。
-- 修复发送消息显示、停止按钮、提示词弹窗及页面切换问题，改善滚动、冷启动与后台恢复。
-- 优化壁纸文字取色及深色模式可读性，增加可关闭的 HEX 色块和正文引号高亮。
-- 增强原生表格与搜索引用，保留粘贴源码和代码块原文，完善日志、网页版设置与图片生成。
-
-版本码为 186，沿用原有正式版签名，支持覆盖更新。
-详见[双语发行说明](docs/release-notes-2.4.8-revised.10.md)、
-[验证记录](docs/release-verification-2.4.8-revised.10.md)及[文档索引](docs/README.md)。
-
-### 上一正式版：2.4.8-revised.9
-
-- 完善世界书导入、递归、来源绑定、条目编辑、测试和教程，并明确 SillyTavern 兼容边界。
-- 修复 Gemini 问答参数及内置工具与函数工具混用问题。
-- 请求日志持久化保存，响应正文和长系统提示词支持折叠阅读。
-- 优化语音识别与朗读，增加 MiniMax/MiMo 模型参数约束和语音模型筛选获取。
-- 修复长下拉列表崩溃、菜单背景异常放大、网页内容焦点引发的崩溃，完善外观与文字配色。
-
-版本码为 185，沿用原有正式版签名，支持从旧版 Revised 覆盖更新。
-完整内容见[双语发行说明](docs/release-notes-2.4.8-revised.9.md)、
-[源码更新记录](docs/changes-2026-09-15.md)及[文档索引](docs/README.md)。
-图片生成流程在后续 `.10` 版本中进一步扩展。
-
-### 历史 Revised 改动（截至 2.4.8-revised.8）
-
-- 新增 OrcaRouter 供应商，并提供官网和文档链接。
-- 优化按模型与协议适配的参数、思考深度、工具调用及第三方兼容接口。
-- 扩展工作区 SAF/本地文件操作和命令执行安全性，并完善提示词模板、占位符、世界书、
-  记忆与娱乐模式。
-- 增加请求统计、高精度耗时诊断和针对性回归测试。
-- 修复聊天加载、流式恢复、分支对话，以及 Markdown、Diff、LaTeX、Mermaid 和 WebView
-  等复杂内容的渲染问题。
-- 改进图片生成设置和全屏预览，并补充多语言资源与 Android 版本兼容性处理。
-
-- 为 OpenAI、Claude、Gemini、Grok、Qwen 和 DeepSeek 增加按模型能力适配的请求
-  参数，并新增不记录凭据、提示词、Schema 与二进制内容的脱敏诊断。
-- 增加流提前终止检测，修正重试时间预算，并完善事件流连接保活。
-- 增加 Gemini 生图参数，统一受支持富代码块的源码、内嵌与全屏预览。
-- 修复裁剪结果在保存完成前被清理、频繁调整设置后可能无法切换对话、导航替换
-  非原子化，以及供应商模型操作栏位置错误的问题。
-
-- 基于 Token 的滚动上下文摘要、上下文窗口自动识别、压缩动画提示和使用量展示。
-- 本地知识库、文档导入与分块、混合检索、助手绑定、RAG、来源引用和文件预览。
-- 更完整的记忆元数据、基于嵌入的检索、词法回退和限定范围的记忆工具。
-- Provider 能力元数据、嵌入支持、连接诊断、脱敏协议追踪、按协议和厂商映射的
-  最高推理深度，以及更安全的自定义 Provider 配置处理。
-- 更严格的工作区、剪贴板、日历和屏幕使用时间工具审批与隐私边界。
-- 分离的备份范围，以及更安全的 S3/WebDAV 归档恢复路径校验。
-- 按天清理聊天附件和生成图片，同时保留聊天文本。
-- ECharts、ABC 乐谱、Leaflet 和铁路图的交互式渲染，以及 Mermaid、LaTeX、
-  Markdown 和 WebView 改进。
-- 由 Revised 仓库维护、能够按 ABI 选择 APK 的更新源。
-- 独立应用 ID、隔离的 URI Scheme 与 Provider Authority，以及默认关闭的
-  Firebase 集成。
-
-### 2.4.8-revised.8 中包含的源码修改
-
-- 增加 DeepSeek V4.1-Flash 模型识别，支持规范名称 `deepseek-flash` 与旧别名，
-  并补齐 1M 上下文、384K 输出上限、视觉输入、思考强度映射和工具调用保护。
-- 增强 `ask_user` 交互、跨协议工具 Schema、后台媒体生成、视频供应商接入和后台
-  生成保活处理。
-- 增加 KaTeX、SVG、Mermaid、Graphviz、图表、地图、乐谱、GitHub 卡片和 WebView
-  全屏预览的离线资源与回归测试。
-- 增加按对话记忆控制、记忆生命周期、上下文统计、灵感卡片、聊天建议、请求日志
-  格式化及外观/文字配色优化。
-
-`.8` 安装包基于对应发行标签的源码构建，使用版本号 184 和原有正式版
-签名证书，支持覆盖更新。完整双语更新说明见
-[release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md)。
-
-完整的修改记录、上游对比和发行要求见
-[MODIFICATIONS.md](docs/MODIFICATIONS.md)。
-
-## 继承自上游的基础能力
-
-上游项目为本应用提供了 Android 聊天客户端基础，包括：
-
-- OpenAI、Google、Anthropic 兼容 Provider 和自定义端点。
-- 流式对话、多模态输入、文档解析和消息分支。
-- MCP、网络搜索 Provider、提示词变量、工具和助手配置。
-- Markdown、代码高亮、LaTeX、表格和 Mermaid 渲染。
-- 本地记忆、Provider 导入导出、内嵌 Web 界面和可选 Linux 工作区环境。
-
-除非 [MODIFICATIONS.md](docs/MODIFICATIONS.md) 明确记录了修改，否则这些基础能力的
-原始实现与作者归属于上游项目。
-
-## 从源码构建
-
-构建环境要求：
-
-- Gradle 守护进程使用 JetBrains JDK 21（见 `gradle/gradle-daemon-jvm.properties`）；
-  Java/Kotlin 源码目标仍为 Java 17
-- Android SDK API 37，以及 Android Gradle 插件选择的 Build Tools
-  （当前本地验证使用 Build Tools 36.0.0）
-- 支持 Submodule 的 Git
-
-克隆完整源码并初始化子模块：
+安装 JetBrains JDK 21、Android SDK API 37，并按[构建指南](docs/building.md)准备 Web UI 依赖。
 
 ```bash
 git clone --recurse-submodules https://github.com/YaeNovin/Rikkahub-Revised.git
 cd Rikkahub-Revised
-```
-
-在 Windows 上构建开发版 APK：
-
-```powershell
-.\gradlew.bat :app:assembleDebug
-```
-
-在 Linux 或 macOS 上构建：
-
-```bash
 ./gradlew :app:assembleDebug
 ```
 
-使用 `./gradlew test` 或 `gradlew.bat test` 运行 JVM 测试。Android 主应用位于
-`app` 模块，其他模块和常见修改入口见
-[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)。
+在 Windows 上执行 `.\gradlew.bat :app:assembleDebug`。测试命令及模块入口见[开发脚本](scripts/README.md)和[项目结构](docs/PROJECT_STRUCTURE.md)。
 
-聊天请求的运行链路分别提供
-[英文文档](docs/references/chat-generation-pipeline.en.md)和
-[简体中文文档](docs/references/chat-generation-pipeline.zh-CN.md)。
+</details>
 
-Release 构建从被忽略的本地 `local.properties` 读取签名值。请勿提交 Keystore、
-密码、`local.properties` 或 Firebase 配置。Firebase 与 Crashlytics 默认关闭；
-只有主动启用时，才需要提供由维护者控制且与 Revised 应用 ID 匹配的配置。
+## 💬 反馈与归属
 
-## 贡献与支持
+Rikkahub Revised 独立维护。欢迎通过本仓库的 [Issues](https://github.com/YaeNovin/Rikkahub-Revised/issues) 或 [Pull Requests](https://github.com/YaeNovin/Rikkahub-Revised/pulls) 反馈。报告问题时请附应用版本和复现步骤，提交前去除凭据和私密对话。
 
-欢迎通过本仓库的
-[Issues](https://github.com/YaeNovin/Rikkahub-Revised/issues)和 Pull Request
-报告或改进 Rikkahub Revised。报告问题时请说明该问题是否也会在上游 RikkaHub
-出现，并且不要附带 Provider 密钥、账号数据、签名文件或私人聊天内容。
-
-上游文档与社区渠道属于上游项目，不应作为 Revised 专属行为的支持渠道。
-
-## 许可证与归属
-
-Rikkahub Revised 与其上游基础一致，采用
-[GNU Affero General Public License v3.0](LICENSE) 发布。分发修改版本或通过网络
-提供软件服务时，必须遵守 AGPL-3.0 关于对应源码可获取性的要求。
-
-- [NOTICE](NOTICE) 说明上游项目与 Revised 发行版的关系。
-- [MODIFICATIONS.md](docs/MODIFICATIONS.md) 记录主要修改内容。
-- [CONTRIBUTORS.md](docs/CONTRIBUTORS.md) 列出直接构建与维护本独立仓库的人员。
-- [THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) 列出内置第三方组件及其许可证。
-- [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) 记录公开签名身份和发行密钥连续性要求。
-
-未修改上游代码的版权与作者身份仍归上游贡献者所有，本仓库不主张这些代码的作者权。
+项目采用 [GNU Affero General Public License v3.0](LICENSE)。上游归属、贡献和依赖许可见 [NOTICE](NOTICE)、[贡献者](docs/CONTRIBUTORS.md)和[第三方声明](docs/THIRD_PARTY_NOTICES.md)。

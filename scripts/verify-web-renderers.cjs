@@ -68,7 +68,11 @@ assert.equal(setOptions, 1);
 chart.events.find(event => event.type === 'resize').fn();
 assert.equal(resizeCalls, 1);
 
-await run('JIANPU', harness());
+const jianpu = harness();
+let jianpuSource;
+jianpu.context.window.rikkaRenderJianpu = (root, source) => { jianpuSource = source; };
+await run('JIANPU', jianpu);
+assert.match(jianpuSource, /1 2_ #3\. 4/);
 await run('SVG', harness());
 
   const mermaid = harness();

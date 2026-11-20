@@ -1523,6 +1523,14 @@
 本地地址：使用 localhost，仅限本设备访问。
 mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过名称访问，无需知道 IP。</string>
   <string name="setting_page_web_server_desc">允许你通过网页访问 RikkaHub</string>
+  <string name="setting_page_web_server_background_title">后台 Web 访问</string>
+  <string name="setting_page_web_server_background_desc">Web 服务器运行时会使用前台服务并保持 CPU 唤醒，持续运行可能增加耗电。</string>
+  <string name="setting_page_web_server_background_restricted">系统当前限制此应用在后台运行。</string>
+  <string name="setting_page_web_server_background_exempt">此应用已豁免电池优化，系统仍可能施加其他后台限制。</string>
+  <string name="setting_page_web_server_background_optimized">此应用受系统电池优化管理。</string>
+  <string name="setting_page_web_server_background_help">如果切到后台后无法访问网页，请在系统设置的「应用」中找到本应用。在电池或后台管理中允许后台运行，或在有此选项时选择「不受限制」。菜单名称因设备而异。</string>
+  <string name="setting_page_web_server_background_open_settings">打开系统设置</string>
+  <string name="setting_page_web_server_background_settings_unavailable">无法打开设置，请手动进入系统设置，在「应用」中找到本应用。</string>
   <string name="setting_page_web_server_error">错误</string>
   <string name="setting_page_web_server_jwt_enable">启用身份验证</string>
   <string name="setting_page_web_server_jwt_enable_desc">访问网页界面时需要密码验证</string>

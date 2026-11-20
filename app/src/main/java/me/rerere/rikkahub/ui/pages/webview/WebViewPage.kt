@@ -90,12 +90,16 @@ import org.jsoup.Jsoup
 private const val FULLSCREEN_PREVIEW_STYLE_ID = "rikkahub-fullscreen-preview-style"
 private const val FULLSCREEN_PREVIEW_BODY_CLASS = "rikkahub-fullscreen-preview"
 private const val READONLY_TERMINAL_SELECTOR = "meta[name=rikkahub-preview][content=terminal-readonly]"
+private const val MUSIC_SCORE_SELECTOR = "meta[name=rikkahub-preview][content=music-score]"
 
 internal fun isReadonlyTerminalPreview(content: String): Boolean =
     content.contains("terminal-readonly") && Jsoup.parse(content).head().selectFirst(READONLY_TERMINAL_SELECTOR) != null
 
+internal fun isMusicScorePreview(content: String): Boolean =
+    content.contains("music-score") && Jsoup.parse(content).head().selectFirst(MUSIC_SCORE_SELECTOR) != null
+
 internal fun previewSupportsGlobalBackground(content: String): Boolean =
-    !isReadonlyTerminalPreview(content) && (!me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(content) ||
+    !isReadonlyTerminalPreview(content) && !isMusicScorePreview(content) && (!me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(content) ||
         me.rerere.rikkahub.ui.components.richtext.isDecorativeGeometryPreview(content))
 
 internal fun prepareFullscreenPreviewHtml(content: String, useGlobalBackground: Boolean = false): String {
@@ -106,6 +110,11 @@ internal fun prepareFullscreenPreviewHtml(content: String, useGlobalBackground: 
     if (document.head().selectFirst(READONLY_TERMINAL_SELECTOR) != null) {
         document.outputSettings().prettyPrint(false)
         document.body().attr("data-embedded", "false")
+        return document.outerHtml()
+    }
+    if (document.head().selectFirst(MUSIC_SCORE_SELECTOR) != null) {
+        document.outputSettings().prettyPrint(false)
+        document.body().attr("data-score-fullscreen", "")
         return document.outerHtml()
     }
     if (me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(content))
@@ -230,6 +239,7 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
     val preview = cached?.takeIf { it.first == contentId }?.second
     val selfManagedPreview = remember(url, preview) {
         url.isEmpty() && (isReadonlyTerminalPreview(preview?.getOrNull().orEmpty()) ||
+            isMusicScorePreview(preview?.getOrNull().orEmpty()) ||
             me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(preview?.getOrNull().orEmpty()))
     }
     val geometryPreview = remember(url, preview) {
@@ -264,7 +274,7 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
                 builtInZoomControls = true
                 displayZoomControls = false
                 useWideViewPort = true
-                loadWithOverviewMode = true
+                loadWithOverviewMode = !selfManagedPreview
             }
         )
     }

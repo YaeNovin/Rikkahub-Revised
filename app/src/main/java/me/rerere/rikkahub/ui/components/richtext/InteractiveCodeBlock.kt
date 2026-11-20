@@ -38,6 +38,7 @@ internal enum class InteractiveCodeRenderer(
     ;
 
     val aliases: Set<String> get() = requireNotNull(me.rerere.rikkahub.data.render.RendererCatalog.find(catalogId)).aliases
+    val isScore: Boolean get() = this == ABC || this == JIANPU || this == MUSICXML
 
     companion object {
         fun fromLanguage(language: String): InteractiveCodeRenderer? =
@@ -70,7 +71,8 @@ internal fun InteractiveCodeBlock(
             builtInZoomControls = true
             displayZoomControls = false
             useWideViewPort = true
-            loadWithOverviewMode = true
+            loadWithOverviewMode = !renderer.isScore
+            blockNetworkLoads = renderer.isScore
             allowFileAccess = false
             allowContentAccess = false
             domStorageEnabled = false
@@ -117,7 +119,7 @@ internal fun buildInteractiveRendererHtml(
     val scriptPath = when (renderer) {
         InteractiveCodeRenderer.ECHARTS -> "renderers/echarts.min.js"
         InteractiveCodeRenderer.ABC -> "renderers/abcjs-basic-min.js"
-        InteractiveCodeRenderer.JIANPU -> null
+        InteractiveCodeRenderer.JIANPU -> "renderers/jianpu-preview.js"
         InteractiveCodeRenderer.LEAFLET -> "renderers/leaflet.js"
         InteractiveCodeRenderer.RAILROAD -> "renderers/railroad-diagrams.js"
         InteractiveCodeRenderer.WAVEFORM -> "renderers/wavedrom.min.js"
@@ -134,7 +136,7 @@ internal fun buildInteractiveRendererHtml(
     val rendererScript = when (renderer) {
         InteractiveCodeRenderer.ECHARTS -> echartsRendererScript()
         InteractiveCodeRenderer.ABC -> abcRendererScript()
-        InteractiveCodeRenderer.JIANPU -> jianpuRendererScript()
+        InteractiveCodeRenderer.JIANPU -> "window.rikkaRenderJianpu(root, source, fail);"
         InteractiveCodeRenderer.LEAFLET -> leafletRendererScript()
         InteractiveCodeRenderer.RAILROAD -> railroadRendererScript()
         else -> additionalRendererScript(renderer)
@@ -150,16 +152,12 @@ internal fun buildInteractiveRendererHtml(
     val foreground = colorScheme.onSurface.toCssHex()
     val error = colorScheme.error.toCssHex()
     val rendererLayoutCss = when (renderer) {
-        InteractiveCodeRenderer.ABC -> """
-            html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
-            #renderer { width: 100%; min-height: 100%; height: auto; overflow: visible; display: flex; align-items: center; justify-content: center; }
-            #renderer svg { display: block; max-width: 100%; height: auto; }
-        """.trimIndent()
-        InteractiveCodeRenderer.JIANPU -> """
-            html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
-            body { display: flex; align-items: center; justify-content: center; }
-            #renderer { width: 100%; min-height: 100%; height: auto; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
-            #renderer svg { display: block; flex: 0 0 auto; max-width: none; height: auto; margin: 0 auto; }
+        InteractiveCodeRenderer.ABC, InteractiveCodeRenderer.JIANPU, InteractiveCodeRenderer.MUSICXML -> """
+            html, body { width: 100%; margin: 0; }
+            #renderer { width: 100%; height: auto; }
+            #renderer svg { display: block; }
+            ${if (renderer == InteractiveCodeRenderer.MUSICXML) "#renderer { background: #fff; color: #222; border-radius: 8px; }" else ""}
+            body[data-score-fullscreen] { padding-bottom: 72px; }
         """.trimIndent()
         InteractiveCodeRenderer.RAILROAD -> """
             html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
@@ -173,8 +171,7 @@ internal fun buildInteractiveRendererHtml(
         InteractiveCodeRenderer.WAVEFORM,
         InteractiveCodeRenderer.GRAPHVIZ,
         InteractiveCodeRenderer.VEGA,
-        InteractiveCodeRenderer.MOLECULE,
-        InteractiveCodeRenderer.MUSICXML -> """
+        InteractiveCodeRenderer.MOLECULE -> """
             html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
             #renderer { width: 100%; min-height: 180px; height: auto; overflow: auto; background: #fff; color: #222; border-radius: 8px; }
             #renderer > svg, #renderer > canvas { display: block; max-width: 100%; height: auto; margin: auto; }
@@ -202,6 +199,7 @@ internal fun buildInteractiveRendererHtml(
         <html>
         <head>
             <meta charset="UTF-8">
+            ${if (renderer.isScore) """<meta name="rikkahub-preview" content="music-score">""" else ""}
             <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=8.0, user-scalable=yes">
             $stylesheet
             ${scriptPath?.let { "<script src=\"$WEB_VIEW_ASSET_URL/html/$it\"></script>" }.orEmpty()}
@@ -233,6 +231,7 @@ internal fun buildInteractiveRendererHtml(
                         errorView.style.display = 'block';
                         errorView.textContent = localizedRenderError + (error && error.message ? '\n' + String(error.message).slice(0, 240) : '');
                     }
+                    ${if (renderer.isScore) SCORE_REFLOW_SCRIPT else ""}
                     try {
                         const renderWatchdog = setTimeout(function() { if (window.__rikkaRenderStatus === 'loading') fail(new Error('图形渲染超时，请减少数据量后重试')); }, 20000);
                         $rendererScript
@@ -241,7 +240,7 @@ internal fun buildInteractiveRendererHtml(
                             clearTimeout(renderWatchdog);
                             window.__rikkaRenderStatus = 'ready';
                             // Leaflet owns its panes' pixel dimensions and scroll offsets.
-                            if (${renderer == InteractiveCodeRenderer.LEAFLET || renderer in ADDITIONAL_RENDERERS}) return;
+                            if (${renderer.isScore || renderer == InteractiveCodeRenderer.LEAFLET || renderer in ADDITIONAL_RENDERERS}) return;
                             root.querySelectorAll('svg').forEach(function(svg) {
                                 svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
                                 const fitToViewport = ${renderer != InteractiveCodeRenderer.JIANPU && renderer != InteractiveCodeRenderer.RAILROAD};
@@ -371,117 +370,42 @@ private fun echartsRendererScript(): String = """
 """.trimIndent()
 
 private fun abcRendererScript(): String = """
-    ABCJS.renderAbc('renderer', source, {
-        responsive: 'resize',
-        add_classes: false,
-        staffwidth: Math.max(root.clientWidth - 16, 220)
-    });
+    if (!window.ABCJS) throw new Error('abcjs 未加载');
+    function renderAbc() {
+        if (!source.trim()) throw new Error('ABC 乐谱为空');
+        const tunes = ABCJS.renderAbc(root, source, {
+            add_classes: true,
+            staffwidth: Math.max(root.clientWidth - 16, 100),
+            paddingtop: 0, paddingbottom: 0, paddingleft: 4, paddingright: 4,
+            wrap: { minSpacing: 1.8, maxSpacing: 2.7, preferredMeasuresPerLine: 4 }
+        });
+        if (!tunes.length || !root.querySelector('.abcjs-note,.abcjs-rest')) throw new Error('未找到可显示的 ABC 音符');
+    }
+    renderAbc();
+    window.rikkaReflowScore(root, renderAbc, fail);
 """.trimIndent()
 
-/** Renders common numbered-notation (简谱) syntax as an offline SVG. */
-private fun jianpuRendererScript(): String = """
-    const lines = String(source).replace(/\r/g, '').split('\n');
-    const notes = [];
-    const lyrics = [];
-    const metadata = [];
-    const tokenPattern = /(\|\||\|\]|\|)|([#b♭n♯]?[0-7](?:['`,]*)(?:[_=.\-]*))/g;
-    lines.forEach(function(line) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.charAt(0) === '%') return;
-        if (/^(?:L|w):/i.test(trimmed)) {
-            lyrics.push(trimmed.replace(/^(?:L|w):\s*/i, ''));
-            return;
-        }
-        if (/^\/key\(/i.test(trimmed) || /^(?:title|t|bpm|tempo)\s*:/i.test(trimmed) || /^ｂｐｍ\s+/i.test(trimmed)) {
-            metadata.push(trimmed);
-            return;
-        }
-        let match;
-        while ((match = tokenPattern.exec(line)) !== null) {
-            notes.push({ token: match[1] || match[2], bar: Boolean(match[1]) });
-        }
-        tokenPattern.lastIndex = 0;
-    });
-    const noteWidth = 48;
-    const left = 16;
-    const width = Math.max(root.clientWidth - 16, left * 2 + Math.max(notes.length, 1) * noteWidth);
-    const height = Math.max(132, 76 + metadata.length * 18 + (lyrics.length ? 28 : 0));
-    const svgNs = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(svgNs, 'svg');
-    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Jianpu numbered musical notation');
-    svg.style.color = getComputedStyle(document.body).color;
-    function text(value, x, y, size, anchor) {
-        const node = document.createElementNS(svgNs, 'text');
-        node.textContent = value;
-        node.setAttribute('x', x);
-        node.setAttribute('y', y);
-        node.setAttribute('font-size', size);
-        node.setAttribute('font-family', 'sans-serif');
-        node.setAttribute('text-anchor', anchor || 'middle');
-        node.setAttribute('fill', 'currentColor');
-        svg.appendChild(node);
-        return node;
-    }
-    metadata.slice(0, 5).forEach(function(value, index) {
-        text(value, left, 20 + index * 18, 13, 'start');
-    });
-    const baseY = 50 + Math.min(metadata.length, 5) * 18;
-    let noteIndex = 0;
-    notes.forEach(function(item) {
-        const x = left + noteIndex * noteWidth;
-        if (item.bar) {
-            const line = document.createElementNS(svgNs, 'line');
-            line.setAttribute('x1', x - 14);
-            line.setAttribute('x2', x - 14);
-            line.setAttribute('y1', baseY - 30);
-            line.setAttribute('y2', baseY + 12);
-            line.setAttribute('stroke', 'currentColor');
-            line.setAttribute('stroke-width', item.token === '||' || item.token === '|]' ? '2' : '1');
-            svg.appendChild(line);
-            return;
-        }
-        const raw = item.token;
-        const digit = raw.replace(/^[#b♭n♯]/, '').charAt(0);
-        const accidentalMatch = raw.match(/^[#b♭n♯]/);
-        const octaveMatch = raw.match(/[',]+/);
-        const accidental = accidentalMatch ? accidentalMatch[0] : '';
-        const octave = octaveMatch ? octaveMatch[0] : '';
-        const duration = raw.replace(/^[#b♭n♯]?[0-7][',]*/, '');
-        if (accidental) text(accidental === '♯' ? '#' : accidental === '♭' ? 'b' : accidental, x, baseY - 18, 12);
-        text(digit === '0' ? '0' : digit, x, baseY, 28);
-        for (let i = 0; i < octave.length; i++) {
-            const dot = document.createElementNS(svgNs, 'circle');
-            dot.setAttribute('cx', x);
-            dot.setAttribute('cy', octave.charAt(i) === ',' ? baseY + 8 + i * 5 : baseY - 31 - i * 5);
-            dot.setAttribute('r', '2');
-            dot.setAttribute('fill', 'currentColor');
-            svg.appendChild(dot);
-        }
-        if (duration.indexOf('_') >= 0 || duration.indexOf('=') >= 0) {
-            const beam = document.createElementNS(svgNs, 'line');
-            beam.setAttribute('x1', x - 11);
-            beam.setAttribute('x2', x + 11);
-            beam.setAttribute('y1', baseY + 7);
-            beam.setAttribute('y2', baseY + 7);
-            beam.setAttribute('stroke', 'currentColor');
-            beam.setAttribute('stroke-width', duration.indexOf('=') >= 0 ? '2' : '1');
-            svg.appendChild(beam);
-        }
-        if (duration.indexOf('.') >= 0) {
-            const dot = document.createElementNS(svgNs, 'circle');
-            dot.setAttribute('cx', x + 15);
-            dot.setAttribute('cy', baseY - 5);
-            dot.setAttribute('r', '2');
-            dot.setAttribute('fill', 'currentColor');
-            svg.appendChild(dot);
-        }
-        noteIndex++;
-    });
-    if (lyrics.length) text(lyrics.join('  '), width / 2, height - 12, 13);
-    while (root.firstChild) root.removeChild(root.firstChild);
-    root.appendChild(svg);
+private val SCORE_REFLOW_SCRIPT = """
+    window.rikkaReflowScore = function(element, render, onError) {
+        let width = element.clientWidth, frame = 0;
+        const onResize = function() {
+            if (frame || element.clientWidth === width) return;
+            frame = requestAnimationFrame(function() {
+                frame = 0;
+                if (element.clientWidth === width) return;
+                width = element.clientWidth;
+                try { render(); } catch (error) { onError(error); }
+            });
+        };
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(onResize) : null;
+        if (observer) observer.observe(element);
+        else window.addEventListener('resize', onResize);
+        window.addEventListener('pagehide', function() {
+            if (observer) observer.disconnect();
+            else window.removeEventListener('resize', onResize);
+            if (frame) cancelAnimationFrame(frame);
+        }, { once: true });
+    };
 """.trimIndent()
 
 private fun leafletRendererScript(): String = """

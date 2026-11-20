@@ -215,3 +215,24 @@ node scripts/verify-html-loading.cjs
 Browser tests intercept network requests and use bundled assets or fixtures.
 They do not verify Android WebView lifecycle/GPU/touch behavior, nor do they
 call a paid model. `node --check` verifies JavaScript syntax only.
+
+## P0 development baseline device checks
+
+Build the isolated renderer fixture:
+
+```text
+python scripts/build_qa.py :app:assembleDebug --init-script scripts/p0-baseline-regression.init.gradle --offline --max-attempts 1
+```
+
+The Debug application ID is `me.rerere.rikkahub.revised.baselineqa`. Install its
+ARM64 APK explicitly, then run:
+
+```text
+python scripts/qa_baseline_alignment.py --serial <device-serial>
+```
+
+This drives `BaselineAlignmentActivity` using generated sample text, role/theme
+buttons and exact UI text assertions. It checks user/assistant cache isolation,
+soft line breaks, pasted source across light/dark themes, and literal inline
+code. Results and screenshots go to `build/reports/p0-device/`.
+The script does not access user conversations or clear the installed QA data.

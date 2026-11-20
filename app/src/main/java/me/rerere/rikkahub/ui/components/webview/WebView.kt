@@ -579,12 +579,12 @@ fun WebView(
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                             view.settings.safeBrowsingEnabled = true
                         }
+                        view.settings.useWideViewPort = true
+                        view.settings.loadWithOverviewMode = true
                         view.settings.apply(state.settings)
                         view.settings.setSupportZoom(nativeZoomEnabled)
                         view.settings.builtInZoomControls = nativeZoomEnabled
                         view.settings.displayZoomControls = false
-                        view.settings.useWideViewPort = true
-                        view.settings.loadWithOverviewMode = true
                         if (view.loads.needsLoad(content, forceReload)) {
                             view.gesture.reset()
                             if (state.restoreContent != content) state.restoreContent = null

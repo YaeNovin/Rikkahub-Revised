@@ -76,18 +76,16 @@ internal fun additionalRendererScript(renderer: InteractiveCodeRenderer): String
         if (!source.trim().startsWith('<')) throw new Error('请提供完整 MusicXML 文本；此入口不读取 URL 或压缩 MXL 文件');
         const score = new DOMParser().parseFromString(source, 'application/xml');
         if (score.querySelector('parsererror') || score.documentElement.tagName !== 'score-partwise') throw new Error('需要有效的 score-partwise MusicXML 乐谱');
-        if (score.querySelectorAll('measure').length > 200) throw new Error('乐谱超过 200 小节，请分段显示');
+        if (!score.querySelector('part measure note')) throw new Error('MusicXML 乐谱没有可显示的音符或休止符');
+        if (score.querySelectorAll('part measure').length > 200) throw new Error('乐谱超过 200 小节，请分段显示');
         const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(root, { backend: 'svg', autoResize: false, drawTitle: true, followCursor: false });
         await osmd.load(score);
-        osmd.render();
-        let resizeQueued = false;
-        const resize = function() { if (resizeQueued) return; resizeQueued = true; requestAnimationFrame(function() { resizeQueued = false; try { osmd.render(); } catch (error) { fail(error); } }); };
-        if (typeof ResizeObserver === 'function') {
-            let width = root.clientWidth;
-            const observer = new ResizeObserver(function() { if (root.clientWidth !== width) { width = root.clientWidth; resize(); } });
-            observer.observe(root);
-            window.addEventListener('pagehide', function() { observer.disconnect(); }, { once: true });
-        } else window.addEventListener('resize', resize);
+        function renderScore() {
+            osmd.render();
+            if (!root.querySelector('svg')) throw new Error('MusicXML 未生成可显示的谱面');
+        }
+        renderScore();
+        window.rikkaReflowScore(root, renderScore, fail);
     """
     else -> error("Not an additional renderer: $renderer")
 }.trimIndent()

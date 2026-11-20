@@ -1,0 +1,10 @@
+// Isolate P0 device fixtures from the user's installed QA and release apps.
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.buildTypes.getByName('debug').applicationIdSuffix = '.revised.baselineqa'
+            }
+        }
+    }
+}

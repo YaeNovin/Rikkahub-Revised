@@ -85,11 +85,12 @@ internal fun buildTerminalPreviewHtml(
         <link rel="stylesheet" href="$assets/xterm-6.0.0.css">
         <style>
             html,body{width:100%;height:100%;margin:0;overflow:hidden;background:$background;color:$foreground}
-            #terminal-scroll{width:100%;height:calc(100% - 24px);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;touch-action:pan-y pinch-zoom}
+            #terminal-scroll{width:100%;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;touch-action:pan-y pinch-zoom}
             #terminal{height:100%;min-width:100%;box-sizing:border-box;padding:8px}
-            #terminal-hint{height:24px;padding:2px 8px;box-sizing:border-box;font:11px system-ui;opacity:.8}
-            #fallback,#error{margin:0;padding:12px;white-space:pre-wrap;overflow:auto;font:13px monospace}
-            #fallback{max-height:80vh} #error{color:#e5534b}
+            #terminal-fallback{height:100%;overflow:auto;box-sizing:border-box;padding:12px}
+            #fallback,#error{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:13px monospace}
+            #error{color:#e5534b;margin-bottom:8px}
+            #terminal-scroll[hidden],#terminal-fallback[hidden]{display:none}
             .xterm-helper-textarea{pointer-events:none!important}
             .xterm .xterm-cursor{visibility:hidden!important}
         </style>
@@ -98,8 +99,7 @@ internal fun buildTerminalPreviewHtml(
         <script defer src="$assets/terminal-preview.js"></script>
         </head><body data-source="$encoded" data-background="$background" data-foreground="$foreground" data-dark="$dark" data-embedded="true">
         <div id="terminal-scroll"><div id="terminal" role="region" aria-label="只读终端输出"></div></div>
-        <div id="terminal-hint">左右滑动查看完整行，展开后上下查看全部输出</div>
-        <pre id="error" hidden></pre><pre id="fallback" hidden></pre>
+        <div id="terminal-fallback" hidden><pre id="error"></pre><pre id="fallback"></pre></div>
         </body></html>
     """.trimIndent()
 }
@@ -113,6 +113,7 @@ internal fun TerminalCodePreview(html: String, onViewCreated: (android.webkit.We
             allowContentAccess = false
             domStorageEnabled = false
             blockNetworkLoads = true
+            loadWithOverviewMode = false
             javaScriptCanOpenWindowsAutomatically = false
             setSupportMultipleWindows(false)
         },

@@ -1,266 +1,58 @@
 <div align="center">
-  <img src="docs/icon.png" alt="Rikkahub Revised app icon" width="100" />
+  <img src="docs/icon.png" alt="Rikkahub Revised app icon" width="88" />
   <h1>Rikkahub Revised</h1>
-
-  <p>An independent, community-maintained Android AI chat client based on RikkaHub.</p>
-
-  English | [Simplified Chinese](README_ZH_CN.md)
-
-  [![Latest release](https://img.shields.io/github/v/release/YaeNovin/Rikkahub-Revised?display_name=tag&sort=semver)](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)
-  [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-  [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg)](https://developer.android.com/about/versions/oreo)
-  [![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a)
+  <p>An independent Android AI chat client based on <a href="https://github.com/rikkahub/rikkahub">RikkaHub</a>.</p>
+  <p>English · <a href="README_ZH_CN.md">简体中文</a></p>
+  <p>
+    <a href="https://github.com/YaeNovin/Rikkahub-Revised/releases/latest"><img alt="Latest stable release" src="https://img.shields.io/github/v/release/YaeNovin/Rikkahub-Revised?label=Release" /></a>
+    <a href="https://developer.android.com/about/versions/oreo"><img alt="Android 8.0 or newer" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&amp;logoColor=white" /></a>
+    <a href="https://github.com/YaeNovin/Rikkahub-Revised/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/YaeNovin/Rikkahub-Revised?style=flat&amp;logo=github" /></a>
+    <a href="LICENSE"><img alt="AGPL-3.0 license" src="https://img.shields.io/badge/License-AGPL--3.0-blue" /></a>
+    <a href="https://trendshift.io/"><img alt="Explore GitHub trends on Trendshift" src="https://img.shields.io/badge/Trendshift-Explore-6F42C1" /></a>
+  </p>
 </div>
 
-> [!IMPORTANT]
-> Rikkahub Revised is a modified distribution of
-> [RikkaHub](https://github.com/rikkahub/rikkahub). It is not an official
-> RikkaHub release and is not endorsed or supported by the upstream
-> maintainers. Revised-specific issues should be reported in this repository,
-> not to the upstream project.
+## 📲 Download
 
-## Project Identity
+**[Download the latest APK from GitHub Releases](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest)**
 
-This repository contains the complete source for Rikkahub Revised. The current
-release line is based on upstream RikkaHub `2.4.8` at commit
-[`8824e0e8`](https://github.com/rikkahub/rikkahub/commit/8824e0e841f2008b322ca8214a27a978e4b4abaa).
-Later upstream releases are not automatically included.
+The latest stable release provides a versioned ARM64 APK and `SHA256SUMS.txt`. Open the [release archive](https://github.com/YaeNovin/Rikkahub-Revised/releases) for older builds. Revised uses the Android package ID `me.rerere.rikkahub.revised` and can be installed alongside upstream RikkaHub. Each app keeps its own data. In-place updates require the [Revised signing certificate](docs/RELEASE_SIGNING.md).
 
-| Item | Value |
-| --- | --- |
-| Distribution name | `Rikkahub Revised` |
-| Android application ID | `me.rerere.rikkahub.revised` |
-| Current release | [`2.4.8-revised.10`](https://github.com/YaeNovin/Rikkahub-Revised/releases/tag/2.4.8-revised.10) |
-| Minimum Android version | Android 8.0 (API 26) |
-| Source repository | `YaeNovin/Rikkahub-Revised` |
-| License | GNU Affero General Public License v3.0 |
+## ✨ What you can do
 
-The distinct application ID allows Rikkahub Revised and upstream RikkaHub to
-be installed on the same device. Their app data is separate, and this project
-does not automatically import data from the upstream application.
+- **Chat with your models.** Connect OpenAI-, Gemini-, or Claude-compatible providers. Use streaming chat, images, documents, web search, and assistant profiles.
+- **Keep the context you need.** Branch conversations, summarize long histories, and attach local knowledge bases, memories, or world books to an assistant.
+- **Read rich output in chat.** Use native Markdown tables, search citations, formulas, syntax highlighting, charts, diagrams, music notation, and read-only ANSI previews.
+- **Make the interface your own.** Use wallpaper-derived text colors, optional HEX swatches and quote highlighting, speech services, or the embedded Web UI.
 
-## Download
+Feature availability depends on the model, protocol, and preview surface. See the [documentation index](docs/README.md) and [rendering support matrix](docs/rendering-roadmap-20261120.md) for details about the current source.
 
-Official Rikkahub Revised APKs are published only through this repository's
-[GitHub Releases](https://github.com/YaeNovin/Rikkahub-Revised/releases/latest).
+<details>
+<summary>📚 Release history and upstream baseline</summary>
 
-| APK | Intended devices |
-| --- | --- |
-| `app-arm64-v8a-release-2.4.8-revised.10.apk` | ARM64 Android phones and tablets |
-| `SHA256SUMS.txt` | SHA-256 checksum for the published APK |
+- [2.4.8-revised.10 release notes](docs/release-notes-2.4.8-revised.10.md) and [verification record](docs/release-verification-2.4.8-revised.10.md)
+- [All releases](https://github.com/YaeNovin/Rikkahub-Revised/releases) and [modification record](docs/MODIFICATIONS.md)
+- The upstream baseline for this release line is [RikkaHub 2.4.8 at `8824e0e8`](https://github.com/rikkahub/rikkahub/commit/8824e0e841f2008b322ca8214a27a978e4b4abaa).
 
-The `2.4.8-revised.10` release publishes an ARM64 APK with the version in its
-filename. The updater detects the device ABI from the name. x86_64 and Universal
-packages from older releases remain available on their original release pages;
-they are not `.10` builds. The in-app updater reads the latest public release from this repository and
-offers an APK compatible with the device ABI. Release descriptions contain only
-user-facing updates and fixes; package integrity and signing continuity are
-verified separately during publication.
+</details>
 
-All future Revised releases must use the same signing certificate. Builds
-signed with another key cannot update an existing Rikkahub Revised installation.
-See [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for the public certificate record
-and signing continuity policy. Private signing material is never stored in this
-repository.
+<details>
+<summary>🛠️ Build from source</summary>
 
-## Provider Promotion
-
-> **Notice:** The providers below are listed for promotion only. They are
-> third-party providers and are not affiliated with this project.
-
-| Provider | Overview |
-| --- | --- |
-| [OrcaRouter](https://www.orcarouter.ai/ref/ref_98131775e412e81ab36a) | Asia's largest large-model API gateway, offering secure inference with zero markup. Pay-as-you-go and subscription plans are available, and free models are provided for long-term use alongside paid models. Intelligent routing, secure deployment, and lower costs. |
-
-## What Revised Changes
-
-Rikkahub Revised keeps the upstream Android client as its foundation and adds
-or changes the following areas:
-
-### Current Formal Release: 2.4.8-revised.10
-
-- Expanded model-name matching, provider parameters, image-generation settings,
-  search services, and Gemini tools, with dedicated decision-model settings.
-- Fixed delayed sent messages, stop controls, prompt-editor crashes, and
-  navigation issues; improved scrolling, startup, and background recovery.
-- Improved wallpaper-derived text colors and dark-mode readability, with
-  optional HEX swatches and quotation highlighting.
-- Enhanced native tables and search citations while preserving pasted source
-  and literal code; improved logs, web settings, and image generation.
-
-Version code 186 retains the existing release certificate for in-place updates.
-See the [bilingual release notes](docs/release-notes-2.4.8-revised.10.md),
-[verification record](docs/release-verification-2.4.8-revised.10.md), and
-[documentation index](docs/README.md).
-
-### Previous Formal Release: 2.4.8-revised.9
-
-- Expanded world-book imports, recursion, source bindings, entry editing, tests,
-  and tutorials, with explicit SillyTavern compatibility limits.
-- Improved Gemini question prompts and mixed built-in/function tools.
-- Added durable request logs and collapsible long responses and instructions.
-- Improved speech recognition and playback, with model-aware MiniMax/MiMo
-  settings and filtered speech-model discovery.
-- Fixed long dropdown crashes, enlarged menu backgrounds, and web-content focus
-  crashes; improved appearance and text-color integration.
-
-Version code 185 uses the existing release certificate for in-place updates
-from previous Revised releases. See the complete
-[bilingual release notes](docs/release-notes-2.4.8-revised.9.md),
-[source update](docs/changes-2026-09-15.md), and [documentation index](docs/README.md).
-The image-generation flow was expanded in the subsequent `.10` release.
-
-### Earlier Revised changes (through 2.4.8-revised.8)
-
-- Added the OrcaRouter provider with official website and documentation links.
-- Improved model- and protocol-aware parameters, reasoning depth, tool calls,
-  and third-party compatible endpoints.
-- Expanded workspace SAF/local-file operations, shell execution safeguards,
-  prompt templates, placeholders, world books, memories, and entertainment mode.
-- Added request statistics, high-precision timing diagnostics, and focused
-  regression coverage.
-- Fixed chat loading, stream recovery, conversation branches, and complex
-  Markdown, Diff, LaTeX, Mermaid, and WebView rendering.
-- Improved image-generation settings and full-screen previews, plus localized
-  resources and Android compatibility handling.
-
-- Added model-aware request parameters for OpenAI, Claude, Gemini, Grok, Qwen,
-  and DeepSeek, plus sanitized diagnostics that omit credentials, prompts,
-  schemas, and binary content.
-- Added premature stream termination detection, corrected retry time budgets,
-  and improved event-stream keepalive behavior.
-- Added Gemini image-generation controls and unified source, inline, and
-  full-screen previews for supported rich code blocks.
-- Fixed crop cleanup before persistence completed, conversation switching after
-  repeated settings changes, non-atomic navigation replacement, and misplaced
-  provider model actions.
-
-- Token-aware rolling context summaries, automatic context-window discovery,
-  animated compression feedback, and context usage display.
-- Local knowledge bases with document ingestion, chunking, hybrid retrieval,
-  assistant bindings, RAG, source citations, and file previews.
-- Expanded memory metadata, embedding-based retrieval, lexical fallback, and
-  scoped memory tools.
-- Provider capability metadata, embedding support, connection diagnostics,
-  sanitized protocol traces, maximum reasoning controls with provider-specific
-  parameter mapping, and safer custom-provider configuration handling.
-- Tighter approval and privacy boundaries for workspace, clipboard, calendar,
-  and screen-time tools.
-- Separated backup scopes and safer S3/WebDAV archive restoration.
-- Day-based cleanup for chat attachments and generated images while retaining
-  conversation text.
-- Interactive ECharts, ABC notation, Leaflet, and railroad-diagram rendering,
-  plus Mermaid, LaTeX, Markdown, and WebView improvements.
-- A Revised-owned update feed with ABI-aware APK selection.
-- A separate application ID, isolated URI schemes and authorities, and
-  opt-in Firebase integration.
-
-### Source changes included in 2.4.8-revised.8
-
-- Added DeepSeek V4.1-Flash model recognition through the canonical
-  `deepseek-flash` name and legacy aliases, including 1M context, 384K output
-  limits, vision input, reasoning-effort mapping, and tool-call safeguards.
-- Added richer `ask_user` interactions, safer cross-protocol tool schemas,
-  background media generation, video-provider support, and generation keepalive
-  handling.
-- Added offline rendering assets and regression coverage for KaTeX, SVG,
-  Mermaid, Graphviz, charts, maps, music notation, GitHub cards, and WebView
-  full-screen previews.
-- Added conversation-scoped memory controls, memory lifecycle handling,
-  context accounting, inspiration cards, chat suggestions, request-log
-  formatting, and appearance/text-color improvements.
-
-The `.8` package was built from its release-tag source after the grouped commits. It
-uses version code 184 and the existing release certificate for in-place updates.
-The complete bilingual release notes are in
-[release-notes-2.4.8-revised.8.md](docs/release-notes-2.4.8-revised.8.md).
-
-For the auditable modification record, upstream comparison, and release
-requirements, read [MODIFICATIONS.md](docs/MODIFICATIONS.md).
-
-## Inherited Capabilities
-
-The upstream foundation provides the core Android chat experience, including:
-
-- OpenAI-, Google-, and Anthropic-compatible providers and custom endpoints.
-- Streaming chat, multimodal input, document parsing, and message branching.
-- MCP, web search providers, prompt variables, tools, and assistant profiles.
-- Markdown, syntax highlighting, LaTeX, tables, and Mermaid rendering.
-- Local memory, provider import/export, an embedded web interface, and the
-  optional Linux workspace environment.
-
-These inherited capabilities originate from the upstream project unless a
-change is identified in [MODIFICATIONS.md](docs/MODIFICATIONS.md).
-
-## Build From Source
-
-Prerequisites:
-
-- JetBrains JDK 21 for the Gradle daemon (see `gradle/gradle-daemon-jvm.properties`);
-  Java/Kotlin source targets remain Java 17
-- Android SDK with API 37 and the Build Tools selected by the Android Gradle plugin
-  (the current local validation uses Build Tools 36.0.0)
-- Git with submodule support
-
-Clone the complete source and initialize its submodule:
+Install JetBrains JDK 21, Android SDK API 37, and the Web UI dependencies described in the [build guide](docs/building.md).
 
 ```bash
 git clone --recurse-submodules https://github.com/YaeNovin/Rikkahub-Revised.git
 cd Rikkahub-Revised
-```
-
-Build a development APK on Windows:
-
-```powershell
-.\gradlew.bat :app:assembleDebug
-```
-
-On Linux or macOS:
-
-```bash
 ./gradlew :app:assembleDebug
 ```
 
-Run JVM tests with `./gradlew test` or `gradlew.bat test`. The Android app is
-the `app` module; the remaining modules and common change locations are mapped
-in [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md).
+On Windows, run `.\gradlew.bat :app:assembleDebug`. See the [project structure](docs/PROJECT_STRUCTURE.md) and [developer scripts](scripts/README.md) for test commands and module entry points.
 
-The chat request lifecycle is documented separately in
-[English](docs/references/chat-generation-pipeline.en.md) and
-[Simplified Chinese](docs/references/chat-generation-pipeline.zh-CN.md).
+</details>
 
-Release builds read signing values from the ignored local `local.properties`.
-Do not commit keystores, passwords, `local.properties`, or a Firebase
-configuration. Firebase and Crashlytics are disabled by default; a
-maintainer-owned configuration matching the Revised application ID is required
-to opt in.
+## 💬 Support and credits
 
-## Contributing and Support
+Rikkahub Revised is independently maintained. Use this repository’s [issues](https://github.com/YaeNovin/Rikkahub-Revised/issues) and [pull requests](https://github.com/YaeNovin/Rikkahub-Revised/pulls) for feedback. Include the app version and reproduction steps, keeping credentials and private chat content out of reports.
 
-Bug reports and changes for Rikkahub Revised are welcome through this
-repository's [issues](https://github.com/YaeNovin/Rikkahub-Revised/issues) and
-pull requests. Please state whether a problem also occurs in upstream RikkaHub
-and avoid including provider keys, account data, signing files, or private chat
-content in reports.
-
-Upstream documentation and community channels belong to the upstream project.
-They should not be treated as support channels for Revised-only behavior.
-
-## License and Attribution
-
-Rikkahub Revised is distributed under the
-[GNU Affero General Public License v3.0](LICENSE), consistent with its upstream
-foundation. When distributing modified versions or providing the software over
-a network, comply with the AGPL-3.0 source-availability requirements.
-
-- [NOTICE](NOTICE) identifies the upstream project and the Revised distribution.
-- [MODIFICATIONS.md](docs/MODIFICATIONS.md) records the material modifications.
-- [CONTRIBUTORS.md](docs/CONTRIBUTORS.md) lists the people who directly build and
-  maintain this independent repository.
-- [THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) lists bundled third-party
-  components and their licenses.
-- [RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) records the public signing identity
-  and release-key continuity requirements.
-
-Copyright and authorship of unchanged upstream code remain with the upstream
-contributors. This repository does not claim authorship of that work.
+Rikkahub Revised is licensed under the [GNU Affero General Public License v3.0](LICENSE). See [NOTICE](NOTICE), [contributors](docs/CONTRIBUTORS.md), and [third-party notices](docs/THIRD_PARTY_NOTICES.md) for attribution and bundled licenses.

@@ -33,10 +33,11 @@ function contrast(a, b) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const executablePath = process.env.RENDERER_TEST_BROWSER;
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : { channel: 'msedge' }) });
   const results = [];
   try {
-    for (const scenario of ['dark', 'light', 'fullscreen', 'empty', 'long', 'missing']) {
+    for (const scenario of ['dark', 'light', 'fullscreen', 'empty', 'long', 'legacy', 'missing']) {
       const page = await browser.newPage({ viewport: { width: 393, height: 300 }, hasTouch: true, isMobile: true });
       const requests = [], errors = [], data = [];
       page.on('pageerror', error => errors.push(error.message));
@@ -57,11 +58,15 @@ async function main() {
           },
         });
       });
+      if (scenario === 'legacy') await page.addInitScript(() => {
+        window.TextDecoder = undefined;
+        window.ResizeObserver = undefined;
+      });
       await page.route('**/*', async route => {
         const url = new URL(route.request().url());
         if (url.origin !== 'https://rikkahub.local') { requests.push(url.href); return route.abort(); }
         if (url.pathname === '/') return route.fulfill({ contentType: 'text/html; charset=utf-8',
-          body: fs.readFileSync(path.join(reports, (scenario === 'missing' ? 'dark' : scenario) + '.html'), 'utf8') });
+          body: fs.readFileSync(path.join(reports, (['legacy', 'missing'].includes(scenario) ? 'dark' : scenario) + '.html'), 'utf8') });
         const file = path.resolve(root, 'app/src/main', '.' + url.pathname);
         if (!file.startsWith(assets + path.sep)) return route.abort();
         if (scenario === 'missing' && file.endsWith('xterm-6.0.0.js')) return route.fulfill({ status: 404, body: 'missing' });
@@ -74,6 +79,10 @@ async function main() {
           assert.equal(await page.evaluate(() => window.__rikkaRenderStatus), 'error');
           assert.equal(await page.locator('#fallback').isVisible(), true);
           assert.ok((await page.locator('#fallback').textContent()).includes('SUCCESS'));
+          assert.ok(await page.locator('#terminal-scroll').isHidden());
+          const error = await page.locator('#error').boundingBox();
+          const fallback = await page.locator('#fallback').boundingBox();
+          assert.ok(error && error.y >= 0 && fallback && fallback.y < 200, 'Fallback must start inside the viewport');
         } else {
           assert.equal(await page.evaluate(() => window.__rikkaRenderStatus), 'ready');
           assert.equal(await page.locator('.xterm-helper-textarea').isDisabled(), true);
@@ -89,6 +98,7 @@ async function main() {
           assert.ok(original.cols > 10 && original.cols <= 500);
           assert.ok(original.rows <= 80);
           assert.equal(original.viewport, 0);
+          if (scenario === 'legacy') assert.ok(original.lines.join('\n').includes('中文 🙂'));
           if (['dark', 'light', 'fullscreen'].includes(scenario)) {
             assert.ok(original.lines.join('\n').includes('中文'));
             assert.ok(original.lines.join('\n').includes('progress 100%'));

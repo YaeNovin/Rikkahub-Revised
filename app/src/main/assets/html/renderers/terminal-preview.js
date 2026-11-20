@@ -6,40 +6,39 @@
   const errorView = document.getElementById('error');
   const viewport = document.getElementById('terminal-scroll') || root;
   const embedded = document.body.dataset.embedded !== 'false';
-  const hint = document.getElementById('terminal-hint');
-  if (hint && !embedded) hint.textContent = '上下左右滑动浏览，复制可返回源码视图';
   viewport.style.touchAction = embedded ? 'pan-y pinch-zoom' : 'pinch-zoom';
-  let terminal, observer, frame = 0, disposed = false;
+  let terminal, observer, onResize, frame = 0, disposed = false;
   let rowHeight = 18;
   window.__rikkaRenderStatus = 'loading';
   function dispose() {
     if (disposed) return;
     disposed = true;
     if (observer) observer.disconnect();
+    else if (onResize) window.removeEventListener('resize', onResize);
     if (frame) cancelAnimationFrame(frame);
     if (terminal) terminal.dispose();
   }
   function fail(error) {
     dispose();
-    root.hidden = true;
-    fallback.hidden = false;
+    viewport.hidden = true;
+    document.getElementById('terminal-fallback').hidden = false;
     errorView.textContent = '终端预览加载失败，可切换到源码查看原始内容。';
-    errorView.hidden = false;
     window.__rikkaRenderStatus = 'error';
     console.error('Read-only terminal preview failed', error);
   }
   try {
     const bytes = Uint8Array.from(atob(document.body.dataset.source), c => c.charCodeAt(0));
-    const source = new TextDecoder('utf-8').decode(bytes);
+    const source = typeof TextDecoder === 'function' ? new TextDecoder('utf-8').decode(bytes)
+      : decodeURIComponent(Array.from(bytes, c => '%' + c.toString(16).padStart(2, '0')).join(''));
     // This is text, never HTML or executable source, even if the transcript contains tags.
-    fallback.textContent = source.replace(/\x1b\[[0-9;:]*[A-Za-z]/g, '');
     const plain = source.replace(/\x1b\[[0-9;:]*[A-Za-z]/g, '');
+    fallback.textContent = plain;
     let sourceColumns = 2;
     for (const line of plain.split(/[\r\n]/)) {
       let columns = 0;
       for (const character of line) {
         const point = character.codePointAt(0);
-        columns += point >= 0x1100 ? 2 : character === '\t' ? 4 : 1;
+        columns += character === '\t' ? 8 - columns % 8 : point >= 0x1100 ? 2 : 1;
         if (columns >= 240) break;
       }
       sourceColumns = Math.max(sourceColumns, Math.min(240, columns));
@@ -88,10 +87,13 @@
       }
     };
     resize();
-    observer = new ResizeObserver(function () {
+    onResize = function () {
       if (!frame && !disposed) frame = requestAnimationFrame(resize);
-    });
-    observer.observe(viewport);
+    };
+    if (typeof ResizeObserver === 'function') {
+      observer = new ResizeObserver(onResize);
+      observer.observe(viewport);
+    } else window.addEventListener('resize', onResize);
     let touch = null;
     viewport.addEventListener('touchstart', function (event) {
       if (disposed || event.touches.length !== 1) { touch = null; return; }

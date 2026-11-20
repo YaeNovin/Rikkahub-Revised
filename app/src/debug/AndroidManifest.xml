@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <activity android:name="me.rerere.rikkahub.BaselineAlignmentActivity" android:exported="true" />
         <activity android:name="me.rerere.rikkahub.CitationRegressionActivity" android:exported="true" />
         <activity android:name="me.rerere.rikkahub.TableRegressionActivity" android:exported="true" />
         <activity android:name="me.rerere.rikkahub.RenderStressActivity" android:exported="true" />

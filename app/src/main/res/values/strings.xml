@@ -1769,6 +1769,14 @@
   <string name="setting_page_web_server">Web Server</string>
   <string name="setting_page_web_server_address_note">Address Notes</string>
   <string name="setting_page_web_server_address_note_desc">LAN Address: Uses device WiFi IP, accessible to other devices on the same network. Unavailable on mobile data.\nLocal Address: Uses localhost, accessible on this device only.\nmDNS Address: Uses .local hostname, accessible by name from other devices on the same network without knowing the IP.</string>
+  <string name="setting_page_web_server_background_title">Background Web access</string>
+  <string name="setting_page_web_server_background_desc">The server runs as a foreground service and keeps the CPU awake while running. Leaving it on may increase battery use.</string>
+  <string name="setting_page_web_server_background_restricted">The system currently restricts this app from running in the background.</string>
+  <string name="setting_page_web_server_background_exempt">This app is exempt from battery optimization. Your device may apply other background limits.</string>
+  <string name="setting_page_web_server_background_optimized">Battery optimization applies to this app.</string>
+  <string name="setting_page_web_server_background_help">If Web access stops when you leave the app, find this app under Apps in system settings. In its battery or background settings, allow background activity or choose Unrestricted if available. Menu names vary by device.</string>
+  <string name="setting_page_web_server_background_open_settings">Open system settings</string>
+  <string name="setting_page_web_server_background_settings_unavailable">Could not open settings. Open system settings manually and find this app under Apps.</string>
   <string name="setting_page_web_server_desc">Allow you access RikkaHub via Web</string>
   <string name="setting_page_web_server_error">Error</string>
   <string name="setting_page_web_server_jwt_enable">Enable authentication</string>
