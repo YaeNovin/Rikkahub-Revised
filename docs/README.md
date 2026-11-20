@@ -33,6 +33,7 @@
 - [Markdown 与上游同步](markdown-upstream-sync-review-20261119.md)
 - [Markdown 与 GFM 渲染覆盖](markdown-gfm-rendering-audit-20261120.md)
 - [聊天渲染现状与下一步计划](rendering-roadmap-20261120.md)
+- [GitHub 卡片、Token 方案与链接交互](github-cards-and-link-interactions-20261120.md)
 - [总体审阅](module-review-and-roadmap-20261115.md)
 
 ## 发行、归属与历史

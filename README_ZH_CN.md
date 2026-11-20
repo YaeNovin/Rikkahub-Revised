@@ -8,7 +8,9 @@
     <a href="https://developer.android.com/about/versions/oreo"><img alt="Android 8.0 或更高版本" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&amp;logoColor=white" /></a>
     <a href="https://github.com/YaeNovin/Rikkahub-Revised/stargazers"><img alt="GitHub 星标数" src="https://img.shields.io/github/stars/YaeNovin/Rikkahub-Revised?style=flat&amp;logo=github" /></a>
     <a href="LICENSE"><img alt="AGPL-3.0 许可证" src="https://img.shields.io/badge/License-AGPL--3.0-blue" /></a>
-    <a href="https://trendshift.io/"><img alt="在 Trendshift 浏览 GitHub 趋势" src="https://img.shields.io/badge/Trendshift-Explore-6F42C1" /></a>
+  </p>
+  <p>
+    <a href="https://trendshift.io/repositories/178561?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-178561" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/178561/daily?language=Kotlin" alt="YaeNovin/Rikkahub-Revised | Trendshift" width="250" height="55" /></a>
   </p>
 </div>
 

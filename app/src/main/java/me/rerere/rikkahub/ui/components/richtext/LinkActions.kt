@@ -25,13 +25,10 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet
 import me.rerere.rikkahub.utils.openUrl
-import java.net.URI
+import me.rerere.rikkahub.utils.webLinkUrl
 
 data class LinkTarget(val url: String, val label: String = "", val onPreviewImage: (() -> Unit)? = null) {
-    val isWeb: Boolean get() = runCatching {
-        val uri = URI(url)
-        uri.scheme.lowercase() in setOf("https", "http") && !uri.host.isNullOrBlank()
-    }.getOrDefault(false)
+    val isWeb: Boolean get() = webLinkUrl(url) != null
 }
 
 val LocalLinkActionHandler = staticCompositionLocalOf<((LinkTarget) -> Unit)?> { null }
@@ -60,7 +57,12 @@ fun Modifier.linkActions(url: String, label: String = ""): Modifier {
 }
 
 @Composable
-fun LinkActionsSheet(target: LinkTarget?, onDismiss: () -> Unit, onDraft: (String) -> Unit) {
+fun LinkActionsSheet(
+    target: LinkTarget?,
+    onDismiss: () -> Unit,
+    onDraft: (String) -> Unit,
+    onPreviewWeb: ((String) -> Unit)? = null,
+) {
     if (target == null) return
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
@@ -74,7 +76,14 @@ fun LinkActionsSheet(target: LinkTarget?, onDismiss: () -> Unit, onDraft: (Strin
             SelectionContainer {
                 Text(target.url, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
             }
-            TextButton(onClick = { context.openUrl(target.url); onDismiss() }) { Text("打开链接") }
+            TextButton(onClick = {
+                onDismiss()
+                context.openUrl(target.url, onPreviewWeb)
+            }) { Text("打开链接") }
+            val previewUrl = webLinkUrl(target.url)
+            if (previewUrl != null && onPreviewWeb != null) {
+                TextButton(onClick = { onDismiss(); onPreviewWeb(previewUrl) }) { Text("预览网页") }
+            }
             target.onPreviewImage?.let { preview ->
                 TextButton(onClick = { onDismiss(); preview() }) { Text("查看图片") }
             }

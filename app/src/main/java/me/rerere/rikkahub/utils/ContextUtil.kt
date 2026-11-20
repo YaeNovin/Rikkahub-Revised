@@ -26,6 +26,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.R
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 import java.io.File
 import java.io.FileOutputStream
@@ -115,20 +116,36 @@ fun Context.openUsageAccessSettings() {
     }
 }
 
-/**
- * Open a url
- */
-fun Context.openUrl(url: String) {
-    Log.i(TAG, "openUrl: $url")
-    runCatching {
-        val intent = CustomTabsIntent.Builder()
-            .setShowTitle(true)
-            .build()
-        intent.launchUrl(this, url.toUri())
-    }.onFailure {
-        it.printStackTrace()
-        Toast.makeText(this, getString(R.string.error_message_open_url), Toast.LENGTH_SHORT).show()
+internal fun webLinkUrl(url: String): String? {
+    val value = url.trim()
+    val prefixed = if (value.startsWith("www.", ignoreCase = true)) "https://$value" else value
+    if (!prefixed.startsWith("https://", ignoreCase = true) && !prefixed.startsWith("http://", ignoreCase = true)) return null
+    return prefixed.toHttpUrlOrNull()?.takeIf { it.username.isEmpty() && it.password.isEmpty() }?.toString()
+}
+
+fun Context.openUrl(url: String, onBrowserUnavailable: ((String) -> Unit)? = null) {
+    val webUrl = webLinkUrl(url)
+    val uri = (webUrl ?: url.trim()).toUri()
+    val activity = getActivity()
+    val launchContext = activity ?: this
+    if (webUrl != null) {
+        val opened = runCatching {
+            val tab = CustomTabsIntent.Builder().setShowTitle(true).build()
+            if (activity == null) tab.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            tab.launchUrl(launchContext, uri)
+        }.isSuccess
+        if (opened) return
     }
+    if (webUrl != null || uri.scheme?.lowercase() in setOf("mailto", "tel")) {
+        val opened = runCatching {
+            launchContext.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
+                if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }.isSuccess
+        if (opened) return
+    }
+    if (webUrl != null && onBrowserUnavailable != null) onBrowserUnavailable(webUrl)
+    else Toast.makeText(this, getString(R.string.error_message_open_url), Toast.LENGTH_SHORT).show()
 }
 
 fun Context.getActivity(): Activity? {

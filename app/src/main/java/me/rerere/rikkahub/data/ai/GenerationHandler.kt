@@ -73,6 +73,8 @@ import me.rerere.rikkahub.data.ai.transformers.resolvePromptVariables
 import me.rerere.rikkahub.data.ai.tools.createKnowledgeBaseTools
 import me.rerere.rikkahub.data.ai.tools.KnowledgeBaseCapabilities
 import me.rerere.rikkahub.data.ai.tools.SESSION_CAPABILITIES_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.SEARCH_WEB_TOOL_NAME
+import me.rerere.rikkahub.data.ai.tools.withSearchWebCitationMetadata
 import me.rerere.rikkahub.data.ai.tools.withSessionCapabilitiesTool
 import me.rerere.rikkahub.data.ai.tools.withRenderingTools
 import me.rerere.rikkahub.data.ai.tools.CHAT_IMAGE_TOOL_NAME
@@ -579,9 +581,11 @@ class GenerationHandler(
                                 toolDef.execute(args)
                             }
                             val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
-                            executedTools += tool.copy(
-                                output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
-                            )
+                            val output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
+                            val executed = tool.copy(output = output)
+                            executedTools += if (output !== result && tool.toolName == SEARCH_WEB_TOOL_NAME) {
+                                executed.withSearchWebCitationMetadata(result)
+                            } else executed
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                             if (it is CancellationException) throw it

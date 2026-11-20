@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -74,9 +76,6 @@ import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.flow.debounce
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
@@ -115,8 +114,8 @@ import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.ui.theme.resolveChatBodyTextStyle
 import me.rerere.rikkahub.ui.theme.extendColors
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.openUrl
+import me.rerere.rikkahub.data.ai.tools.searchWebCitations
+import me.rerere.rikkahub.utils.webLinkUrl
 import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
@@ -455,40 +454,27 @@ internal fun MessagePartsBlock(
     val hapticFeedback = LocalHapticFeedback.current
     val partsState by rememberUpdatedState(parts)
     val loadingState by rememberUpdatedState(loading)
+    val uriHandler by rememberUpdatedState(LocalUriHandler.current)
+    val citationContext by rememberUpdatedState(context)
     val linkActions by rememberUpdatedState(me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler.current)
-    val handleLongClickCitation: (String) -> Unit = { citationId ->
-        partsState.filterIsInstance<UIMessagePart.Tool>().filter { it.toolName == "search_web" && it.isExecuted }.forEach { part ->
-            val items = runCatching {
-                JsonInstant.parseToJsonElement(part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
-                    .jsonObject["items"]?.jsonArray
-            }.getOrNull().orEmpty()
-            items.firstOrNull { it.jsonObject["id"]?.jsonPrimitive?.content == citationId }?.jsonObject?.let { item ->
-                item["url"]?.jsonPrimitive?.content?.let { url ->
-                    linkActions?.invoke(me.rerere.rikkahub.ui.components.richtext.LinkTarget(url, item["title"]?.jsonPrimitive?.content.orEmpty()))
+    val resolveCitation = remember {
+        { citationId: String ->
+            partsState.asSequence().filterIsInstance<UIMessagePart.Tool>()
+                .flatMap { it.searchWebCitations().asSequence() }
+                .firstNotNullOfOrNull { citation ->
+                    if (citation.id != citationId) null else webLinkUrl(citation.url)?.let {
+                        me.rerere.rikkahub.ui.components.richtext.LinkTarget(it, citation.title)
+                    }
+                }.also {
+                    if (it == null) Toast.makeText(citationContext, "找不到此引用的网页地址。", Toast.LENGTH_SHORT).show()
                 }
-            }
         }
     }
-
     val handleClickCitation: (String) -> Unit = remember {
-        handler@{ citationId ->
-            partsState.forEach { part ->
-                if (part is UIMessagePart.Tool && part.toolName == "search_web" && part.isExecuted) {
-                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-                    val items =
-                        runCatching { JsonInstant.parseToJsonElement(outputText).jsonObject["items"]?.jsonArray }.getOrNull()
-                            ?: return@forEach
-                    items.forEach { item ->
-                        val id = item.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
-                        val url = item.jsonObject["url"]?.jsonPrimitive?.content ?: return@forEach
-                        if (citationId == id) {
-                            context.openUrl(url)
-                            return@handler
-                        }
-                    }
-                }
-            }
-        }
+        { citationId -> resolveCitation(citationId)?.let { uriHandler.openUri(it.url) } }
+    }
+    val handleLongClickCitation: (String) -> Unit = remember {
+        { citationId -> resolveCitation(citationId)?.let { linkActions?.invoke(it) } }
     }
     LaunchedEffect(settings.displaySetting) {
         snapshotFlow { partsState }
@@ -850,7 +836,7 @@ internal fun MessagePartsBlock(
                                             text = buildAnnotatedString {
                                                 append("${index + 1}. ")
                                                 withLink(LinkAnnotation.Url(annotation.url)) {
-                                                    append(annotation.title.urlDecode())
+                                                    append(runCatching { annotation.title.urlDecode() }.getOrDefault(annotation.title).ifBlank { annotation.url })
                                                 }
                                             }
                                         )

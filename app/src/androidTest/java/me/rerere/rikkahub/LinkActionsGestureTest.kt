@@ -11,9 +11,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
@@ -59,6 +61,50 @@ class LinkActionsGestureTest {
         }
         compose.onNodeWithTag("link").performTouchInput { click() }
         compose.runOnIdle { assertEquals(1, opened); assertEquals(0, menus) }
+    }
+
+    @Test fun holdingAdjacentTextDoesNotOpenTheLinkMenuAndTheLinkStillTaps() {
+        var opened = 0
+        var menus = 0
+        val sentence = buildAnnotatedString {
+            append("See ")
+            append(text)
+            append(" for details.")
+        }
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalUriHandler provides object : UriHandler {
+                    override fun openUri(uri: String) {
+                        assertEquals(url, uri)
+                        opened++
+                    }
+                },
+                LocalLinkActionHandler provides { menus++ },
+            ) {
+                MaterialTheme { SelectionContainer { LinkText(sentence, Modifier.testTag("sentence")) } }
+            }
+        }
+        val node = compose.onNodeWithTag("sentence")
+        val layouts = mutableListOf<TextLayoutResult>()
+        node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.first()
+        node.performTouchInput { longClick(layout.getBoundingBox(1).center) }
+        node.performTouchInput { click(layout.getBoundingBox(6).center) }
+        compose.runOnIdle { assertEquals(0, menus); assertEquals(1, opened) }
+    }
+
+    @Test fun webPreviewMenuUsesTheNormalizedDestination() {
+        var target by mutableStateOf<LinkTarget?>(LinkTarget("www.example.com/a b", "Source"))
+        var preview: String? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalSettings provides Settings()) {
+                MaterialTheme {
+                    LinkActionsSheet(target, { target = null }, {}, { preview = it })
+                }
+            }
+        }
+        compose.onNodeWithText("预览网页").performClick()
+        compose.runOnIdle { assertNull(target); assertEquals("https://www.example.com/a%20b", preview) }
     }
 
     @Test fun scrollStartingOnLinkDoesNotOpenItOrShowMenu() {

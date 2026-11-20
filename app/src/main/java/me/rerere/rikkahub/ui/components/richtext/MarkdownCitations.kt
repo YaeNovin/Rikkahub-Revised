@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
@@ -126,12 +127,14 @@ internal fun AnnotatedString.Builder.appendCitationBadge(
             }
         }
         CompositionLocalProvider(LocalViewConfiguration provides inlineConfiguration) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).background(surface.container)
-                .combinedClickable(onClick = { onClickCitation(citation.id) },
-                    onLongClick = longClick?.let { { it(citation.id) } })
-                .semantics(mergeDescendants = true) { contentDescription = "引用 ${citation.label}" }, contentAlignment = Alignment.Center) {
-                Text(citation.label, color = surface.foreground, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = TextStyle(fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium))
+            DisableSelection {
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).background(surface.container)
+                    .combinedClickable(onClick = { onClickCitation(citation.id) },
+                        onLongClick = longClick?.let { { it(citation.id) } })
+                    .semantics(mergeDescendants = true) { contentDescription = "引用 ${citation.label}" }, contentAlignment = Alignment.Center) {
+                    Text(citation.label, color = surface.foreground, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium))
+                }
             }
         }
     })

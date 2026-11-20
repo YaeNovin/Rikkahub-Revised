@@ -20,22 +20,22 @@ internal val LocalChatWebPreviewVisible = compositionLocalOf { false }
 
 /** Owned by ChatPage rather than a lazy message: opening a preview does not pop/recreate the list. */
 @Composable
-internal fun ChatWebPreviewHost(contentId: String?, onDismiss: () -> Unit) {
-    if (contentId == null) return
+internal fun ChatWebPreviewHost(contentId: String?, url: String? = null, onDismiss: () -> Unit) {
+    if (contentId == null && url == null) return
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
         usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
         dismissOnClickOutside = false,
     )) {
         val view = LocalView.current
-        DisposableEffect(view) {
+        DisposableEffect(view, url == null) {
             val window = (view.parent as? DialogWindowProvider)?.window
             val controller = window?.let { WindowCompat.getInsetsController(it, view) }
             controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller?.hide(WindowInsetsCompat.Type.systemBars())
-            onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
+            if (url == null) controller?.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose { if (url == null) controller?.show(WindowInsetsCompat.Type.systemBars()) }
         }
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            WebViewPage(url = "", contentId = contentId, onClose = onDismiss)
+            WebViewPage(url = url.orEmpty(), contentId = contentId.orEmpty(), onClose = onDismiss)
         }
     }
 }

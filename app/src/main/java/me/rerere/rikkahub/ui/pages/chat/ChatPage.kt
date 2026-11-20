@@ -238,14 +238,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val navController = LocalNavController.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val chatUriHandler = remember(context) {
-        object : UriHandler {
-            override fun openUri(uri: String) {
-                context.openUrl(uri)
-            }
-        }
-    }
-
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
@@ -308,17 +300,34 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
 
     val inputState = vm.inputState
     var webPreviewId by remember(id) { mutableStateOf<String?>(null) }
+    var webPreviewUrl by remember(id) { mutableStateOf<String?>(null) }
+    val previewWebLink: (String) -> Unit = remember(id) {
+        { url ->
+            webPreviewId = null
+            webPreviewUrl = url
+        }
+    }
+    val chatUriHandler = remember(context, previewWebLink) {
+        object : UriHandler {
+            override fun openUri(uri: String) = context.openUrl(uri, previewWebLink)
+        }
+    }
     var linkActionsTarget by remember(id) { mutableStateOf<me.rerere.rikkahub.ui.components.richtext.LinkTarget?>(null) }
     me.rerere.rikkahub.ui.components.richtext.LinkActionsSheet(
         target = linkActionsTarget,
         onDismiss = { linkActionsTarget = null },
+        onPreviewWeb = previewWebLink,
         onDraft = { draft ->
             webPreviewId = null
+            webPreviewUrl = null
             inputState.appendText((if (inputState.textContent.text.isNotBlank()) "\n\n" else "") + draft)
         },
     )
     CompositionLocalProvider(me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler provides { linkActionsTarget = it }) {
-        me.rerere.rikkahub.ui.components.webview.ChatWebPreviewHost(webPreviewId) { webPreviewId = null }
+        me.rerere.rikkahub.ui.components.webview.ChatWebPreviewHost(webPreviewId, webPreviewUrl) {
+            webPreviewId = null
+            webPreviewUrl = null
+        }
     }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
@@ -447,8 +456,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     CompositionLocalProvider(
         LocalUriHandler provides chatUriHandler,
         me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler provides { linkActionsTarget = it },
-        me.rerere.rikkahub.ui.components.webview.LocalChatWebPreview provides { previewId -> webPreviewId = previewId },
-        me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible provides (webPreviewId != null),
+        me.rerere.rikkahub.ui.components.webview.LocalChatWebPreview provides { previewId ->
+            webPreviewUrl = null
+            webPreviewId = previewId
+        },
+        me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible provides (webPreviewId != null || webPreviewUrl != null),
         LocalChatPreviewReturn provides previewReturn,
         me.rerere.rikkahub.ui.components.webview.LocalBeforeWebPreview provides { previewReturn.capture(chatListState) },
         LocalGlobalBackgroundActive provides setting.hasActiveChatBackground(),
