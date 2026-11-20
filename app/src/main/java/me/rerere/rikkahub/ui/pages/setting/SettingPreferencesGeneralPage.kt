@@ -78,6 +78,11 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item(key = "github-settings") {
+                me.rerere.rikkahub.ui.components.ui.AppearanceCard {
+                    GitHubSettings(displaySetting, onUpdate = ::updateDisplaySetting)
+                }
+            }
             item {
                 var createNewConversationOnStart by rememberSharedPreferenceBoolean(
                     "create_new_conversation_on_start",

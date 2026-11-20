@@ -23,6 +23,7 @@ import org.koin.dsl.module
 import java.io.File
 
 val repositoryModule = module {
+    single { me.rerere.rikkahub.data.github.GitHubTokenStore(get<Context>()) }
     single { me.rerere.rikkahub.data.memory.MemoryMaintenanceService(get(), get()) }
     single { GitHubRepository(get(), onFailure = { repository, result ->
         me.rerere.common.android.Logging.logError(
@@ -32,6 +33,9 @@ val repositoryModule = module {
             details = "Repository: $repository\nEndpoint: api.github.com\nHTTP: ${result.httpStatus ?: "none"}\nFailure: ${result.failure}\nRetry at: ${result.retryAt ?: "none"}",
             tag = "GITHUB_CARD",
         )
+    }, credentials = get<me.rerere.rikkahub.data.github.GitHubTokenStore>(), budgets = {
+        val display = get<me.rerere.rikkahub.data.datastore.SettingsStore>().settingsFlow.value.displaySetting
+        me.rerere.rikkahub.data.github.GitHubRequestBudgets(display.gitHubAnonymousHourlyBudget, display.gitHubAuthenticatedHourlyBudget)
     }) }
     single {
         ConversationRepository(get(), get(), get(), get(), get(), get())

@@ -23,6 +23,7 @@
 
 以下文件保留当时的代码结论和待办，需结合后续实现核对：
 
+- [记忆与对话分支审阅](memory-branch-review-20261120.md)
 - [AI 模块](ai-module-review-and-roadmap-20261115.md)
 - [日志链路](logging-review-and-roadmap-20261115.md)
 - [Material3 与 Web](material3-web-review-and-roadmap-20261116.md)
@@ -34,6 +35,8 @@
 - [Markdown 与 GFM 渲染覆盖](markdown-gfm-rendering-audit-20261120.md)
 - [聊天渲染现状与下一步计划](rendering-roadmap-20261120.md)
 - [GitHub 卡片、Token 方案与链接交互](github-cards-and-link-interactions-20261120.md)
+- [GitHub Token 与原生仓库卡片实现](github-token-native-cards-20261120.md)
+- [GitHub OG 风格卡片与导出](github-social-preview-20261120.md)
 - [总体审阅](module-review-and-roadmap-20261115.md)
 
 ## 发行、归属与历史

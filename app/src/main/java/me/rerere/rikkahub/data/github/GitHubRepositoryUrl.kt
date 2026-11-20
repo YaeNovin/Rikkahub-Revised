@@ -3,7 +3,7 @@ package me.rerere.rikkahub.data.github
 import java.net.URI
 import java.util.Locale
 
-/** Only public github.com repository homepages, not profiles, special routes or subresources. */
+/** github.com repository homepages; private metadata still requires an authorized credential. */
 object GitHubRepositoryUrl {
     private val ownerPattern = Regex("[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
     private val repoPattern = Regex("[A-Za-z0-9_.-]{1,100}")

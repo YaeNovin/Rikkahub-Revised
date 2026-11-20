@@ -19,8 +19,11 @@ interface GitHubRepositoryCacheDAO {
     @Query("UPDATE github_repository_cache SET lastAccessAt = :now WHERE fullName = :fullName")
     suspend fun touch(fullName: String, now: Long)
 
-    @Query("SELECT * FROM github_api_cache_state WHERE id = 'public'")
-    suspend fun apiState(): GitHubApiCacheStateEntity?
+    @Query("SELECT * FROM github_api_cache_state WHERE id = :scope")
+    suspend fun apiState(scope: String = "public"): GitHubApiCacheStateEntity?
+
+    @Query("DELETE FROM github_repository_cache WHERE fullName = :fullName")
+    suspend fun remove(fullName: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun putApiState(state: GitHubApiCacheStateEntity)

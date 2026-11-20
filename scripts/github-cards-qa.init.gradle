@@ -1,0 +1,10 @@
+// Separate GitHub card/token device fixtures from the user's QA and release data.
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.buildTypes.getByName('debug').applicationIdSuffix = '.revised.githubqa'
+            }
+        }
+    }
+}

@@ -149,9 +149,12 @@ class GitHubRepositoryTest {
         val count = AtomicInteger()
         val repository = GitHubRepository(dao, client { req -> count.incrementAndGet(); response(req) }) { now }
         assertNull(repository.cached("owner/repo").data)
-        assertEquals(GitHubCardStatus.RATE_LIMITED, repository.get("owner/repo").status)
+        val limited = repository.get("owner/repo")
+        assertEquals(GitHubCardStatus.RATE_LIMITED, limited.status)
+        assertEquals(GitHubRateLimitKind.LOCAL, limited.rateLimitKind)
+        assertEquals(now + GitHubRepository.HOUR, limited.retryAt)
         assertEquals(0, count.get())
-        assertEquals(now + GitHubRepository.HOUR, dao.apiState()!!.blockedUntil)
+        assertEquals(0L, dao.apiState()!!.blockedUntil)
     }
 
     @Test fun `oversized response and corrupted JSON are not cached as repository success`() = runBlocking {
@@ -254,15 +257,16 @@ class GitHubRepositoryTest {
     }
 }
 
-private class MemoryGitHubDAO : GitHubRepositoryCacheDAO {
+internal class MemoryGitHubDAO : GitHubRepositoryCacheDAO {
     private val rows = ConcurrentHashMap<String, GitHubRepositoryCacheEntity>()
     private val changes = MutableStateFlow(0L)
-    private var state: GitHubApiCacheStateEntity? = null
+    private val states = ConcurrentHashMap<String, GitHubApiCacheStateEntity>()
     override suspend fun get(fullName: String) = rows[fullName]
     override fun observe(fullName: String) = changes.map { rows[fullName] }
     override suspend fun put(entity: GitHubRepositoryCacheEntity) { rows[entity.fullName] = entity; changes.value++ }
     override suspend fun touch(fullName: String, now: Long) { rows.computeIfPresent(fullName) { _, row -> row.copy(lastAccessAt = now) } }
-    override suspend fun apiState() = state
-    override suspend fun putApiState(state: GitHubApiCacheStateEntity) { this.state = state }
+    override suspend fun apiState(scope: String) = states[scope]
+    override suspend fun putApiState(state: GitHubApiCacheStateEntity) { states[state.id] = state }
+    override suspend fun remove(fullName: String) { rows.remove(fullName); changes.value++ }
     override suspend fun trim() = Unit
 }
