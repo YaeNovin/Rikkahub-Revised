@@ -33,3 +33,6 @@ app/src/release/generated/baselineProfiles/*.txt text eol=lf
 # Preserve upstream formatting in the bundled OFL and unmodified Verovio module.
 /app/src/main/assets/html/renderers/fonts/DoulosSIL-OFL.txt whitespace=cr-at-eol
 /app/src/main/assets/html/renderers/verovio-6.4.1/verovio.mjs whitespace=-trailing-space
+
+# Highlight fixtures compare literal tokens and require LF across checkouts.
+/highlight/src/test/resources/hljs/** text eol=lf

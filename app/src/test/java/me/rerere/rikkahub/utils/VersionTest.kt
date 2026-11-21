@@ -38,6 +38,7 @@ class VersionTest {
         assertTrue(Version("2.4.8-revised.1") < Version("v2.4.8-revised.2"))
         assertTrue(Version("2.4.8-revised.9") < Version("2.4.8-revised.10"))
         assertTrue(Version("2.4.8-revised.10") < Version("2.4.8-revised.11"))
+        assertTrue(Version("2.4.8-revised.11") < Version("2.4.8-revised.12"))
     }
 
     @Test
