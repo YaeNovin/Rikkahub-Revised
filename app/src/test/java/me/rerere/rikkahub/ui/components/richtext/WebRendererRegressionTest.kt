@@ -60,6 +60,7 @@ class WebRendererRegressionTest {
                 InteractiveCodeRenderer.GRAPHVIZ -> "digraph G { A -> B; A -> C; }"
                 InteractiveCodeRenderer.VEGA -> """{"mark":"bar","data":{"values":[{"a":"A","b":2},{"a":"B","b":4}]},"encoding":{"x":{"field":"a","type":"nominal"},"y":{"field":"b","type":"quantitative"}}}"""
                 InteractiveCodeRenderer.MOLECULE -> "CC(=O)Oc1ccccc1C(=O)O"
+                InteractiveCodeRenderer.MEI -> me.rerere.rikkahub.data.render.MEI_MENSURAL_EXAMPLE
                 InteractiveCodeRenderer.MUSICXML -> """<?xml version="1.0"?><score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>"""
             }
             File(dir, "${renderer.name}.html").writeText(buildInteractiveRendererHtml(renderer, sample, lightColorScheme()))

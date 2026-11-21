@@ -3,7 +3,7 @@ package me.rerere.rikkahub.ui.components.richtext
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_ASSET_URL
 
 internal val ADDITIONAL_RENDERERS = setOf(InteractiveCodeRenderer.WAVEFORM, InteractiveCodeRenderer.GRAPHVIZ,
-    InteractiveCodeRenderer.VEGA, InteractiveCodeRenderer.MOLECULE, InteractiveCodeRenderer.MUSICXML)
+    InteractiveCodeRenderer.VEGA, InteractiveCodeRenderer.MOLECULE, InteractiveCodeRenderer.MUSICXML, InteractiveCodeRenderer.MEI)
 
 internal fun additionalRendererResources(renderer: InteractiveCodeRenderer): String = when (renderer) {
     InteractiveCodeRenderer.WAVEFORM -> listOf("wavedrom-skin.js")
@@ -73,19 +73,54 @@ internal fun additionalRendererScript(renderer: InteractiveCodeRenderer): String
     """
     InteractiveCodeRenderer.MUSICXML -> """
         if (!window.opensheetmusicdisplay) throw new Error('OpenSheetMusicDisplay 未加载');
-        if (!source.trim().startsWith('<')) throw new Error('请提供完整 MusicXML 文本；此入口不读取 URL 或压缩 MXL 文件');
-        const score = new DOMParser().parseFromString(source, 'application/xml');
-        if (score.querySelector('parsererror') || score.documentElement.tagName !== 'score-partwise') throw new Error('需要有效的 score-partwise MusicXML 乐谱');
-        if (!score.querySelector('part measure note')) throw new Error('MusicXML 乐谱没有可显示的音符或休止符');
-        if (score.querySelectorAll('part measure').length > 200) throw new Error('乐谱超过 200 小节，请分段显示');
-        const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(root, { backend: 'svg', autoResize: false, drawTitle: true, followCursor: false });
+        const score = window.rikkaMusicXmlHarmony(window.rikkaParseScoreXml(source, 'musicxml'));
+        const scoreSurface = document.createElement('div'); root.replaceChildren(scoreSurface);
+        const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(scoreSurface, { backend:'svg', autoResize:false, drawTitle:true, followCursor:false,
+            pageFormat:'A4_P', drawUpToPageNumber:64, drawLyrics:true, drawMeasureNumbers:true, newPageFromXML:true });
         await osmd.load(score);
         function renderScore() {
+            root.replaceChildren(scoreSurface);
             osmd.render();
+            if (osmd.GraphicSheet.MusicPages.length > 64) throw new Error('MusicXML 超过 64 页，请拆分长谱');
             if (!root.querySelector('svg')) throw new Error('MusicXML 未生成可显示的谱面');
+            window.rikkaScorePages(root, root.querySelectorAll('svg'), true);
         }
         renderScore();
         window.rikkaReflowScore(root, renderScore, fail);
+    """
+    InteractiveCodeRenderer.MEI -> """
+        const meiDocument = window.rikkaParseScoreXml(source, 'mei');
+        if (meiDocument.querySelector('neume') && meiDocument.querySelector('syllable > syl')) root.dataset.scoreNotice = '当前 MEI 纽姆歌词尚不参与谱面和 PDF 排版；歌词原文保留在源码中。';
+        if (typeof WebAssembly !== 'object' || typeof Worker !== 'function') throw new Error('MEI 需要支持 WebAssembly / 模块 Worker 的系统 WebView');
+        let generation = 0, cancelActive = null;
+        async function renderMei() {
+            const ownGeneration = ++generation;
+            if (cancelActive) cancelActive();
+            window.__rikkaRenderStatus = 'loading';
+            const result = await new Promise(function(resolve, reject) {
+                const worker = new Worker('$WEB_VIEW_ASSET_URL/html/renderers/mei-worker.js', {type:'module'});
+                const cleanup = function(){ clearTimeout(timer); worker.terminate(); window.removeEventListener('pagehide', cancel); if(cancelActive === cancel) cancelActive = null; };
+                const cancel = function(){ cleanup(); resolve(null); };
+                cancelActive = cancel;
+                const timer = setTimeout(function(){ cleanup(); reject(new Error('MEI 排版超时，请拆分长谱')); }, 15000);
+                worker.onmessage = function(event){ cleanup(); event.data.error ? reject(new Error(event.data.error)) : resolve(event.data); };
+                worker.onerror = function(event){ event.preventDefault(); cleanup(); reject(new Error('MEI 引擎加载失败，请更新系统 WebView')); };
+                worker.postMessage({source:source,width:Math.max(240,root.clientWidth-16)});
+                window.addEventListener('pagehide', cancel, {once:true});
+            });
+            if (ownGeneration !== generation || !result) return;
+            const svgs = result.pages.map(function(text){
+                const svg = new DOMParser().parseFromString(text,'image/svg+xml');
+                if(svg.querySelector('parsererror') || svg.documentElement.localName !== 'svg') throw new Error('MEI 返回无效谱面');
+                return document.importNode(svg.documentElement,true);
+            });
+            root.dataset.engine = result.version;
+            window.rikkaScorePages(root,svgs,true);
+            window.__rikkaRenderStatus = 'ready';
+        }
+        await renderMei();
+        window.rikkaReflowScore(root, function(){ renderMei().catch(fail); }, fail);
+        window.addEventListener('pagehide',function(){ generation++; if(cancelActive) cancelActive(); },{once:true});
     """
     else -> error("Not an additional renderer: $renderer")
 }.trimIndent()

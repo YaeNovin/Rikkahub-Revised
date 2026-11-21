@@ -1,0 +1,28 @@
+Verovio 6.4.1 (LGPL-3.0-only)
+Developed by Laurent Pugin and the Verovio contributors.
+https://www.verovio.org/   https://github.com/rism-digital/verovio
+
+These two files are unmodified from npm verovio@6.4.1:
+  verovio.mjs
+  verovio-module.mjs (embedded WebAssembly and built-in glyph resources)
+The app-owned mei-worker.js and score-pages.js are separate files, not edits to the library.
+
+License copies in this APK:
+  assets/html/licenses/verovio-6.4.1-LGPL-3.0.txt
+  assets/html/licenses/verovio-6.4.1-GPL-3.0.txt
+
+Exact upstream source revision: fbe8f4695ab0a123cb096e0cf92354b44f7a2fb8
+Corresponding source:
+  https://github.com/rism-digital/verovio/tree/fbe8f4695ab0a123cb096e0cf92354b44f7a2fb8
+  https://github.com/rism-digital/verovio/archive/fbe8f4695ab0a123cb096e0cf92354b44f7a2fb8.tar.gz
+Original binary package:
+  https://registry.npmjs.org/verovio/-/verovio-6.4.1.tgz
+
+The app source is available at https://github.com/YaeNovin/Rikkahub-Revised
+To use an interface-compatible modified version of Verovio, replace these two asset
+files in app/src/main/assets/html/renderers/verovio-6.4.1/ and rebuild the Android
+app with ./gradlew assembleDebug. The app requires no production signing key for
+a separate debug install. See AGENTS.md and docs/music-rendering.md for building
+and testing. Modification and reverse engineering for debugging changes to this
+LGPL library are permitted by its license. The package hashes identify the
+upstream build; they are provenance checks, not a runtime restriction on replacement.

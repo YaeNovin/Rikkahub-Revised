@@ -356,6 +356,7 @@ class SettingsStore(
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
             )
         }
+        .map { it.withCurrentMiniMaxEndpoints() }
         .map {
             var providers = it.providers.ifEmpty { DEFAULT_PROVIDERS }.toMutableList()
             DEFAULT_PROVIDERS.forEach { defaultProvider ->
@@ -468,7 +469,7 @@ class SettingsStore(
                     val initial = sharedServicesStore.settingsFlow.first { !it.init }
                     webDataStore.edit { if (it[key] == null) it[key] = JsonInstant.encodeToString(initial) }
                     initial
-                } else JsonInstant.decodeFromString<Settings>(preferences[key]!!)
+                } else JsonInstant.decodeFromString<Settings>(preferences[key]!!).withCurrentMiniMaxEndpoints()
             },
             sharedServicesStore.settingsFlow,
         ) { web, native ->
@@ -494,7 +495,8 @@ class SettingsStore(
         }
     }
 
-    private suspend fun updateUnlocked(settings: Settings): Unit = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    private suspend fun updateUnlocked(input: Settings): Unit = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val settings = input.withCurrentMiniMaxEndpoints()
         if(settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
             return@withContext
@@ -1342,6 +1344,8 @@ data class DisplaySetting(
     val sendOnEnter: Boolean = false,
     val enableAutoScroll: Boolean = true,
     val enableLatexRendering: Boolean = true,
+    val meiRenderingEnabled: Boolean = true,
+    val linguisticRendering: me.rerere.rikkahub.data.render.LinguisticRenderingSettings = me.rerere.rikkahub.data.render.LinguisticRenderingSettings(),
     val showHexColorSwatches: Boolean = true,
     val highlightQuotedText: Boolean = true,
     val gitHubCardStyle: me.rerere.rikkahub.data.github.GitHubCardStyle = me.rerere.rikkahub.data.github.GitHubCardStyle.NATIVE,

@@ -47,6 +47,8 @@ import org.koin.compose.koinInject
 internal fun MediaFileInputRow(
     state: ChatInputState,
 ) {
+    val scorePreview = if (state.messageContent.any { it is UIMessagePart.Document && me.rerere.rikkahub.data.render.ScoreDocuments.isCandidate(it.fileName, it.mime) })
+        me.rerere.rikkahub.ui.components.richtext.rememberScoreAttachmentPreview() else null
     val filesManager: FilesManager = koinInject()
     val managedFiles by filesManager.observe().collectAsState(initial = emptyList())
     val displayNameByRelativePath = remember(managedFiles) {
@@ -133,6 +135,7 @@ internal fun MediaFileInputRow(
                             displayNameByFileName = displayNameByFileName
                         ),
                         leading = { AttachmentLeadingIcon(icon = HugeIcons.Files02) },
+                        onClick = if (me.rerere.rikkahub.data.render.ScoreDocuments.isCandidate(part.fileName, part.mime)) ({ scorePreview?.invoke(part, {}) }) else null,
                         onRemove = { removePart(part, part.url) }
                     )
                 }
@@ -148,8 +151,10 @@ private fun AttachmentChip(
     title: String,
     leading: @Composable () -> Unit,
     onRemove: () -> Unit,
+    onClick: (() -> Unit)? = null,
 ) {
     Surface(
+        modifier = Modifier.then(if(onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = RoundedCornerShape(18.dp),
         tonalElevation = 1.dp,
         shadowElevation = 0.dp,

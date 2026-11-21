@@ -31,9 +31,9 @@ data class SpeechModelSource(
     val unavailableReason: String?
         get() = when {
             service == SpeechModelService.FISH -> "该服务的 Model API 查询音色，并非合成引擎。请选择引擎预设或手动填写。"
-            service == SpeechModelService.MINIMAX && baseUrl.toHttpUrlOrNull()?.host in setOf(
-                "api.minimaxi.com", "api.minimax.io", "api-uw.minimax.io"
-            ) -> "MiniMax 官方暂未提供模型目录接口，可选择官方预设；自定义兼容服务可尝试获取模型。"
+            service == SpeechModelService.MINIMAX && baseUrl.toHttpUrlOrNull()?.host.let {
+                me.rerere.common.http.MiniMaxEndpoints.isOfficialHost(it) || it == "api-uw.minimax.io"
+            } -> "MiniMax 官方暂未提供模型目录接口，可选择官方预设；自定义兼容服务可尝试获取模型。"
             else -> null
         }
 }

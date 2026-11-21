@@ -1,9 +1,20 @@
 import unittest
 from pathlib import Path
-from prepare_github import ROOT, inspect_text, private_reason, missing_doc_links
+from prepare_github import ROOT, inspect_text, private_reason, missing_doc_links, is_local_experiment
 
 
 class PublishInventoryTest(unittest.TestCase):
+    def test_local_experiments_are_separate_from_production_renderers(self):
+        for path in ("desktopApp/src/main/Main.kt", "Desktop/a.cs", "docs/windows-desktop-foundation.md",
+                     "app/src/debug/assets/three-spike/vendor/three.module.js",
+                     "app/src/debug/java/me/rerere/rikkahub/ThreeSpikeActivity.kt",
+                     "app/src/testDebug/java/me/rerere/rikkahub/ThreeSpikeTest.kt",
+                     "docs/assets/threejs-feasibility/device.png", "scripts/verify-three-spike.cjs"):
+            self.assertTrue(is_local_experiment(path), path)
+        for path in ("app/src/main/assets/html/renderers/mei-worker.js", "docs/music-rendering.md",
+                     "docs/subject-rendering-roadmap-20261120.md", "scripts/music-qa.init.gradle"):
+            self.assertFalse(is_local_experiment(path), path)
+
     def test_secrets_and_generated_files_are_excluded_but_build_inputs_remain(self):
         for path in ("app/app.key", "app/google-services.json", "web-ui/.env.production", "docs/local/x.md", "node_modules/pkg/index.js", "x.hprof"):
             self.assertIsNotNone(private_reason(path), path)

@@ -13,7 +13,7 @@ internal val WEBVIEW_EXPORT_PROBE = """
       if (document.readyState !== 'complete' || window.__rikkaRenderStatus === 'loading' ||
           (document.fonts && document.fonts.status !== 'loaded') ||
           Array.from(document.images).some(image => !image.complete)) return result('loading');
-      if (typeof window.rikkaPrepareExport === 'function') window.rikkaPrepareExport();
+      if (typeof window.rikkaPrepareExport === 'function') window.rikkaPrepareExport('message');
       document.querySelectorAll('svg').forEach(svg => { if (svg.pauseAnimations) svg.pauseAnimations(); });
       if (document.getAnimations) document.getAnimations().forEach(animation => animation.pause());
       if (!document.getElementById('rikka-export-layout')) {

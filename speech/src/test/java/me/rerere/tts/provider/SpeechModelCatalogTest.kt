@@ -70,6 +70,11 @@ class SpeechModelCatalogTest {
         assertTrue(settings.capabilities().recognized)
         assertEquals("xiaomi/mimo-v2.5-tts", buildMiMoSpeechRequest(settings, "Hello")["model"]!!.jsonPrimitive.content)
     }
+    @Test fun currentMiniMaxChineseHostUsesOfficialModelPresets() {
+        assertNotNull(TTSProviderSetting.MiniMax(baseUrl = "https://api.minimax.cn/v1").speechModelSource()!!.unavailableReason)
+        assertNull(TTSProviderSetting.MiniMax(baseUrl = "https://api.minimax.cn.proxy.test/v1").speechModelSource()!!.unavailableReason)
+    }
+
     @Test fun miniMaxSpeechFamilyIsNotConfusedWithVideoOrText() {
         val result = filterSpeechModels(entries("MiniMax-M3", "MiniMax-H3", "speech-2.8-hd", "speech-02-turbo",
             "music-2.6", "speechwriter"), source(SpeechModelService.MINIMAX))

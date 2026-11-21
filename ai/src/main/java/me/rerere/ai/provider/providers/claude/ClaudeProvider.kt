@@ -579,7 +579,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
 
                     else -> {
-                        if (providerSetting.baseUrl.contains("api.minimaxi.com", ignoreCase = true)) {
+                        if (officialChatVendor(providerSetting.baseUrl) == OfficialChatVendor.MINIMAX) {
                             if (maxTokens > 1_024) {
                                 val requestedBudget = if (params.reasoningLevel == ReasoningLevel.AUTO) {
                                     ReasoningLevel.HIGH.budgetTokens

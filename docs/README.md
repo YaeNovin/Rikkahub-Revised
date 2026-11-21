@@ -1,6 +1,6 @@
 # 文档索引
 
-更新：2026-11-20。当前正式版为 `2.4.8-revised.11`，见[发行说明](release-notes-2.4.8-revised.11.md)和[验证记录](release-verification-2.4.8-revised.11.md)。后续审阅和未完成事项见 [开发状态与文档范围](development-status.md)。
+更新：2026-11-21。当前正式版为 `2.4.8-revised.11`，见[发行说明](release-notes-2.4.8-revised.11.md)和[验证记录](release-verification-2.4.8-revised.11.md)。后续审阅和未完成事项见 [开发状态与文档范围](development-status.md)。
 
 本次源码整合、换行规则及旧文档/图片删除范围见[同步与清理记录](source-sync-20261119.md)。
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | 构建与验证 | [环境和缓存](building.md)、[脚本](../scripts/README.md)、[项目结构](PROJECT_STRUCTURE.md)、[签名连续性](RELEASE_SIGNING.md) |
 | 聊天与上下文 | [聊天入口](chat-entry-improvements.md)、[上下文记忆](context-memory-upgrade.md)、[建议](chat-suggestions-upgrade.md)、[记忆提取](memory-extraction-only.md)、[身份与可读性](memory-identity-and-readability.md) |
-| 富文本 | [渲染组件](rendering-components.md)、[原生表格](markdown-tables.md)、[搜索引用与 Markdown 修复](markdown-citation-repairs-20261119.md)、[HEX 和引号高亮](chat-inline-hex-and-quote-highlights.md)、[链接和图片工具](chat-links-and-image-tools.md)、[图片导出](chat-image-export.md)、[P0 基线对齐与验证](development-baseline-alignment-20261119.md) |
+| 富文本 | [渲染组件](rendering-components.md)、[语言学与外语](linguistic-rendering.md)、[音乐学与谱面](music-rendering.md)、[原生表格](markdown-tables.md)、[搜索引用与 Markdown 修复](markdown-citation-repairs-20261119.md)、[HEX 和引号高亮](chat-inline-hex-and-quote-highlights.md)、[链接和图片工具](chat-links-and-image-tools.md)、[图片导出](chat-image-export.md)、[P0 基线对齐与验证](development-baseline-alignment-20261119.md) |
 | 图形与 WebView | [WebView](webview-rendering.md)、[HTML 策略](rendering-tools-and-html-policy.md)、[数学与法阵](math-plot-and-sigil.md)、[程序化纹样](procedural-patterns.md)、[特效与性能](decorative-effects-and-performance.md)、[几何与手势](geometry-background-and-gestures.md) |
 | 外观 | [文字配色](text-color-modes.md)、[液态玻璃](liquid-glass.md)、[背景与输入栏](background-composer-fixes.md)、[云母与聊天控件](mica-background-and-floating-chat-controls.md)、[高亮配色](highlight-original-palette-and-comments.md) |
 | 模型与搜索 | [模型名称识别](model-name-and-dark-text.md)、[模型协议](model-protocol-adaptation-20261118.md)、[供应商参数](official-provider-audit-20261118.md)、[自定义搜索](custom-search-service.md)、[Gemini 工具与豆包密钥](gemini-assistant-tools-and-doubao-keys.md) |
@@ -35,6 +35,8 @@
 - [Markdown 与上游同步](markdown-upstream-sync-review-20261119.md)
 - [Markdown 与 GFM 渲染覆盖](markdown-gfm-rendering-audit-20261120.md)
 - [聊天渲染现状与下一步计划](rendering-roadmap-20261120.md)
+- [分学科渲染扩展调研与路线](subject-rendering-roadmap-20261120.md)
+- [MiniMax 国内 API 域名更新](minimax-endpoint-update-20261121.md)
 - [GitHub 卡片、Token 方案与链接交互](github-cards-and-link-interactions-20261120.md)
 - [GitHub Token 与原生仓库卡片实现](github-token-native-cards-20261120.md)
 - [GitHub OG 风格卡片与导出](github-social-preview-20261120.md)

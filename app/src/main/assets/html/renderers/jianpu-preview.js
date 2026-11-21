@@ -20,6 +20,18 @@
                 if (phrase && phrase.lyrics.length < 4) phrase.lyrics.push(lyric[1].slice(0, maxLineLength));
                 continue;
             }
+            const harmony = /^(?:H|harmony|和声)\s*:\s*(.*)$/i.exec(text);
+            if (harmony) {
+                const phrase = score.phrases[score.phrases.length - 1];
+                if (!phrase) throw new Error('和声标注须位于旋律行之后');
+                const labels = harmony[1].replace(/^\s*\||\|\s*$/g, '').split('|').map(s => s.trim());
+                if (labels.length !== phrase.measures.length || labels.some(s => s.length > 24)) throw new Error('H: 每个小节需对应一个和声标注，单项最多 24 字符');
+                labels.forEach((label, i) => {
+                    const item = phrase.measures[i].find(item => !item.bar);
+                    if(item && label) { item.chord = label; item.width = Math.max(item.width, label.length * 8 + 8); }
+                });
+                continue;
+            }
             if (metadataPattern.test(text)) {
                 if (score.metadata.length < 8) score.metadata.push(text.slice(0, maxLineLength));
                 continue;
@@ -69,6 +81,7 @@
 
     function drawToken(parent, item, x, y) {
         const token = item.token;
+        if(item.chord) parent.append(text(item.chord, x + 2, y - 38, 14, 'start'));
         if (item.bar) {
             parent.append(line(x + 8, y - 20, x + 8, y + 7, token === '|]' ? 2.4 : 1.2));
             if (token !== '|') parent.append(line(x + 11, y - 20, x + 11, y + 7));
@@ -122,7 +135,7 @@
             function finishRow() {
                 if (!row.length) return;
                 const system = tag('g', { 'data-score-system': '' });
-                y += 41;
+                y += row.some(item => item.chord) ? 65 : 41;
                 let x = 8;
                 for (const item of row) {
                     drawToken(system, item, x, y);
@@ -149,6 +162,7 @@
         svg.setAttribute('height', y + 8);
         svg.setAttribute('viewBox', '0 0 ' + width + ' ' + (y + 8));
         root.replaceChildren(svg);
+        if(window.rikkaScorePages) window.rikkaScorePages(root, window.rikkaScoreSystems(svg), false);
     }
 
     window.rikkaRenderJianpu = function (root, source, onError) {

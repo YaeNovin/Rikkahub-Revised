@@ -58,35 +58,41 @@ async function main() {
         const note = [...svg.querySelectorAll('[data-score-system] text')].find(n => n.textContent === '1');
         const scale = note.getScreenCTM().a;
         return { font: parseFloat(note.getAttribute('font-size')) * scale, width: svg.getBoundingClientRect().width,
-          rows: svg.querySelectorAll('[data-score-system]').length, sharps: [...svg.querySelectorAll('text')].some(n => n.textContent === '♯'),
-          dots: svg.querySelectorAll('circle').length, lyrics: svg.textContent.includes('排版和长谱换行') };
+          rows: Array.from({length:window.rikkaScoreInfo().pages},(_,i)=>new DOMParser().parseFromString(window.rikkaScoreExportPage(i+1,window.rikkaScoreInfo().revision),'image/svg+xml').querySelectorAll('[data-score-system]').length).reduce((a,b)=>a+b,0), sharps: [...svg.querySelectorAll('text')].some(n => n.textContent === '♯'),
+          dots: svg.querySelectorAll('circle').length, lyrics: Array.from({length:window.rikkaScoreInfo().pages},(_,i)=>window.rikkaScoreExportPage(i+1,window.rikkaScoreInfo().revision)).join('').includes('排版和长谱换行') };
       });
       const portrait = await stats();
       assert.ok(portrait.rows > 4 && portrait.font >= 22 && portrait.width <= 360, JSON.stringify(portrait));
       assert.ok(portrait.sharps && portrait.dots > 0 && portrait.lyrics);
+      const revision = await page.evaluate(() => window.rikkaScoreInfo().revision);
       await page.setViewportSize({ width: 740, height: 460 });
+      await page.waitForFunction(revision => window.rikkaScoreInfo().revision > revision, revision);
       await page.waitForFunction(() => document.querySelector('#renderer svg').getBoundingClientRect().width > 650);
       const landscape = await stats();
       assert.ok(landscape.rows < portrait.rows);
-      assert.equal(landscape.font, portrait.font);
+      assert.ok(Math.abs(landscape.font - portrait.font) < 0.01); // SVG subpixel rounding across widths.
     });
     await scenario('JIANPU', 'There are 7 words, not notes', null, { error: true });
     await scenario('JIANPU', '1 '.repeat(1601), null, { error: true });
     await scenario('scores/JIANPU-fullscreen', undefined, async page => {
       assert.equal(await page.locator('body').getAttribute('data-score-fullscreen'), '');
       assert.equal(await page.locator('#rikkahub-fullscreen-pan-script').count(), 0);
+      await page.evaluate(() => window.rikkaPrepareExport('message'));
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
       await page.waitForFunction(() => window.scrollY > 400);
+      await page.getByText('测试歌词 14', { exact: true }).scrollIntoViewIfNeeded();
       const finalLyric = await page.getByText('测试歌词 14', { exact: true }).boundingBox();
       assert.ok(finalLyric && finalLyric.y >= 0 && finalLyric.y + finalLyric.height <= 560);
     });
     await scenario('ABC', undefined, async page => {
       const before = await page.locator('#renderer svg').first().boundingBox();
-      assert.ok(await page.locator('.abcjs-note').count() >= 80);
+      assert.ok(await page.evaluate(()=>Array.from({length:window.rikkaScoreInfo().pages},(_,i)=>(window.rikkaScoreExportPage(i+1,window.rikkaScoreInfo().revision).match(/class=\"abcjs-note /g)||[]).length).reduce((a,b)=>a+b,0)) >= 80);
+      const revision = await page.evaluate(() => window.rikkaScoreInfo().revision);
       await page.setViewportSize({ width: 740, height: 460 });
+      await page.waitForFunction(revision => window.rikkaScoreInfo().revision > revision, revision);
       await page.waitForFunction(width => document.querySelector('#renderer svg').getBoundingClientRect().width > width + 100, before.width);
       const after = await page.locator('#renderer svg').first().boundingBox();
-      assert.ok(after.height < before.height);
+      assert.ok(after.width > before.width); // Page aspect stays A4; systems reflow within pages.
     });
     await scenario('ABC', 'X:1\nK:C\n', null, { error: true });
     await scenario('WAVEFORM');

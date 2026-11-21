@@ -6,6 +6,8 @@ import me.rerere.rikkahub.data.render.MAX_DECLARATIVE_SOURCE_CHARS
 internal fun rendererSourceHighlightLanguage(language: String, source: String? = null): String = when {
     normalizeCodeFenceLanguage(language) == "jsxgraph" && geometryRenderer(language, source) == null -> "javascript"
     geometryRenderer(language) != null -> "json"
+    me.rerere.rikkahub.data.render.RendererCatalog.find(normalizeCodeFenceLanguage(language))?.id.let { it in me.rerere.rikkahub.data.render.linguisticRendererIds && it != "dependency" } -> "json"
+    me.rerere.rikkahub.data.render.RendererCatalog.find(normalizeCodeFenceLanguage(language))?.id in setOf("mei", "musicxml") -> "xml"
     else -> normalizeCodeFenceLanguage(language)
 }
 

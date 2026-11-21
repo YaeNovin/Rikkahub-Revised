@@ -1,0 +1,11 @@
+// Isolate synthetic linguistic fixtures from the user's QA/release data.
+gradle.beforeProject { project ->
+    project.extensions.extraProperties.set('kotlin.compiler.execution.strategy', 'in-process')
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                android.buildTypes.getByName('debug').applicationIdSuffix = '.revised.linguisticqa'
+            }
+        }
+    }
+}

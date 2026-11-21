@@ -17,9 +17,12 @@ another charge. A task that lost its remote ID is not automatically resubmitted.
 
 ## MiniMax Hailuo
 
-The existing MiniMax Anthropic configuration and OpenAI configurations on official
-api.minimaxi.com / api.minimax.io / api.minimax.chat hosts can share their API key
-with the native video API. Chat protocol configuration is retained.
+The MiniMax Anthropic and OpenAI configurations on `api.minimax.cn`
+(current Chinese endpoint), `api.minimaxi.com` (legacy), and `api.minimax.io`
+(international) are recognized for native video routing. The selected provider's
+API key is reused with the native video API on its own host; this does not claim
+that Chinese and international platform credentials are interchangeable.
+Chat protocol configuration is retained. See [the endpoint update](minimax-endpoint-update-20261121.md).
 Add a VIDEO model: MiniMax-Hailuo-2.3, MiniMax-Hailuo-2.3-Fast, MiniMax-Hailuo-02,
 T2V-01, T2V-01-Director, I2V-01, I2V-01-Director, or I2V-01-live.
 Fast and I2V models accept image input only; T2V models accept text only.

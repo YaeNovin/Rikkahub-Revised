@@ -717,18 +717,22 @@ internal fun MessagePartsBlock(
                     }
 
                     is UIMessagePart.Document -> {
+                        val scorePreview = me.rerere.rikkahub.ui.components.richtext.rememberScoreAttachmentPreview()
                         Surface(
                             tonalElevation = 2.dp,
                             onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                intent.data = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    part.url.toUri().toFile()
-                                )
-                                val chooserIndent = Intent.createChooser(intent, null)
-                                context.startActivity(chooserIndent)
+                                scorePreview(part) {
+                                    try {
+                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", part.url.toUri().toFile())
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            setDataAndType(uri, part.mime.ifBlank { "application/octet-stream" })
+                                        }
+                                        context.startActivity(Intent.createChooser(intent, null))
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "无法打开此附件，请检查文件或可用的查看应用", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             },
                             modifier = Modifier,
                             shape = RoundedCornerShape(50),

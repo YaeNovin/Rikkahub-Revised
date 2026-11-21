@@ -91,6 +91,10 @@ private const val FULLSCREEN_PREVIEW_STYLE_ID = "rikkahub-fullscreen-preview-sty
 private const val FULLSCREEN_PREVIEW_BODY_CLASS = "rikkahub-fullscreen-preview"
 private const val READONLY_TERMINAL_SELECTOR = "meta[name=rikkahub-preview][content=terminal-readonly]"
 private const val MUSIC_SCORE_SELECTOR = "meta[name=rikkahub-preview][content=music-score]"
+private const val LINGUISTIC_SELECTOR = "meta[name=rikkahub-preview][content=linguistic-v1]"
+
+internal fun isLinguisticPreview(content: String): Boolean =
+    content.contains("linguistic-v1") && Jsoup.parse(content).head().selectFirst(LINGUISTIC_SELECTOR) != null
 
 internal fun isReadonlyTerminalPreview(content: String): Boolean =
     content.contains("terminal-readonly") && Jsoup.parse(content).head().selectFirst(READONLY_TERMINAL_SELECTOR) != null
@@ -105,6 +109,12 @@ internal fun previewSupportsGlobalBackground(content: String): Boolean =
 internal fun prepareFullscreenPreviewHtml(content: String, useGlobalBackground: Boolean = false): String {
     if (content.isBlank()) return content
     val document = Jsoup.parse(content)
+    // Natural text selection, Ruby layout and ordered arcs own their scroll surfaces.
+    if (document.head().selectFirst(LINGUISTIC_SELECTOR) != null) {
+        document.outputSettings().prettyPrint(false)
+        document.body().attr("data-linguistic-fullscreen", "true")
+        return document.outerHtml()
+    }
     // A read-only terminal fits its own viewport and allows only fixed local scripts.
     // Diagram pan scripts and flex layouts would conflict with its scrolling text grid.
     if (document.head().selectFirst(READONLY_TERMINAL_SELECTOR) != null) {
@@ -239,6 +249,7 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
     val preview = cached?.takeIf { it.first == contentId }?.second
     val selfManagedPreview = remember(url, preview) {
         url.isEmpty() && (isReadonlyTerminalPreview(preview?.getOrNull().orEmpty()) ||
+            isLinguisticPreview(preview?.getOrNull().orEmpty()) ||
             isMusicScorePreview(preview?.getOrNull().orEmpty()) ||
             me.rerere.rikkahub.ui.components.richtext.isGeometryPreview(preview?.getOrNull().orEmpty()))
     }
@@ -421,6 +432,7 @@ private fun WebViewPageContent(url: String, contentId: String, onClose: (() -> U
                     IconButton(onClick = onClose ?: { navigator.popBackStack() }, modifier = Modifier.size(40.dp)) {
                         Icon(HugeIcons.ArrowLeft01, contentDescription = stringResource(R.string.back), modifier = Modifier.size(18.dp))
                     }
+                    if (isMusicScorePreview(preview?.getOrNull().orEmpty())) me.rerere.rikkahub.ui.components.richtext.ScorePdfExportAction(state.webView)
                     if (!selfManagedPreview) {
                         IconButton(
                             onClick = { state.webView?.evaluateJavascript("window.rikkaResetPan && window.rikkaResetPan();", null) },

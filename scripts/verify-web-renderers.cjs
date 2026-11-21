@@ -9,7 +9,7 @@ function scripts(html) {
   return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(match => match[1]).filter(text => text.trim());
 }
 const files = fs.readdirSync(directory).filter(file => file.endsWith('.html'));
-assert.equal(files.length, 12);
+assert.equal(files.length, 13);
 for (const file of files) for (const text of scripts(fs.readFileSync(path.join(directory, file), 'utf8'))) new vm.Script(text, { filename: file });
 
 function harness() {
@@ -82,5 +82,5 @@ await run('SVG', harness());
   mermaid.context.window.exportSvgToPng();
   assert.ok(mermaid.canvas.width * mermaid.canvas.height <= 4000000);
   assert.ok(mermaid.canvas.width <= 4096 && mermaid.canvas.height <= 4096);
-  console.log('12 renderer pages passed syntax checks; map, chart, Jianpu, SVG and Mermaid export contracts passed. Browser rendering is not covered.');
+  console.log('13 renderer pages passed syntax checks; map, chart, Jianpu, SVG and Mermaid export contracts passed. Browser rendering is not covered.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

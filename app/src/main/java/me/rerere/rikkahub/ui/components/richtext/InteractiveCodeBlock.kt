@@ -35,10 +35,11 @@ internal enum class InteractiveCodeRenderer(
     VEGA("vega"),
     MOLECULE("smiles"),
     MUSICXML("musicxml"),
+    MEI("mei"),
     ;
 
     val aliases: Set<String> get() = requireNotNull(me.rerere.rikkahub.data.render.RendererCatalog.find(catalogId)).aliases
-    val isScore: Boolean get() = this == ABC || this == JIANPU || this == MUSICXML
+    val isScore: Boolean get() = this == ABC || this == JIANPU || this == MUSICXML || this == MEI
 
     companion object {
         fun fromLanguage(language: String): InteractiveCodeRenderer? =
@@ -47,8 +48,9 @@ internal enum class InteractiveCodeRenderer(
 }
 
 internal fun canRenderInteractiveCodeBlock(language: String, code: String): Boolean =
-    code.length <= MAX_INTERACTIVE_RENDER_SOURCE_CHARS &&
-        InteractiveCodeRenderer.fromLanguage(language) != null
+    InteractiveCodeRenderer.fromLanguage(language)?.let { renderer ->
+        code.length <= (me.rerere.rikkahub.data.render.RendererCatalog.find(normalizeCodeFenceLanguage(language))?.maxChars ?: MAX_INTERACTIVE_RENDER_SOURCE_CHARS)
+    } == true
 
 @Composable
 internal fun InteractiveCodeBlock(
@@ -127,6 +129,7 @@ internal fun buildInteractiveRendererHtml(
         InteractiveCodeRenderer.VEGA -> "renderers/vega.min.js"
         InteractiveCodeRenderer.MOLECULE -> "renderers/smiles-drawer.js"
         InteractiveCodeRenderer.MUSICXML -> "renderers/opensheetmusicdisplay.js"
+        InteractiveCodeRenderer.MEI -> null
     }
     val stylesheet = when (renderer) {
         InteractiveCodeRenderer.LEAFLET -> "<link rel=\"stylesheet\" href=\"$WEB_VIEW_ASSET_URL/html/renderers/leaflet.css\">"
@@ -152,12 +155,18 @@ internal fun buildInteractiveRendererHtml(
     val foreground = colorScheme.onSurface.toCssHex()
     val error = colorScheme.error.toCssHex()
     val rendererLayoutCss = when (renderer) {
-        InteractiveCodeRenderer.ABC, InteractiveCodeRenderer.JIANPU, InteractiveCodeRenderer.MUSICXML -> """
+        InteractiveCodeRenderer.ABC, InteractiveCodeRenderer.JIANPU, InteractiveCodeRenderer.MUSICXML, InteractiveCodeRenderer.MEI -> """
             html, body { width: 100%; margin: 0; }
             #renderer { width: 100%; height: auto; }
             #renderer svg { display: block; }
             ${if (renderer == InteractiveCodeRenderer.MUSICXML) "#renderer { background: #fff; color: #222; border-radius: 8px; }" else ""}
-            body[data-score-fullscreen] { padding-bottom: 72px; }
+            #renderer { background:#fff; color:#111; }
+            .score-pager { position:sticky; top:0; display:flex; gap:8px; align-items:center; justify-content:center; background:${colorScheme.surface.toCssHex()}; color:$foreground; padding:4px; z-index:2; }
+            .score-pager button { color:inherit; font:inherit; min-height:40px; border:1px solid currentColor; border-radius:8px; background:transparent; padding:4px 12px; }
+            .score-pager button:disabled { opacity:.4; }
+            .score-page > svg { width:100%; height:auto; color:#111; background:#fff; margin-bottom:8px; }
+            body[data-score-fullscreen] { padding-bottom:72px; }
+            @media print { .score-pager { display:none; } .score-page > svg { break-after:page; } }
         """.trimIndent()
         InteractiveCodeRenderer.RAILROAD -> """
             html, body { width: 100%; min-height: 100%; margin: 0; overflow: auto; }
@@ -204,6 +213,7 @@ internal fun buildInteractiveRendererHtml(
             $stylesheet
             ${scriptPath?.let { "<script src=\"$WEB_VIEW_ASSET_URL/html/$it\"></script>" }.orEmpty()}
             ${additionalRendererResources(renderer)}
+            ${if (renderer.isScore) """<script src="$WEB_VIEW_ASSET_URL/html/renderers/score-pages.js"></script><script src="$WEB_VIEW_ASSET_URL/html/renderers/score-xml.js"></script>""" else ""}
             ${if (renderer == InteractiveCodeRenderer.LEAFLET) "<script src=\"$WEB_VIEW_ASSET_URL/html/renderers/offline-basemap.js\"></script>" else ""}
             <style>
                 $rendererLayoutCss
@@ -371,15 +381,25 @@ private fun echartsRendererScript(): String = """
 
 private fun abcRendererScript(): String = """
     if (!window.ABCJS) throw new Error('abcjs 未加载');
+    const parsed = ABCJS.parseOnly(source);
+    let abcEvents = 0, abcSystems = 0;
+    for (const tune of parsed) for (const line of tune.lines || []) {
+        if (line.staff) abcSystems++;
+        for (const staff of line.staff || []) for (const voice of staff.voices || []) for (const item of voice)
+            if (item.el_type === 'note') abcEvents += Math.max(1, (item.pitches || []).length);
+    }
+    if (abcEvents > 8000 || abcSystems > 384) throw new Error('ABC 超过 8000 个音符/休止符或 384 个系统，请拆分长谱');
     function renderAbc() {
         if (!source.trim()) throw new Error('ABC 乐谱为空');
         const tunes = ABCJS.renderAbc(root, source, {
             add_classes: true,
-            staffwidth: Math.max(root.clientWidth - 16, 100),
+            staffwidth: Math.max(root.clientWidth - 24, 100),
+            oneSvgPerLine: true,
             paddingtop: 0, paddingbottom: 0, paddingleft: 4, paddingright: 4,
             wrap: { minSpacing: 1.8, maxSpacing: 2.7, preferredMeasuresPerLine: 4 }
         });
         if (!tunes.length || !root.querySelector('.abcjs-note,.abcjs-rest')) throw new Error('未找到可显示的 ABC 音符');
+        window.rikkaScorePages(root, root.querySelectorAll('svg'), false);
     }
     renderAbc();
     window.rikkaReflowScore(root, renderAbc, fail);
@@ -655,7 +675,7 @@ private fun railroadRendererScript(): String = """
     Diagram(...items.map(node)).addTo(root);
 """.trimIndent()
 
-private fun String.toJavaScriptStringLiteral(): String = buildString(length + 2) {
+internal fun String.toJavaScriptStringLiteral(): String = buildString(length + 2) {
     append('"')
     for (character in this@toJavaScriptStringLiteral) {
         when (character) {

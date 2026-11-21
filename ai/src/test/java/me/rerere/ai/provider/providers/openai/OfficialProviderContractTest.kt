@@ -116,7 +116,8 @@ class OfficialProviderContractTest {
     }
 
     @Test fun `native MiniMax retains video token usage and reasoning but omits unrelated fields`() {
-        val body = chat("https://api.minimax.io/v1", TextGenerationParams(model("MiniMax-M3.1-Flash"),
+        for (host in listOf("api.minimax.cn", "api.minimax.io", "api.minimaxi.com")) {
+        val body = chat("https://$host/v1", TextGenerationParams(model("MiniMax-M3.1-Flash"),
             reasoningLevel = ReasoningLevel.MAX, maxTokens = 1_000_000, tools = listOf(tool),
             openAIOptions = OpenAIGenerationOptions(toolChoice = OpenAIToolChoice.REQUIRED, parallelToolCalls = OpenAIParallelToolCalls.ENABLED)),
             listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Video("https://example.test/video.mp4")))))
@@ -125,6 +126,7 @@ class OfficialProviderContractTest {
         assertFalse(body.containsKey("tool_choice"))
         assertFalse(body.containsKey("parallel_tool_calls"))
         assertEquals("video_url", body["messages"]!!.jsonArray.single().jsonObject["content"]!!.jsonArray.single().jsonObject["type"]!!.jsonPrimitive.content)
+        }
     }
 
     @Test fun `regional OpenAI endpoints retain native Responses and US-only Ultrafast constraints`() {

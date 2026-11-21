@@ -211,8 +211,17 @@ private fun HighlightCodeBlockBody(
     }
     val canRenderInteractive = renderComplete &&
         interactiveRenderer != null &&
+        (interactiveRenderer != InteractiveCodeRenderer.MEI || settings.displaySetting.meiRenderingEnabled) &&
         canRenderInteractiveCodeBlock(normalizedLanguage, code)
-    val canShowVisualPreview = renderVisuals && (canInlinePreview || canRenderMermaid || canRenderInteractive || canRenderTerminal || canRenderGeometry)
+    val linguisticId = remember(normalizedLanguage) { me.rerere.rikkahub.data.render.RendererCatalog.find(normalizedLanguage)?.id?.takeIf { it in me.rerere.rikkahub.data.render.linguisticRendererIds } }
+    val canRenderLinguistic = renderComplete && linguisticId != null && settings.displaySetting.linguisticRendering.enabled(linguisticId) && code.length <= me.rerere.rikkahub.data.render.MAX_LINGUISTIC_SOURCE_CHARS
+    val linguisticForeground = rememberReadableTextSurface(richContent.container, androidx.compose.material3.LocalContentColor.current).foreground
+    val linguisticBaseColors = MaterialTheme.colorScheme
+    val linguisticColors = remember(linguisticBaseColors, linguisticForeground) {
+        linguisticBaseColors.copy(onSurface = linguisticForeground, onSurfaceVariant = linguisticForeground)
+    }
+    val linguisticFontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+    val canShowVisualPreview = renderVisuals && (canRenderLinguistic || canInlinePreview || canRenderMermaid || canRenderInteractive || canRenderTerminal || canRenderGeometry)
     val badgeDocument = rememberMarkdownFenceBadges(code, renderVisuals && renderComplete && isMarkdownBadgeFence(normalizedLanguage))
     val canRenderBadges = badgeDocument?.badges?.isNotEmpty() == true
     val canTogglePreview = canShowVisualPreview || canRenderBadges
@@ -225,9 +234,12 @@ private fun HighlightCodeBlockBody(
         colorScheme,
         renderErrorMessage,
         darkMode,
+        linguisticColors,
+        linguisticFontScale,
     ) {
         when {
             !canShowVisualPreview -> null
+            canRenderLinguistic -> buildLinguisticRendererHtml(requireNotNull(linguisticId), code, linguisticColors, renderErrorMessage, linguisticFontScale)
             canRenderGeometry -> buildGeometryPreviewHtml(requireNotNull(geometry), code, darkMode)
             canRenderTerminal -> buildTerminalPreviewHtml(code, darkMode)
             normalizedLanguage in PREVIEWABLE_LANGUAGES -> buildCodePreviewHtml(
@@ -308,6 +320,7 @@ private fun HighlightCodeBlockBody(
             }
             Column(Modifier.fillMaxWidth().padding(if (canRenderGeometry) 0.dp else 12.dp)) {
                 when {
+                    canRenderLinguistic -> LinguisticCodePreview(fullScreenPreviewHtml.orEmpty(), onViewCreated = { previewView = it })
                     canRenderGeometry -> GeometryCodePreview(fullScreenPreviewHtml.orEmpty(), onViewCreated = { previewView = it })
                     canRenderTerminal -> TerminalCodePreview(fullScreenPreviewHtml.orEmpty(), onViewCreated = { previewView = it })
                     canRenderMermaid -> Mermaid(code, Modifier.fillMaxWidth(), showFullScreenAction = true)

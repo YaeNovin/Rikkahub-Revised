@@ -8,6 +8,9 @@ import me.rerere.rikkahub.data.render.RendererCatalog
 import me.rerere.rikkahub.data.render.RendererSpec
 import me.rerere.rikkahub.data.render.compileDeclarativeRenderSpec
 import me.rerere.rikkahub.data.render.isDeclarativeRenderer
+import me.rerere.rikkahub.data.render.LinguisticRenderingSettings
+import me.rerere.rikkahub.data.render.linguisticRendererIds
+import me.rerere.rikkahub.data.render.compileLinguisticSpec
 
 internal const val LIST_RENDERERS_TOOL_NAME = "list_renderers"
 internal const val RENDER_CONTENT_TOOL_NAME = "render_content"
@@ -22,19 +25,21 @@ internal fun parseRenderRequest(input: JsonElement): RenderRequest {
     require(source.isNotBlank()) { "source must not be blank" }
     require(source.length <= renderer.maxChars) { "Source exceeds ${renderer.maxChars} characters; split the content" }
     if (isDeclarativeRenderer(renderer.id)) compileDeclarativeRenderSpec(renderer.id, source)
+    if (renderer.id in linguisticRendererIds) compileLinguisticSpec(renderer.id, source)
+    if (renderer.id in setOf("musicxml", "mei")) me.rerere.rikkahub.data.render.ScoreDocuments.parseXml(source, renderer.id)
     val language = text("language") ?: "plaintext"
     require(language.length <= 64 && language.all { it.isLetterOrDigit() || it in "_+-.#" }) { "Invalid code language" }
     return RenderRequest(renderer, source, language)
 }
 
-internal fun List<Tool>.withRenderingTools(enabled: Boolean): List<Tool> =
+internal fun List<Tool>.withRenderingTools(enabled: Boolean, linguistic: LinguisticRenderingSettings = LinguisticRenderingSettings(), meiEnabled: Boolean = true): List<Tool> =
     filterNot { it.name in setOf(LIST_RENDERERS_TOOL_NAME, RENDER_CONTENT_TOOL_NAME) } +
-        if (enabled) createRenderingTools() else emptyList()
+        if (enabled) createRenderingTools(linguistic, meiEnabled) else emptyList()
 
-internal fun createRenderingTools(): List<Tool> = listOf(
+internal fun createRenderingTools(linguistic: LinguisticRenderingSettings = LinguisticRenderingSettings(), meiEnabled: Boolean = true): List<Tool> = listOf(
     Tool(
         name = LIST_RENDERERS_TOOL_NAME,
-        description = "List the Android chat's available renderers. Pass renderer for its format, aliases, limits and example. HTML is manual static preview only. Does not change settings or execute source.",
+        description = "List the Android chat's available renderers, including paginated music scores (ABC, numbered notation, MusicXML, MEI), IPA, Ruby pronunciation, interlinear gloss, syntax trees and UD dependency arcs. Pass renderer for its format, aliases, limits and example. HTML is manual static preview only. Does not change settings or execute source.",
         parameters = { InputSchema.Obj(buildJsonObject {
             put("renderer", buildJsonObject { put("type", "string"); put("description", "Optional renderer id/alias; omit for compact catalog.") })
         }) },
@@ -43,7 +48,9 @@ internal fun createRenderingTools(): List<Tool> = listOf(
                 .any { tool -> tool.output.filterIsInstance<UIMessagePart.Text>().none { text ->
                     runCatching { Json.parseToJsonElement(text.text).jsonObject["catalog_version"]?.jsonPrimitive?.intOrNull == RendererCatalog.version }.getOrDefault(false)
                 } }
-            if (stale) "The current renderer catalog version is ${RendererCatalog.version}. Older list_renderers results may omit supported renderers; query list_renderers again before claiming a renderer is unavailable." else ""
+            val refresh = if (stale) "The current renderer catalog version is ${RendererCatalog.version}. Older list_renderers results may omit supported renderers; query list_renderers again before claiming a renderer is unavailable. " else ""
+            refresh + (if (meiEnabled) "" else "MEI preview is disabled by the user; use readable plain text. ") + if (linguisticRendererIds.all(linguistic::enabled)) "" else "Current linguistic renderers: " + linguisticRendererIds.joinToString { "$it=${linguistic.enabled(it)}" } +
+                ". Use list_renderers for input schemas before render_content; false means disabled by the user, use readable plain text instead."
         },
         execute = { input ->
             val field = (input as? JsonObject)?.get("renderer")
@@ -54,11 +61,14 @@ internal fun createRenderingTools(): List<Tool> = listOf(
             } else buildJsonObject {
                 put("platform", "android_chat")
                 put("catalog_version", RendererCatalog.version)
+                put("snapshot_scope", "current_request")
                 put("render_tool", RENDER_CONTENT_TOOL_NAME)
                 put("renderers", buildJsonArray {
                     (spec?.let(::listOf) ?: RendererCatalog.entries).forEach { renderer -> add(buildJsonObject {
                         put("id", renderer.id); put("name", renderer.title)
-                        put("format", renderer.format); put("automatic_preview", renderer.automatic)
+                        put("enabled", linguistic.enabled(renderer.id) && (renderer.id != "mei" || meiEnabled))
+                        put("format", renderer.format); put("automatic_preview", renderer.automatic && linguistic.enabled(renderer.id) && (renderer.id != "mei" || meiEnabled))
+                        if (!linguistic.enabled(renderer.id) || renderer.id == "mei" && !meiEnabled) put("status", "disabled_by_user")
                         if (spec != null) {
                             put("aliases", buildJsonArray { renderer.aliases.forEach(::add) })
                             put("max_source_chars", renderer.maxChars)
@@ -82,6 +92,10 @@ internal fun createRenderingTools(): List<Tool> = listOf(
             val request = runCatching { parseRenderRequest(input) }
             listOf(UIMessagePart.Text(buildJsonObject {
                 request.fold(onSuccess = { value ->
+                    if (!linguistic.enabled(value.renderer.id) || value.renderer.id == "mei" && !meiEnabled) {
+                        put("status", "error"); put("code", "renderer_disabled"); put("error", "Renderer disabled by user; use readable plain text")
+                        return@fold
+                    }
                     put("status", "accepted"); put("renderer", value.renderer.id)
                     put("display", if (value.renderer.automatic) "chat_preview" else "manual_static_preview")
                     put("source_chars", value.source.length)

@@ -205,3 +205,29 @@ binary packages; listing an upstream URL alone is not a substitute for those
 distribution obligations. The library remains a separate asset, not merged
 into application-owned scripts. `PatternPreviewTest` checks its pinned hash
 and license presence. App adapters and shared geometry code are separate files.
+
+
+## Verovio MEI engraving (2026-11-21)
+
+Verovio 6.4.1, LGPL-3.0-only, is bundled as two **unmodified, separately replaceable**
+ES modules under `html/renderers/verovio-6.4.1/`. The app-owned Worker and pagination
+host are separate source files. Only an MEI preview loads the WASM module; rendering
+runs in a disposable Worker. Existing ABC / numbered notation / MusicXML do not
+load Verovio. No Humdrum build is included.
+
+| Asset | Bytes | SHA-256 |
+| --- | --- | --- |
+| `verovio.mjs` | 25,815 | `0659cecb1f4c70ab47773f51f4bfd30a7c17273a0b8075cb4dc6407974ad1338` |
+| `verovio-module.mjs` | 7,400,749 | `50939c8976c90992c9e20521424d9128066daa0b219ca86bad1578f2dc6eb013` |
+
+Binary source: https://registry.npmjs.org/verovio/-/verovio-6.4.1.tgz
+
+Exact corresponding source: https://github.com/rism-digital/verovio/tree/fbe8f4695ab0a123cb096e0cf92354b44f7a2fb8
+
+`html/renderers/verovio-6.4.1/NOTICE.txt` accompanies the assets in the APK, identifies
+the corresponding source and explains replacement/rebuilding. Both upstream
+`COPYING` (GPL v3) and `COPYING.LESSER` (LGPL v3) are included in `html/licenses/`
+as `verovio-6.4.1-GPL-3.0.txt` and `verovio-6.4.1-LGPL-3.0.txt`. The main app's source
+and Android build files permit rebuilding a separate install with modified assets;
+no library hash check prevents replacement. Preserve these notices, corresponding
+source access and build instructions with any future binary distribution.

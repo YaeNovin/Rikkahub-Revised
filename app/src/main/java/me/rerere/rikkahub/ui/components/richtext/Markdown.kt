@@ -225,7 +225,7 @@ private val markdownFragmentCache = object : LinkedHashMap<MarkdownParseCacheKey
 }
 
 private val GRAPHICAL_CODE_FENCE_REGEX = Regex(
-    pattern = "(?m)^\\s*```\\s*(?:pattern|generative_art|p5_pattern|p5-pattern|math_plot|math_plan|math-plot|jsxgraph|sigil|magic_circle|magic-circle|ansi|terminal|xterm|console-output|mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|ebnf|html|svg|wavedrom|waveform|timing|digital-waveform|dot|graphviz|vega|vega-lite|vegalite|smiles|smiles-drawer|molecule|musicxml|music-xml)\\b",
+    pattern = "(?m)^\\s*```\\s*(?:pattern|generative_art|p5_pattern|p5-pattern|math_plot|math_plan|math-plot|jsxgraph|sigil|magic_circle|magic-circle|ansi|terminal|xterm|console-output|mermaid|echarts|chart|abc|abcjs|jianpu|numbered|numbered-notation|numberednotation|numbered_notation|简谱|leaflet|map|geojson|railroad|railroad-diagram|grammar|ebnf|html|svg|wavedrom|waveform|timing|digital-waveform|dot|graphviz|vega|vega-lite|vegalite|smiles|smiles-drawer|molecule|musicxml|music-xml|mei|mei-xml|ipa|phonetic|ruby_annotation|ruby-annotation|furigana|zhuyin|gloss|interlinear|igt|syntax_tree|syntax-tree|constituency|dependency|conllu|conll-u|ud)\\b",
     option = RegexOption.IGNORE_CASE,
 )
 

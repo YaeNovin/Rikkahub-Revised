@@ -60,13 +60,14 @@ internal fun GraphPreviewActions(html: String, view: WebView?) {
         }
     }
     Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.End) {
+        if (html.contains("content=\"music-score\"")) ScorePdfExportAction(view)
         IconButton(onClick = { preview { html } }) {
             Icon(HugeIcons.View, stringResource(R.string.code_block_preview))
         }
         IconButton(enabled = view != null && !saving, onClick = {
             val renderer = view ?: return@IconButton
             saving = true
-            renderer.evaluateJavascript("(function(){ if (typeof window.rikkaPrepareExport === 'function') window.rikkaPrepareExport(); return document.readyState === 'complete' && window.__rikkaRenderStatus !== 'loading' && window.__rikkaRenderStatus !== 'error'; })()") { ready ->
+            renderer.evaluateJavascript("(function(){ if (typeof window.rikkaPrepareExport === 'function') window.rikkaPrepareExport('snapshot'); return document.readyState === 'complete' && window.__rikkaRenderStatus !== 'loading' && window.__rikkaRenderStatus !== 'error'; })()") { ready ->
                 if (ready != "true" || !renderer.isAttachedToWindow) {
                     saving = false
                     toaster.show("图形尚未完成渲染，请稍后重试。", type = ToastType.Error)

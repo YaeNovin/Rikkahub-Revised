@@ -45,7 +45,9 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                             val pathAttr = path?.let { " path=\"${it.escapeXmlAttribute()}\"" } ?: ""
                             val isMidi = isMidiFileType(document.fileName, document.mime)
                             val midiAttr = if (isMidi) " format=\"abc\"" else ""
-                            val fenceLanguage = if (isMidi) "abc" else ""
+                            val fenceLanguage = if (isMidi) "abc" else when (document.fileName.substringAfterLast('.', "").lowercase()) {
+                                "musicxml", "mxl" -> "musicxml"; "mei" -> "mei"; "abc" -> "abc"; "jianpu" -> "jianpu"; else -> ""
+                            }
                             val prompt = """
                                 <UploadFile name="${document.fileName.escapeXmlAttribute()}"$pathAttr$midiAttr>
                                 ```$fenceLanguage
@@ -107,6 +109,8 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
             if (isMidiFileType(document.fileName, document.mime)) {
                 MidiToAbcConverter.convert(file).getOrThrow()
             } else when {
+                me.rerere.rikkahub.data.render.ScoreDocuments.isCandidate(document.fileName, document.mime) ->
+                    me.rerere.rikkahub.data.render.ScoreDocuments.read(file, document.fileName, document.mime)?.source ?: file.readText()
                 extension == "pdf" || mime == "application/pdf" -> parsePdfAsText(file)
                 extension == "doc" || mime == DOC_MIME -> parseDocAsText(file)
                 extension == "docx" || mime == DOCX_MIME -> parseDocxAsText(file)

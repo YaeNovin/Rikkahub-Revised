@@ -49,7 +49,7 @@ internal fun normalizeDiagramData(source: String, renderer: InteractiveCodeRende
  * The original language/source remains available for copying and source view. */
 internal fun resolveDiagramLanguage(language: String, code: String): String {
     val declared = normalizeCodeFenceLanguage(language)
-    if (code.length > MAX_DIAGRAM_SOURCE_LENGTH) return declared
+    if (code.length > MAX_DIAGRAM_SOURCE_LENGTH && (declared !in setOf("", "text", "plaintext", "xml") || code.length > me.rerere.rikkahub.data.render.MAX_SCORE_SOURCE_CHARS)) return declared
     if (declared == "ebnf") return "railroad"
     if (declared !in GENERIC_JSON_LANGUAGES && declared != "xml") return declared
     val source = code.trim()
@@ -57,9 +57,12 @@ internal fun resolveDiagramLanguage(language: String, code: String): String {
         val document = Jsoup.parse(source, "", Parser.xmlParser())
         if (document.childrenSize() == 1 && document.child(0).tagName() == "score-partwise" &&
             source.trimEnd().endsWith("</score-partwise>")) return "musicxml"
-        if (document.childrenSize() == 1 && document.child(0).tagName().equals("svg", true) &&
+        if (document.childrenSize() == 1 && document.child(0).tagName() == "mei" &&
+            document.child(0).attr("xmlns") == "http://www.music-encoding.org/ns/mei" && source.trimEnd().endsWith("</mei>")) return "mei"
+        if (code.length <= MAX_DIAGRAM_SOURCE_LENGTH && document.childrenSize() == 1 && document.child(0).tagName().equals("svg", true) &&
             Regex("</svg\\s*>\\s*$", RegexOption.IGNORE_CASE).containsMatchIn(source)) return "svg"
     }
+    if (code.length > MAX_DIAGRAM_SOURCE_LENGTH) return declared
     if (declared in GENERIC_JSON_LANGUAGES) {
         val data = parseDiagramData(source)
         if (data is JsonArray && data.isNotEmpty() && data.all { it.isGeoJson() }) return "geojson"

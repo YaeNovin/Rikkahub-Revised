@@ -2,8 +2,11 @@
 app/src/release/generated/baselineProfiles/*.txt text eol=lf
 
 # Public documentation and portable Python tools use stable repository line endings.
+/.gitattributes text eol=lf
+/.gitignore text eol=lf
 /docs/**/*.md text eol=lf
 /README*.md text eol=lf
+/scripts/*.md text eol=lf
 /scripts/*.py text eol=lf
 
 # Application-owned source is identical on Windows and Unix checkouts.
@@ -26,3 +29,7 @@ app/src/release/generated/baselineProfiles/*.txt text eol=lf
 /app/src/main/assets/html/renderers/** -text
 /app/src/main/assets/html/licenses/** -text
 /third_party/** -text
+
+# Preserve upstream formatting in the bundled OFL and unmodified Verovio module.
+/app/src/main/assets/html/renderers/fonts/DoulosSIL-OFL.txt whitespace=cr-at-eol
+/app/src/main/assets/html/renderers/verovio-6.4.1/verovio.mjs whitespace=-trailing-space

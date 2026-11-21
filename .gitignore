@@ -71,3 +71,15 @@ hs_err_pid*
 /scripts/relocate_android_sdk.py
 /scripts/test_build_resource_maintenance.py
 /scripts/test_android_sdk_paths.py
+
+# Local experiments are maintained separately from Android source and releases.
+/desktop/
+/Desktop/
+/desktopApp/
+/app/src/debug/assets/three-spike/
+/app/src/debug/java/me/rerere/rikkahub/ThreeSpikeActivity.kt
+/app/src/testDebug/java/me/rerere/rikkahub/ThreeSpikeTest.kt
+/docs/assets/threejs-feasibility/
+/docs/threejs-feasibility-spike.md
+/docs/windows-desktop-foundation.md
+/scripts/*three-spike*

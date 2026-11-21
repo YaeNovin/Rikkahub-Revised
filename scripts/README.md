@@ -236,3 +236,15 @@ buttons and exact UI text assertions. It checks user/assistant cache isolation,
 soft line breaks, pasted source across light/dark themes, and literal inline
 code. Results and screenshots go to `build/reports/p0-device/`.
 The script does not access user conversations or clear the installed QA data.
+
+### 语言学渲染
+
+- `verify-linguistic-renderers.cjs`：读取 JVM 生成的生产 HTML，离线核对五类渲染、深浅色、大字体、RTL、图形边界与导出。
+- `linguistic-qa.init.gradle`：独立 `.revised.linguisticqa` Debug 包与进程内 Kotlin 编译，不修改常用 QA 数据。
+- `qa_linguistic_renderers.py`：ADB 外部驱动 Activity 启动、截图与源码 UI 检查，应用内断言使用生产组件；完成后恢复临时亮屏设置。构建与命令见 [语言学说明](../docs/linguistic-rendering.md)。
+
+### 音乐学渲染
+
+- `verify-music-renderers.cjs`：`MusicScoreRenderingTest` 生成生产 HTML；离线验证翻页、系统完整性、屏宽重排、MusicXML 功能和声、MEI 定量谱/纽姆谱、逐页 SVG 与整条消息导出。
+- `music-qa.init.gradle`：独立 `.revised.musicqa` Debug 包；合成谱面与常用 QA 数据隔离。
+- `qa_music_renderers.py`：通过 ADB 驱动 `MusicRenderingDeviceTest`，检查深浅色、翻页后整谱 PDF 页数和每页墨迹、Android 原生 XML/MXL 解析与模型附件上下文，收集截图/PDF并恢复亮屏设置。命令与结果见 [音乐学说明](../docs/music-rendering.md)。

@@ -8,10 +8,10 @@ enum class OfficialChatVendor { OPENAI, DEEPSEEK, MINIMAX, KIMI, MIMO, GLM, OTHE
 fun officialChatVendor(baseUrl: String): OfficialChatVendor = when (val host = runCatching { baseUrl.toHttpUrl().host }.getOrNull()) {
     "api.openai.com" -> OfficialChatVendor.OPENAI
     "api.deepseek.com" -> OfficialChatVendor.DEEPSEEK
-    "api.minimax.io", "api.minimaxi.com", "api.minimax.chat" -> OfficialChatVendor.MINIMAX
     "api.moonshot.cn", "api.moonshot.ai", "api.kimi.com" -> OfficialChatVendor.KIMI
     "open.bigmodel.cn", "api.z.ai" -> OfficialChatVendor.GLM
     else -> when {
+        me.rerere.common.http.MiniMaxEndpoints.isOfficialHost(host) -> OfficialChatVendor.MINIMAX
         host?.endsWith(".api.openai.com") == true -> OfficialChatVendor.OPENAI
         host == "api.xiaomimimo.com" || host == "token-plan-cn.xiaomimimo.com" || host == "batch-api-cn.xiaomimimo.com" -> OfficialChatVendor.MIMO
         else -> OfficialChatVendor.OTHER

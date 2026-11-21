@@ -390,7 +390,7 @@ val DEFAULT_PROVIDERS = listOf(
     ProviderSetting.Claude(
         id = Uuid.parse("b4deabea-20fb-4101-a74c-65679c7e4754"),
         name = "MiniMax",
-        baseUrl = "https://api.minimaxi.com/anthropic/v1",
+        baseUrl = me.rerere.common.http.MiniMaxEndpoints.CHINA_ANTHROPIC_BASE_URL,
         apiKey = "",
         enabled = false,
         builtIn = true,

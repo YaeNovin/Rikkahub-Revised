@@ -38,9 +38,9 @@ render_content({"renderer":"mermaid","source":"flowchart LR; A[请求] --> B[响
 
 HTML 的展示方式固定为 `manual_static_preview`；即使工具调用中传入 `allow_scripts`，也不会取得执行权限。无效类型、未知渲染器、空输入、超长输入返回错误，不静默截断或切换到其他渲染器。
 
-统一目录现为版本 6，包含 21 类：Markdown（含表格/图片/GIF/链接/任务列表）、LaTeX、代码高亮、Diff、HTML、SVG、Mermaid、ECharts、ABC、简谱、Leaflet/GeoJSON、铁路图/EBNF、WaveDrom、Graphviz、Vega/Vega-Lite、SMILES、MusicXML、只读 xterm、JSXGraph 数理绘图 `math_plot`（兼容 `math_plan`）、法阵图案 `sigil` 及 p5.js 程序化纹样 `pattern`。后三项使用受限声明式 JSON，格式及交互限制见[数理绘图与 sigil](math-plot-and-sigil.md)和[程序化纹样](procedural-patterns.md)。图片生成不属于渲染器，继续使用独立生图工具与既有确认规则。法阵/纹样共享动态特效参数，见[特效说明](decorative-effects-and-performance.md)。目录 6 同时包含多色调色板、镜像对称、受限自由路径、统一动画编排和对象形式的高级发光参数。
+统一目录现为版本 9，包含 27 类（原 21 类与新增的 IPA、Ruby 注音、逐词释义、句法树、依存弧线，详见[语言学说明](linguistic-rendering.md)，另新增 [MEI 古谱](music-rendering.md)）：Markdown（含表格/图片/GIF/链接/任务列表）、LaTeX、代码高亮、Diff、HTML、SVG、Mermaid、ECharts、ABC、简谱、Leaflet/GeoJSON、铁路图/EBNF、WaveDrom、Graphviz、Vega/Vega-Lite、SMILES、MusicXML、MEI、只读 xterm、JSXGraph 数理绘图 `math_plot`（兼容 `math_plan`）、法阵图案 `sigil` 及 p5.js 程序化纹样 `pattern`。后三项使用受限声明式 JSON，格式及交互限制见[数理绘图与 sigil](math-plot-and-sigil.md)和[程序化纹样](procedural-patterns.md)。图片生成不属于渲染器，继续使用独立生图工具与既有确认规则。法阵/纹样共享动态特效参数，见[特效说明](decorative-effects-and-performance.md)。目录 6 同时包含多色调色板、镜像对称、受限自由路径、统一动画编排和对象形式的高级发光参数。
 
-多数输入上限为 131072 个 UTF-16 代码单元；LaTeX 为 8000、SMILES 为 4000、WaveDrom/Graphviz 为 32000，math_plot/sigil/pattern 为 32768，另保留 MusicXML 最多 200 小节、Graphviz 布局超时与 xterm 滚动历史等原有限制。实际设备是否支持 WASM/Worker、用户公式显示设置和格式子集仍影响展示，目录不承诺任意 WebView 版本均可运行。
+多数输入上限为 131072 个 UTF-16 代码单元；LaTeX 为 8000、SMILES 为 4000、WaveDrom/Graphviz 为 32000，math_plot/sigil/pattern 与五类语言学格式为 32768，曲谱为 524288，另有每声部 512 小节/16000 事件/64 页等预算，详见[音乐学说明](music-rendering.md)；另保留 Graphviz 布局超时与 xterm 滚动历史等原有限制。实际设备是否支持 WASM/Worker、用户公式显示设置和格式子集仍影响展示，目录不承诺任意 WebView 版本均可运行。
 
 ## 安全边界与实现
 

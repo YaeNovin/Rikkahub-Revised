@@ -24,11 +24,15 @@ internal fun List<Tool>.withSessionCapabilitiesTool(
     knowledgeBaseCapabilities: KnowledgeBaseCapabilities = KnowledgeBaseCapabilities.fromAssistant(assistant),
     suggestionCapabilities: ((details: Boolean) -> JsonObject)? = null,
     searchCapabilities: JsonObject? = null,
+    linguisticRendering: me.rerere.rikkahub.data.render.LinguisticRenderingSettings = me.rerere.rikkahub.data.render.LinguisticRenderingSettings(),
+    meiRenderingEnabled: Boolean = true,
 ): List<Tool> {
     val registered = filterNot { it.name == SESSION_CAPABILITIES_TOOL_NAME }
     val names = registered.map(Tool::name) + SESSION_CAPABILITIES_TOOL_NAME
     return registered + createSessionCapabilitiesTool(
         assistant = assistant,
+        linguisticRendering = linguisticRendering,
+        meiRenderingEnabled = meiRenderingEnabled,
         toolCallsAvailable = true,
         availableToolNames = { names },
         knowledgeBaseCapabilities = knowledgeBaseCapabilities,
@@ -62,6 +66,8 @@ fun createSessionCapabilitiesTool(
     knowledgeBaseCapabilities: KnowledgeBaseCapabilities = KnowledgeBaseCapabilities.fromAssistant(assistant),
     suggestionCapabilities: ((details: Boolean) -> JsonObject)? = null,
     searchCapabilities: JsonObject? = null,
+    linguisticRendering: me.rerere.rikkahub.data.render.LinguisticRenderingSettings = me.rerere.rikkahub.data.render.LinguisticRenderingSettings(),
+    meiRenderingEnabled: Boolean = true,
 ): Tool = Tool(
     name = SESSION_CAPABILITIES_TOOL_NAME,
     description = "Inspect the active assistant session's non-sensitive feature flags, retrieval modes, chat suggestion configuration and available tool names. Use include_suggestion_details=true for suggestion fields, draft actions and local form rules. This query cannot create suggestion cards or change settings.",
@@ -147,6 +153,12 @@ fun createSessionCapabilitiesTool(
                             put("list_tool", LIST_RENDERERS_TOOL_NAME)
                             put("render_tool", RENDER_CONTENT_TOOL_NAME)
                             put("catalog_version", me.rerere.rikkahub.data.render.RendererCatalog.version)
+                            put("linguistic_renderers", buildJsonObject {
+                                me.rerere.rikkahub.data.render.linguisticRendererIds.forEach { put(it, linguisticRendering.enabled(it)) }
+                            })
+                            put("music_renderers", buildJsonObject {
+                                put("abc", true); put("jianpu", true); put("musicxml", true); put("mei", meiRenderingEnabled)
+                            })
                             put("html_auto_render", false)
                             put("author_scripts_allowed", false)
                         }

@@ -11,10 +11,12 @@ import org.junit.Test
 class MiniMaxVideoAPITest {
     private val model = Model(modelId = "MiniMax-Hailuo-2.3", type = ModelType.VIDEO)
     @Test fun `anthropic setting uses native video endpoint without changing chat config`() {
-        val setting = ProviderSetting.Claude(baseUrl = "https://api.minimaxi.com/anthropic/v1", apiKey = "test")
-        assertEquals("https://api.minimaxi.com/v1", setting.miniMaxVideoSetting(model)?.baseUrl)
-        assertEquals("https://api.minimaxi.com/anthropic/v1", setting.baseUrl)
-        assertNull(setting.copy(baseUrl = "https://example.com/v1").miniMaxVideoSetting(model))
+        for (host in listOf("api.minimax.cn", "api.minimaxi.com", "api.minimax.io")) {
+            val setting = ProviderSetting.Claude(baseUrl = "https://$host/anthropic/v1", apiKey = "test")
+            assertEquals("https://$host/v1", setting.miniMaxVideoSetting(model)?.baseUrl)
+            assertEquals("https://$host/anthropic/v1", setting.baseUrl)
+            assertNull(setting.copy(baseUrl = "https://example.com/v1").miniMaxVideoSetting(model))
+        }
     }
     @Test fun `fast model is image only and legacy duration is fixed`() {
         assertEquals(setOf(VideoGenerationInputMode.IMAGE_TO_VIDEO), miniMaxVideoConstraints(model.copy(modelId = "MiniMax-Hailuo-2.3-Fast")).supportedInputModes)

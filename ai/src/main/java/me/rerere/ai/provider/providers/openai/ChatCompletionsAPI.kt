@@ -388,7 +388,7 @@ class ChatCompletionsAPI(
                     grokSupport.available ||
                     (host in setOf("api.moonshot.cn", "api.moonshot.ai") &&
                         params.model.modernVendorModel() in setOf(me.rerere.ai.provider.ModernVendorModel.KIMI_K3, me.rerere.ai.provider.ModernVendorModel.KIMI_K27)) ||
-                    (host in setOf("api.minimaxi.com", "api.minimax.io") && params.model.isMiniMaxM3())
+                    (me.rerere.common.http.MiniMaxEndpoints.isOfficialHost(host) && params.model.isMiniMaxM3())
                 ) {
                     "max_completion_tokens"
                 } else {

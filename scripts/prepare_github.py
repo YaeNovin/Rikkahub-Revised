@@ -49,6 +49,14 @@ def private_reason(path: str) -> str | None:
     return None
 
 
+def is_local_experiment(path: str) -> bool:
+    name = path.replace("\\", "/")
+    return (name.startswith(("desktop/", "Desktop/", "desktopApp/", "docs/assets/threejs-feasibility/",
+                             "app/src/debug/assets/three-spike/"))
+            or "ThreeSpike" in name or "three-spike" in name
+            or name in {"docs/threejs-feasibility-spike.md", "docs/windows-desktop-foundation.md"})
+
+
 def inspect_text(text: str, url_examples: frozenset[str] = frozenset()) -> list[dict]:
     hits = []
     for name, pattern in SECRET_RULES.items():
@@ -76,7 +84,8 @@ def missing_doc_links(path: Path, text: str) -> list[str]:
         target = destination.split("#", 1)[0].split("?", 1)[0]
         resolved = (path.parent / target).resolve()
         lexical = Path(os.path.abspath(path.parent / target))
-        local_only = lexical.is_relative_to(ROOT) and private_reason(lexical.relative_to(ROOT).as_posix())
+        local_only = lexical.is_relative_to(ROOT) and (private_reason(lexical.relative_to(ROOT).as_posix())
+                                                      or is_local_experiment(lexical.relative_to(ROOT).as_posix()))
         if target and (not resolved.exists() or local_only):
             missing.append(destination)
     return sorted(set(missing))
@@ -130,7 +139,7 @@ def main() -> int:
                         row.update(category="hold", reason="document-needs-portable-example")
                     for link in missing_doc_links(file, text):
                         missing.append({"path": name, "target": link})
-            if row["category"] == "source" and (name.startswith(("desktopApp/", "docs/assets/threejs-feasibility/")) or "ThreeSpike" in name or "three-spike" in name or name == "docs/threejs-feasibility-spike.md"):
+            if row["category"] == "source" and is_local_experiment(name):
                 row.update(category="separate", reason="optional-experiment")
         if row["bytes"] >= 50 * 1024 * 1024:
             row.update(category="hold", reason="large-file-review")

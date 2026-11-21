@@ -19,7 +19,7 @@ fun ProviderSetting.miniMaxVideoSetting(model: Model): ProviderSetting.OpenAI? {
     if (model.type != ModelType.VIDEO || MINIMAX_VIDEO_MODELS.none { it.equals(model.parameterModelId(), true) }) return null
     val base = when (this) { is ProviderSetting.OpenAI -> baseUrl; is ProviderSetting.Claude -> baseUrl; else -> return null }
     val url = runCatching { base.trim().toHttpUrl() }.getOrNull() ?: return null
-    if (!url.isHttps || url.host !in setOf("api.minimaxi.com", "api.minimax.io", "api.minimax.chat")) return null
+    if (!url.isHttps || !me.rerere.common.http.MiniMaxEndpoints.isOfficialHost(url.host)) return null
     val key = when (this) { is ProviderSetting.OpenAI -> apiKey; is ProviderSetting.Claude -> apiKey; else -> return null }
     return ProviderSetting.OpenAI(id = id, name = name, enabled = enabled, apiKey = key,
         baseUrl = url.newBuilder().encodedPath("/v1").query(null).fragment(null).build().toString())

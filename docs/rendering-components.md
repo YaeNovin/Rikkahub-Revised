@@ -8,6 +8,8 @@
 
 同日增补：[统一渲染工具与 HTML 安全策略](rendering-tools-and-html-policy.md)。HTML 默认源码，点击后只显示静态安全预览；裸 HTML 不再按原生 HTML 排版。下文中更早的任意 HTML 脚本加载说明属于历史行为，专用图表入口继续保留。
 
+2026-11-21 开发增补：[语言学与外语渲染](linguistic-rendering.md)。新增 IPA、受控 Ruby 注音、逐词/词素释义、成分句法树和 UD 依存弧线；共用校验、设置与模型工具发现。
+
 ## 当前已有能力
 
 2026-09-24 增补：[数理绘图与法阵](math-plot-and-sigil.md)。新增 `math_plot`（含 `math_plan` 别名）的 JSXGraph 受限表达式绘图，以及 SVG 参数化 `sigil`，不是任意 JSXGraph/HTML 脚本运行入口。
@@ -70,13 +72,14 @@ Markmap 与已有 Mermaid 思维导图重叠，Plotly/Three.js 等较重的 3D �
 | `dot` / `graphviz` | @hpcc-js/wasm-graphviz 1.29.0，内嵌 Graphviz 16.1.0 | 在模块 Worker 中执行 DOT 布局；需要 WebAssembly/模块 Worker，15 秒超时终止；不支持时提示更新系统 WebView |
 | `vega` / `vega-lite` | Vega 6.4.0、Vega-Lite 6.4.3、Vega Embed 7.2.0 | 数据使用 `data.values`；禁用外部数据加载，预览不提供打开在线编辑器按钮 |
 | `smiles` / `molecule` | SmilesDrawer 2.4.1，SVG 分子结构 | 单个 SMILES，不把 MOL 文件误当作 SMILES；最多 4000 字符 |
-| `musicxml` / `music-xml` | OpenSheetMusicDisplay 2.1.2 | 完整 `score-partwise` XML，最多 200 小节；压缩 MXL/文件导入和播放本次未接入 |
+| `mei` / `mei-xml` | Verovio 6.4.1，本地 WASM Worker | 单个 mdiv；现代、定量谱和纽姆音符，最多 64 页。纽姆歌词本版不参与刻谱/PDF，会提示并保留源码；非完整 MEI 校验器，见 [音乐学说明](music-rendering.md) |
+| `musicxml` / `music-xml` | OpenSheetMusicDisplay 2.1.2 | MusicXML 3/4 `score-partwise`，每声部最多 512 小节、24 声部、16000 事件、64 页；XML/MXL 附件、和声标注、A4 分页与整谱 PDF，播放未接入 |
 
 这五类使用统一的聊天预览、源码切换、全屏缩放与导出等待机制。
 图形内部采用清晰的浅色纸面，防止原生谱面、分子符号与复杂壁纸发生低对比度。
 渲染库、WaveDrom 皮肤、Vega 依赖和 Graphviz WASM 已本地打包。
 jQuery 3.6.4 作为用户提供的通用脚本保留，不单独提供渲染入口，也不注入这些预览。
-输入超过通用 128 KiB 限制时保留源码展示。
+普通交互图形维持 128 Ki 字符限制；音乐谱面为 512 Ki 字符并另有事件/页数预算。ABC、简谱和 MusicXML/MEI 共用完整系统分页与逐页矢量 PDF 导出；详见 [音乐学说明](music-rendering.md)。
 
 ```wavedrom
 {"signal":[{"name":"clock","wave":"p....."},{"name":"data","wave":"x.345x","data":["A","B","C"]}]}

@@ -83,6 +83,41 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                     GitHubSettings(displaySetting, onUpdate = ::updateDisplaySetting)
                 }
             }
+            item(key = "music-renderers") {
+                CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    item(headlineContent = { Text("MEI 古谱 / Verovio") },
+                        supportingContent = { Text("离线古谱排版、分页和整谱 PDF；关闭后保留源码，模型会获知此设置") },
+                        trailingContent = { Switch(checked = displaySetting.meiRenderingEnabled, onCheckedChange = { enabled ->
+                            displaySetting = displaySetting.copy(meiRenderingEnabled = enabled)
+                            vm.updateDisplaySetting { it.copy(meiRenderingEnabled = enabled) }
+                        }) })
+                }
+            }
+            item(key = "linguistic-renderers") {
+                val linguistic = displaySetting.linguisticRendering
+                CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    listOf("ipa" to "IPA 音标", "ruby_annotation" to "注音 / Ruby", "gloss" to "逐词 / 词素释义",
+                        "syntax_tree" to "句法树", "dependency" to "依存弧线").forEach { (id, title) ->
+                        item(
+                            headlineContent = { Text(title) },
+                            supportingContent = { Text("语言学渲染；关闭后显示源码，模型也会获知此设置") },
+                            trailingContent = {
+                                Switch(checked = linguistic.enabled(id), onCheckedChange = { enabled ->
+                                    val updated = when (id) {
+                                        "ipa" -> linguistic.copy(ipa = enabled)
+                                        "ruby_annotation" -> linguistic.copy(ruby = enabled)
+                                        "gloss" -> linguistic.copy(gloss = enabled)
+                                        "syntax_tree" -> linguistic.copy(syntaxTree = enabled)
+                                        else -> linguistic.copy(dependency = enabled)
+                                    }
+                                    displaySetting = displaySetting.copy(linguisticRendering = updated)
+                                    vm.updateDisplaySetting { current -> current.copy(linguisticRendering = updated) }
+                                })
+                            },
+                        )
+                    }
+                }
+            }
             item {
                 var createNewConversationOnStart by rememberSharedPreferenceBoolean(
                     "create_new_conversation_on_start",

@@ -34,7 +34,8 @@ fun Context.copyMessageToClipboard(message: UIMessage) {
 
 private val ALLOWED_MIME_TYPES = setOf(
     "text/plain", "text/html", "text/css", "text/javascript", "text/csv", "text/xml",
-    "application/json", "application/javascript", "application/pdf",
+    "application/json", "application/javascript", "application/pdf", "application/xml",
+    "application/vnd.recordare.musicxml", "application/vnd.recordare.musicxml+xml", "application/mei+xml",
     "audio/midi", "audio/x-midi", "audio/mid",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -47,7 +48,7 @@ private val ALLOWED_MIME_TYPES = setOf(
 
 private val ALLOWED_FILE_EXTENSIONS = setOf(
     "txt", "md", "csv", "json", "js", "jsx", "mjs", "cjs",
-    "html", "css", "vue", "svelte", "xml",
+    "html", "css", "vue", "svelte", "xml", "musicxml", "mxl", "mei", "abc", "jianpu",
     "py", "rb", "lua", "sql", "java", "kt", "ts", "tsx",
     "dart", "php", "swift", "go",
     "bat", "cmd", "ps1", "psm1", "sh", "bash", "zsh", "fish",

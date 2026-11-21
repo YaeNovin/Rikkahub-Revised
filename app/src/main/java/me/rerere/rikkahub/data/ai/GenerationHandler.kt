@@ -198,7 +198,7 @@ class GenerationHandler(
                     )
                 }
                 addAll(tools)
-            }.withRenderingTools(enabled = model.supportsFunctionCalling()).withChatImageTools(
+            }.withRenderingTools(enabled = model.supportsFunctionCalling(), linguistic = settings.displaySetting.linguisticRendering, meiEnabled = settings.displaySetting.meiRenderingEnabled).withChatImageTools(
                 settings = settings,
                 assistant = assistant,
                 chatModel = model,
@@ -213,6 +213,8 @@ class GenerationHandler(
             val toolsInternal = if (toolCallsAvailable) {
                 registeredTools.withSessionCapabilitiesTool(
                     assistant = assistant,
+                    linguisticRendering = settings.displaySetting.linguisticRendering,
+                    meiRenderingEnabled = settings.displaySetting.meiRenderingEnabled,
                     knowledgeBaseCapabilities = knowledgeBaseCapabilities,
                     searchCapabilities = searchAvailability(assistant, model, provider).let {
                         kotlinx.serialization.json.buildJsonObject {
@@ -690,6 +692,12 @@ class GenerationHandler(
                     appendLine()
                     append(nonToolCapabilityPrompt)
                 }
+                appendLine()
+                append("Android music previews: ABC, numbered notation and MusicXML; MEI enabled=${settings.displaySetting.meiRenderingEnabled}. Scores support pagination and whole-score PDF. Query list_renderers for limits and format. Android linguistic previews (settings for this request): ")
+                append(me.rerere.rikkahub.data.render.linguisticRendererIds.joinToString { id ->
+                    "$id=${settings.displaySetting.linguisticRendering.enabled(id)}"
+                })
+                append(". For enabled formats use list_renderers then render_content when available. Dedicated fenced blocks also work. Disabled formats must use readable plain text. These are display tools, not automatic linguistic analysis or audio synthesis.")
                 appendLine()
                 append(searchAvailability(assistant, model, provider).let {
                     it.copy(external = it.external && tools.any { tool -> tool.name == "search_web" }).prompt()

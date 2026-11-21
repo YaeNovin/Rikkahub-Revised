@@ -60,12 +60,13 @@ class ClaudeReasoningRequestTest {
 
     @Test
     fun `MiniMax Anthropic endpoint uses budget thinking`() {
-        val body = buildRequest("https://api.minimaxi.com/anthropic/v1", "MiniMax-M2.5")
-        val thinking = body["thinking"]?.jsonObject
-
-        assertEquals("enabled", thinking?.get("type")?.jsonPrimitive?.content)
-        assertEquals(32_000, thinking?.get("budget_tokens")?.jsonPrimitive?.int)
-        assertFalse(body.containsKey("output_config"))
+        for (host in listOf("api.minimax.cn", "api.minimaxi.com", "api.minimax.io")) {
+            val body = buildRequest("https://$host/anthropic/v1", "MiniMax-M2.5")
+            val thinking = body["thinking"]?.jsonObject
+            assertEquals("enabled", thinking?.get("type")?.jsonPrimitive?.content)
+            assertEquals(32_000, thinking?.get("budget_tokens")?.jsonPrimitive?.int)
+            assertFalse(body.containsKey("output_config"))
+        }
     }
 
     private fun buildRequest(
