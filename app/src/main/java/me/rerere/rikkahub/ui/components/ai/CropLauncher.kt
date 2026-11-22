@@ -9,8 +9,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toFile
@@ -23,6 +23,7 @@ import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.context.LocalToaster
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlin.uuid.Uuid
 
 @Composable
 internal fun useCropLauncher(
@@ -34,7 +35,7 @@ internal fun useCropLauncher(
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
-    var cropOutputUri by remember { mutableStateOf<Uri?>(null) }
+    var cropOutputUri by rememberSaveable { mutableStateOf<Uri?>(null) }
 
     fun cleanupCropOutput() {
         cropOutputUri?.toFile()?.delete()
@@ -79,10 +80,10 @@ internal fun useCropLauncher(
     }
 
     val launchCrop: (Uri) -> Unit = { sourceUri ->
-        val outputFile = File(context.appTempFolder, "crop_output_${System.currentTimeMillis()}.png")
-        cropOutputUri = Uri.fromFile(outputFile)
+        val outputFile = File(context.appTempFolder, "crop_output_${Uuid.random()}.png")
+        val outputUri = Uri.fromFile(outputFile)
 
-        var crop = UCrop.of(sourceUri, cropOutputUri!!).withOptions(UCrop.Options().apply {
+        var crop = UCrop.of(sourceUri, outputUri).withOptions(UCrop.Options().apply {
             setFreeStyleCropEnabled(freeStyleCropEnabled)
             setAllowedGestures(
                 UCropActivity.SCALE, UCropActivity.ROTATE, UCropActivity.NONE
@@ -94,7 +95,13 @@ internal fun useCropLauncher(
         }
         val cropIntent = crop.getIntent(context)
 
-        cropActivityLauncher.launch(cropIntent)
+        cropOutputUri = outputUri
+        try {
+            cropActivityLauncher.launch(cropIntent)
+        } catch (error: Exception) {
+            cleanupCropOutput()
+            throw error
+        }
     }
 
     return Pair(cropActivityLauncher, launchCrop)

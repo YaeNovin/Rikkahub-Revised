@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,16 +63,15 @@ import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.ui.components.ai.useCropLauncher
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.rememberAvatarShape
+import me.rerere.rikkahub.utils.ImageUtils
 import org.koin.compose.koinInject
 import java.io.File
-import java.io.InputStream
-import java.io.OutputStream
+import kotlin.uuid.Uuid
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private const val MAX_AVATAR_IMPORT_BYTES = 32L * 1024 * 1024
 
 @Composable
 fun TextAvatar(
@@ -119,7 +119,8 @@ fun UIAvatar(
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showUrlInput by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
-    var preCropTempFile by remember { mutableStateOf<File?>(null) }
+    var preparingImage by remember { mutableStateOf(false) }
+    var preCropTempPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     suspend fun saveAvatarImage(uri: Uri) {
         runCatching {
@@ -132,6 +133,7 @@ fun UIAvatar(
         }.onSuccess { managedAvatar ->
             onUpdate?.invoke(Avatar.Image(filesManager.getFile(managedAvatar).toUri().toString()))
         }.onFailure { error ->
+            if (error is CancellationException) throw error
             toaster.show(
                 context.formatUserFacingError(error),
                 type = ToastType.Error,
@@ -144,8 +146,8 @@ fun UIAvatar(
             saveAvatarImage(croppedUri)
         },
         onCleanup = {
-            preCropTempFile?.delete()
-            preCropTempFile = null
+            preCropTempPath?.let { File(it).delete() }
+            preCropTempPath = null
         },
         aspectRatio = 1f to 1f,
         freeStyleCropEnabled = false
@@ -155,28 +157,25 @@ fun UIAvatar(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { selectedUri ->
-            val tempFile = File(context.appTempFolder, "avatar_pick_${System.currentTimeMillis()}.jpg")
+            val tempFile = File(context.appTempFolder, "avatar_pick_${Uuid.random()}.png")
+            preparingImage = true
             scope.launch {
-                runCatching {
+                try {
                     withContext(Dispatchers.IO) {
-                        val inputStream = requireNotNull(
-                            context.contentResolver.openInputStream(selectedUri)
-                        ) { "Failed to open input stream for $selectedUri" }
-                        inputStream.use { input ->
-                            tempFile.outputStream().use { output ->
-                                copyAvatarWithLimit(input, output)
-                            }
-                        }
+                        ImageUtils.prepareAvatarCropSource(context, selectedUri, tempFile)
                     }
-                    preCropTempFile?.delete()
-                    preCropTempFile = tempFile
+                    preCropTempPath = tempFile.path
                     launchImageCrop(tempFile.toUri())
-                }.onFailure { error ->
-                    withContext(Dispatchers.IO) { tempFile.delete() }
+                } catch (error: Exception) {
+                    tempFile.delete()
+                    if (preCropTempPath == tempFile.path) preCropTempPath = null
+                    if (error is CancellationException) throw error
                     toaster.show(
                         context.formatUserFacingError(error),
                         type = ToastType.Error,
                     )
+                } finally {
+                    preparingImage = false
                 }
             }
         }
@@ -269,6 +268,7 @@ fun UIAvatar(
                             showPickOption = false
                             imagePickerLauncher.launch("image/*")
                         },
+                        enabled = !preparingImage && preCropTempPath == null,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(text = stringResource(id = R.string.avatar_pick_image))
@@ -374,18 +374,6 @@ fun UIAvatar(
                 }
             }
         )
-    }
-}
-
-private fun copyAvatarWithLimit(input: InputStream, output: OutputStream) {
-    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-    var copied = 0L
-    while (true) {
-        val count = input.read(buffer)
-        if (count < 0) return
-        copied += count
-        require(copied <= MAX_AVATAR_IMPORT_BYTES) { "Selected image is too large" }
-        output.write(buffer, 0, count)
     }
 }
 

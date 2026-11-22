@@ -5,11 +5,16 @@ package me.rerere.rikkahub.utils
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
+import me.rerere.common.android.appTempFolder
 import java.io.File
+import kotlin.math.roundToInt
 import com.drew.imaging.ImageMetadataReader
 import com.drew.imaging.png.PngChunkType
 import com.drew.metadata.png.PngDirectory
@@ -25,6 +30,79 @@ import com.google.zxing.common.HybridBinarizer
 object ImageUtils {
 
     private const val LARGE_IMAGE_BYTES = 10L * 1024L * 1024L
+    private const val MAX_AVATAR_IMPORT_BYTES = 32L * 1024 * 1024
+    private const val MAX_AVATAR_CROP_DIMENSION = 4096
+
+    /** uCrop's native writer reopens the source file when the user confirms the crop. */
+    internal fun prepareAvatarCropSource(context: Context, uri: Uri, target: File) {
+        val source = File.createTempFile("avatar_import_", ".img", context.appTempFolder)
+        try {
+            val input = requireNotNull(context.contentResolver.openInputStream(uri)) {
+                "Failed to open selected image"
+            }
+            input.use {
+                source.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var copied = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        copied += count
+                        require(copied <= MAX_AVATAR_IMPORT_BYTES) { "Selected image is too large" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+
+            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(source)) { decoder, info, _ ->
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+                    val size = info.size
+                    val longestEdge = maxOf(size.width, size.height)
+                    if (longestEdge > MAX_AVATAR_CROP_DIMENSION) {
+                        val scale = MAX_AVATAR_CROP_DIMENSION.toDouble() / longestEdge
+                        decoder.setTargetSize(
+                            (size.width * scale).roundToInt().coerceAtLeast(1),
+                            (size.height * scale).roundToInt().coerceAtLeast(1),
+                        )
+                    }
+                }
+            } else {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(source.path, bounds)
+                val longestEdge = maxOf(bounds.outWidth, bounds.outHeight)
+                var sampleSize = 1
+                while (longestEdge > sampleSize.toLong() * MAX_AVATAR_CROP_DIMENSION) {
+                    sampleSize *= 2
+                }
+                val options = BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+                }
+                val decoded = requireNotNull(BitmapFactory.decodeFile(source.path, options)) {
+                    "Selected image could not be decoded"
+                }
+                correctImageOrientation(context, Uri.fromFile(source), decoded)
+            }
+
+            try {
+                target.outputStream().use { output ->
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                        "Failed to prepare image for cropping"
+                    }
+                }
+            } finally {
+                bitmap.recycle()
+            }
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        } finally {
+            source.delete()
+        }
+    }
 
     /**
      * Re-encodes a large static image before it enters the chat upload directory.
@@ -171,24 +249,14 @@ object ImageUtils {
      */
     fun correctImageOrientation(context: Context, uri: Uri, bitmap: Bitmap): Bitmap {
         return runCatching {
-            val inputStream = context.contentResolver.openInputStream(uri)
-            val exif = inputStream?.let { ExifInterface(it) }
-            inputStream?.close()
-
-            val orientation = exif?.getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            ) ?: ExifInterface.ORIENTATION_NORMAL
+            val exif = context.contentResolver.openInputStream(uri)?.use { ExifInterface(it) }
+            val rotation = exif?.rotationDegrees ?: 0
+            val flipped = exif?.isFlipped == true
+            if (rotation == 0 && !flipped) return bitmap
 
             val matrix = Matrix()
-            when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-                else -> return bitmap // 不需要旋转
-            }
+            if (flipped) matrix.setScale(-1f, 1f)
+            matrix.postRotate(rotation.toFloat())
 
             val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
             if (rotatedBitmap != bitmap) {
