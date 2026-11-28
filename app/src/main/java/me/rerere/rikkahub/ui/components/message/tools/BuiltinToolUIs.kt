@@ -767,7 +767,7 @@ private fun SearchWebPreview(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     items(images) { imageUrl ->
-                        AsyncImage(
+                        me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage(
                             model = imageUrl,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,

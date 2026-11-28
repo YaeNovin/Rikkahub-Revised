@@ -12,17 +12,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.currentStateAsState
 import me.rerere.rikkahub.data.github.GitHubRepository
 import me.rerere.rikkahub.data.github.GitHubCardResult
 import me.rerere.rikkahub.data.github.GitHubCardStatus
@@ -41,45 +35,37 @@ internal fun GitHubRepositoryCard(url: String, modifier: Modifier = Modifier, li
     val layer = rememberGraphicsLayer()
     var actions by remember(fullName) { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
-    val view = LocalView.current
-    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val export = me.rerere.rikkahub.ui.components.ui.LocalExportContext.current
-    var visible by remember(fullName) { mutableStateOf(false) }
-    val mayFetch = visible && lifecycleState.isAtLeast(Lifecycle.State.RESUMED) && !export &&
-        !LocalRichTextStreaming.current &&
-        !me.rerere.rikkahub.ui.components.webview.LocalChatWebPreviewVisible.current
-    var result by remember(fullName) { mutableStateOf<GitHubCardResult?>(null) }
-    var loading by remember(fullName) { mutableStateOf(true) }
-    var attempted by remember(fullName) { mutableStateOf(false) }
-    var retry by remember(fullName) { mutableIntStateOf(0) }
-    var cacheReadComplete by remember(fullName) { mutableStateOf(false) }
+    var result by remember(fullName, credentialState.revision) { mutableStateOf<GitHubCardResult?>(null) }
+    var loading by remember(fullName, credentialState.revision) { mutableStateOf(false) }
+    var retry by remember(fullName, credentialState.revision) { mutableIntStateOf(0) }
+    var cacheReadComplete by remember(fullName, credentialState.revision) { mutableStateOf(false) }
+    var avatarNetworkAllowed by remember(fullName, credentialState.revision) { mutableStateOf(false) }
     me.rerere.rikkahub.ui.components.ui.AwaitExportRender(!cacheReadComplete)
-    LaunchedEffect(fullName) {
+    LaunchedEffect(repository, fullName, credentialState.revision) {
         try {
             repository.observe(fullName).collect { cached ->
                 result = cached
+                cacheReadComplete = true
             }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { /* Explicit get/retry still reports failures. */ }
+        catch (_: Exception) { cacheReadComplete = true }
     }
-    LaunchedEffect(fullName, mayFetch, export, retry, credentialState.revision, native) {
+    // Rendering, lifecycle changes and stale cache entries never initiate a network request.
+    LaunchedEffect(repository, fullName, credentialState.revision, retry) {
+        if (retry == 0) return@LaunchedEffect
         try {
-            result = repository.cached(fullName)
-            if (result?.failure != null || result?.status == GitHubCardStatus.RATE_LIMITED) attempted = true
-            loading = mayFetch
-            if (mayFetch) {
-                delay(350) // Scrolling past a card must not spend a request.
-                result = repository.get(fullName, forceRefresh = retry > 0, enrichLanguages = native)
-                attempted = true
-            }
+            loading = true
+            result = repository.get(fullName, forceRefresh = true, enrichLanguages = native)
+            avatarNetworkAllowed = result?.data != null
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { attempted = true; result = GitHubCardResult(null, GitHubCardStatus.UNAVAILABLE) }
+        catch (_: Exception) { result = GitHubCardResult(null, GitHubCardStatus.UNAVAILABLE) }
         finally { loading = false; cacheReadComplete = true }
     }
     val retryAt = result?.retryAt ?: 0L
-    val retryReady by produceState(false, retryAt, mayFetch) {
+    val retryReady by produceState(false, retryAt) {
         value = false
-        if (mayFetch) { delay((retryAt - System.currentTimeMillis()).coerceAtLeast(0)); value = true }
+        delay((retryAt - System.currentTimeMillis()).coerceAtLeast(0)); value = true
     }
     val colors = richContentColors()
     val socialImage = rememberGitHubSocialImageRenderer(fullName, result?.data, linkLabel)
@@ -91,17 +77,14 @@ internal fun GitHubRepositoryCard(url: String, modifier: Modifier = Modifier, li
         }.combinedClickable(enabled = !export,
             onClick = { uriHandler.openUri(GitHubRepositoryUrl.url(result?.data?.fullName ?: fullName)) },
             onLongClick = { actions = true }, onClickLabel = "打开 GitHub 仓库", onLongClickLabel = "仓库卡片操作"
-        ).onGloballyPositioned { coordinates ->
-            val bounds = coordinates.boundsInWindow()
-            visible = bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.top < view.height
-        },
+        ),
         shape = if (native) RoundedCornerShape(6.dp) else MaterialTheme.shapes.large,
         color = colors.container, border = BorderStroke(1.dp, colors.border),
     ) {
         Column(Modifier.padding(if (native) 0.dp else 14.dp), verticalArrangement = Arrangement.spacedBy(if (native) 0.dp else 6.dp)) {
             val item = result?.data
-            if (native) GitHubNativeCardContent(fullName, item, linkLabel, mayFetch, padding = 0.dp,
-                placeholder = if (loading || !attempted) "正在读取仓库信息…" else gitHubCardFailureText(result))
+            if (native) GitHubNativeCardContent(fullName, item, linkLabel, avatarNetworkAllowed && !export, padding = 0.dp,
+                placeholder = if (loading) "正在读取仓库信息…" else if (result?.failure != null) gitHubCardFailureText(result) else "点击加载仓库信息")
             else {
             Text("GitHub · 仓库", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             linkLabel?.takeIf { it.isNotBlank() && !it.equals(fullName, ignoreCase = true) && GitHubRepositoryUrl.parse(it) == null }
@@ -111,11 +94,11 @@ internal fun GitHubRepositoryCard(url: String, modifier: Modifier = Modifier, li
             }
             if (!native) {
             Text(item?.description?.takeIf(String::isNotBlank) ?: when {
-                loading || result == null || !attempted -> "正在读取仓库信息…"
-                item == null -> gitHubCardFailureText(result)
+                loading -> "正在读取仓库信息…"
+                item == null -> if (result?.failure != null) gitHubCardFailureText(result) else "点击加载仓库信息"
                 else -> "暂无仓库简介"
             }, style = MaterialTheme.typography.bodyMedium, minLines = 2,
-                maxLines = if (item == null && attempted && !loading) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+                maxLines = if (item == null && !loading) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
             }
             if (loading && !export && result?.data == null) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             if (item != null) {
@@ -129,12 +112,12 @@ internal fun GitHubRepositoryCard(url: String, modifier: Modifier = Modifier, li
                 }
                 if (result?.status != GitHubCardStatus.FRESH) Text("显示本地缓存", style = MaterialTheme.typography.labelSmall)
             }
-            if (attempted && result?.status != GitHubCardStatus.FRESH) {
+            if (!export) {
                 if (item != null && (result?.failure != null || result?.status == GitHubCardStatus.RATE_LIMITED)) {
                     Text(gitHubCardFailureText(result), style = MaterialTheme.typography.bodySmall)
                 }
                 TextButton(onClick = { retry++ }, enabled = !loading && retryReady) {
-                    Text(if (retryReady) "重试加载" else "稍后重试")
+                    Text(if (!retryReady) "稍后重试" else if (item == null) "加载仓库信息" else "刷新仓库信息")
                 }
             }
         }

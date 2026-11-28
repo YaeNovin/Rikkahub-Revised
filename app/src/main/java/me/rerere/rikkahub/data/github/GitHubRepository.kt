@@ -140,7 +140,7 @@ class GitHubRepository(
             val now = clock()
             val cached = row(key, auth)
             val data = cached.decode()
-            val manualRetry = forceRefresh && cached?.error != null && now >= cached.lastAccessAt + MANUAL_RETRY_DELAY
+            val manualRetry = forceRefresh && cached != null && now >= cached.lastAccessAt + MANUAL_RETRY_DELAY
             if (!validate && !manualRetry && cached != null && now < cached.refreshAfter && (data != null || cached.error != null)) {
                 if (cached.error == null && !data.let { it?.isPrivate == true }) dao.touch(scopedKey, now)
                 return@withLock cached.result(now)

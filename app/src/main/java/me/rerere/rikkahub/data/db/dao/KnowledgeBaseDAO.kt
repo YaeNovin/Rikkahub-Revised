@@ -91,6 +91,12 @@ interface KnowledgeBaseDAO {
         limit: Int,
     ): List<KnowledgeDocumentPreviewChunk>
 
+    @Query(
+        "SELECT ordinal, substr(content, 1, 65536) AS content, page_start, page_end, section_path, char_start, char_end " +
+            "FROM knowledge_chunk WHERE id = :chunkId AND document_id = :documentId AND knowledge_base_id = :baseId LIMIT 1"
+    )
+    suspend fun getCitationChunk(chunkId: String, documentId: String, baseId: String): KnowledgeDocumentPreviewChunk?
+
     @Query("SELECT COUNT(*) FROM knowledge_chunk WHERE knowledge_base_id = :baseId")
     suspend fun countChunks(baseId: String): Int
 

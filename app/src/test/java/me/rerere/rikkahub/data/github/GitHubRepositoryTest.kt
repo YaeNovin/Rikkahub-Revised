@@ -17,6 +17,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GitHubRepositoryTest {
+    @Test fun `viewing an expired cache repeatedly never spends a request`() = runBlocking {
+        var now = 10_000_000L
+        val dao = MemoryGitHubDAO()
+        val calls = AtomicInteger()
+        val repository = GitHubRepository(dao, client { request -> calls.incrementAndGet(); response(request) }) { now }
+        assertNull(repository.cached("owner/repo").data)
+        assertEquals(0, calls.get())
+        repository.get("owner/repo") // explicit user load
+        now += GitHubRepository.FRESH_TTL + 1
+        repeat(20) {
+            assertEquals(GitHubCardStatus.STALE, repository.cached("owner/repo").status)
+            assertNotNull(repository.cached("owner/repo").data)
+        }
+        assertEquals(1, calls.get())
+        repository.get("owner/repo", forceRefresh = true) // explicit refresh
+        assertEquals(2, calls.get())
+    }
+
     private val metadata = """{"full_name":"Owner/Repo","private":false,"description":"Description 中文","language":"Kotlin","stargazers_count":100,"forks_count":5,"license":null,"archived":true,"fork":false}"""
     private fun client(block: (Request) -> Response) = OkHttpClient.Builder().addInterceptor { block(it.request()) }.build()
     private fun response(request: Request, code: Int = 200, body: String = metadata, headers: Headers = Headers.Builder().build()) =

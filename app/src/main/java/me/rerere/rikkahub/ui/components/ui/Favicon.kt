@@ -11,13 +11,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import coil3.compose.AsyncImage
+import androidx.compose.material3.Icon
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Link01
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -28,21 +26,15 @@ fun Favicon(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(25),
 ) {
-    val faviconUrl = remember(url) {
-        url.toHttpUrlOrNull()?.host?.let { host ->
-            "https://favicone.com/$host"
-        }
-    }
-    AsyncImage(
-        model = faviconUrl,
+    // A source link is not consent to disclose its host to a favicon service.
+    Icon(
+        imageVector = HugeIcons.Link01,
         modifier = modifier
             .size(20.dp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainer),
         contentDescription = null,
-        contentScale = ContentScale.Crop,
-        placeholder = rememberVectorPainter(HugeIcons.Link01),
-        fallback = rememberVectorPainter(HugeIcons.Link01),
+        tint = MaterialTheme.colorScheme.primary,
     )
 }
 

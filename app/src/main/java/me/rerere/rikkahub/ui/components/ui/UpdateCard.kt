@@ -20,6 +20,7 @@ import me.rerere.rikkahub.ui.components.ui.AppearanceModalBottomSheet as ModalBo
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,6 +46,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useThrottle
 import me.rerere.rikkahub.ui.pages.chat.ChatVM
 import me.rerere.rikkahub.utils.UpdateDownload
+import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.Version
 import me.rerere.rikkahub.utils.onError
 import me.rerere.rikkahub.utils.onSuccess
@@ -60,6 +62,10 @@ fun UpdateCard(vm: ChatVM) {
     val context = LocalContext.current
     val appResources by rememberAppResources()
     val toaster = LocalToaster.current
+
+    TextButton(onClick = vm::checkForUpdates, enabled = state !is UiState.Loading) {
+        Text(if (state is UiState.Loading) "正在检查更新…" else "检查更新")
+    }
 
     state.onError {
         Card {

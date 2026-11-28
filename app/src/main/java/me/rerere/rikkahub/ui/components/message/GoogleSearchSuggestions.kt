@@ -33,17 +33,18 @@ internal fun GoogleSearchSuggestions(annotation: UIMessageAnnotation.GoogleSearc
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     settings.domStorageEnabled = false
+                    settings.blockNetworkLoads = true
                     settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                             val uri = request.url
-                            if (request.isForMainFrame && uri.scheme in setOf("http", "https")) {
+                            if (request.isForMainFrame && request.hasGesture() && uri.scheme in setOf("http", "https")) {
                                 currentHandler.openUri(uri.toString())
                             }
                             return true
                         }
                         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                            if (request.url.scheme in setOf("https", "data")) null else
+                            if (request.url.scheme == "data") null else
                                 WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(byteArrayOf()))
 
                         override fun onPageFinished(view: WebView, url: String?) {
@@ -55,7 +56,7 @@ internal fun GoogleSearchSuggestions(annotation: UIMessageAnnotation.GoogleSearc
             update = { view ->
                 if (view.tag != annotation.html) {
                     view.tag = annotation.html
-                    val policy = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src https: data:; style-src 'unsafe-inline';\">"
+                    val policy = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline';\">"
                     view.loadDataWithBaseURL("https://www.google.com/", policy + annotation.html, "text/html", "UTF-8", null)
                 }
             },

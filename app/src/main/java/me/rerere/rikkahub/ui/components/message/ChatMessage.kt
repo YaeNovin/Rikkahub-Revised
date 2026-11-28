@@ -46,8 +46,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -57,15 +55,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
-import androidx.compose.ui.util.fastForEachIndexed
 import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
@@ -104,7 +98,6 @@ import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.message.tools.RenderingToolContent
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
-import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.LocalAdvancedAppearanceCapabilities
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
@@ -113,10 +106,8 @@ import me.rerere.rikkahub.ui.theme.LocalChatBackgroundForeground
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.ui.theme.resolveChatBodyTextStyle
-import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.data.ai.tools.searchWebCitations
 import me.rerere.rikkahub.utils.webLinkUrl
-import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -441,17 +432,10 @@ internal fun MessagePartsBlock(
 ) {
     val context = LocalContext.current
     val settings = LocalSettings.current
-    val contentColor = if (settings.hasActiveChatBackground()) {
-        LocalChatBackgroundForeground.current
-            .takeUnless { it == Color.Unspecified }
-            ?.copy(alpha = 0.90f)
-            ?: MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-    }
-
     // 消息输出HapticFeedback
     val hapticFeedback = LocalHapticFeedback.current
+    var selectedKnowledgeCitation by remember { mutableStateOf<UIMessageAnnotation.KnowledgeCitation?>(null) }
+    val annotationState by rememberUpdatedState(annotations)
     val partsState by rememberUpdatedState(parts)
     val loadingState by rememberUpdatedState(loading)
     val uriHandler by rememberUpdatedState(LocalUriHandler.current)
@@ -471,7 +455,12 @@ internal fun MessagePartsBlock(
         }
     }
     val handleClickCitation: (String) -> Unit = remember {
-        { citationId -> resolveCitation(citationId)?.let { uriHandler.openUri(it.url) } }
+        { citationId ->
+            val knowledge = annotationState.filterIsInstance<UIMessageAnnotation.KnowledgeCitation>()
+                .firstOrNull { it.chunkId == citationId.removePrefix("knowledge:") }
+            if (knowledge != null) selectedKnowledgeCitation = knowledge
+            else resolveCitation(citationId)?.let { uriHandler.openUri(it.url) }
+        }
     }
     val handleLongClickCitation: (String) -> Unit = remember {
         { citationId -> resolveCitation(citationId)?.let { linkActions?.invoke(it) } }
@@ -795,113 +784,15 @@ internal fun MessagePartsBlock(
     }
     val citationAnnotations = annotations.filterNot { it is UIMessageAnnotation.GoogleSearchSuggestions }
     if (citationAnnotations.isNotEmpty()) {
-        Column(
-            modifier = Modifier.animateContentSize(),
-        ) {
-            var expand by remember(annotations) {
-                mutableStateOf(annotations.any { it is UIMessageAnnotation.KnowledgeCitation })
-            }
-            if (expand) {
-                ProvideTextStyle(
-                    MaterialTheme.typography.labelMedium.copy(
-                        color = MaterialTheme.extendColors.gray8.copy(alpha = 0.65f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .drawWithContent {
-                                drawContent()
-                                drawRoundRect(
-                                    color = contentColor.copy(alpha = 0.2f),
-                                    size = Size(width = 10f, height = size.height),
-                                )
-                            }
-                            .padding(start = 16.dp)
-                            .padding(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        citationAnnotations.fastForEachIndexed { index, annotation ->
-                            when (annotation) {
-                                is UIMessageAnnotation.GoogleSearchSuggestions -> Unit
-                                is UIMessageAnnotation.UrlCitation -> {
-                                    annotation.groundingSegments.map { it.text }.filter(String::isNotBlank).distinct().forEach { quote ->
-                                        Text(quote, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    annotation.retrievalStatus?.let { Text(googleUrlRetrievalLabel(it)) }
-                                    annotation.imageUrl?.let { imageUrl ->
-                                        coil3.compose.AsyncImage(model = imageUrl, contentDescription = annotation.title,
-                                            modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp))
-                                    }
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Favicon(annotation.url, modifier = Modifier.size(20.dp))
-                                        me.rerere.rikkahub.ui.components.richtext.LinkText(
-                                            text = buildAnnotatedString {
-                                                append("${index + 1}. ")
-                                                withLink(LinkAnnotation.Url(annotation.url)) {
-                                                    append(runCatching { annotation.title.urlDecode() }.getOrDefault(annotation.title).ifBlank { annotation.url })
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-
-                                is UIMessageAnnotation.KnowledgeCitation -> {
-                                    Card(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        ),
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(10.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                                        ) {
-                                            Text(
-                                                text = "${index + 1}. ${annotation.title}",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            val location = buildString {
-                                                annotation.pageStart?.let { start ->
-                                                    append("Page $start")
-                                                    annotation.pageEnd?.takeIf { it != start }?.let { append("-$it") }
-                                                }
-                                                if (annotation.sectionPath.isNotBlank()) {
-                                                    if (isNotEmpty()) append(" · ")
-                                                    append(annotation.sectionPath)
-                                                }
-                                            }
-                                            if (location.isNotBlank()) {
-                                                Text(
-                                                    text = location,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                            Text(
-                                                text = annotation.excerpt,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                maxLines = 4,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            TextButton(
-                onClick = {
-                    expand = !expand
-                }
-            ) {
+        Column(modifier = Modifier.animateContentSize()) {
+            var expand by remember { mutableStateOf(false) }
+            if (expand) CitationSources(citationAnnotations) { selectedKnowledgeCitation = it }
+            TextButton(onClick = { expand = !expand }) {
                 Text(pluralStringResource(R.plurals.citations_count, citationAnnotations.size, citationAnnotations.size))
             }
         }
+    }
+    selectedKnowledgeCitation?.let { citation ->
+        KnowledgeCitationSheet(citation, onDismiss = { selectedKnowledgeCitation = null })
     }
 }

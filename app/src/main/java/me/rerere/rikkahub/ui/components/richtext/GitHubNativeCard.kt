@@ -131,6 +131,7 @@ private fun GitHubSocialAvatar(name: String, url: String?, size: Dp, allowNetwor
         .testTag("github-social-avatar"), contentAlignment = Alignment.Center) {
         if (!shown) Text(name.take(1).uppercase(), fontSize = (size.value * .46f).sp)
         if (url != null) AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(url).allowHardware(false)
+            .apply { if (!allowNetwork) fetcherFactory(CacheOnlyImageFetcher) }
             .networkCachePolicy(if (allowNetwork) CachePolicy.ENABLED else CachePolicy.DISABLED).build(),
             onSuccess = { ready = true; shown = true }, onError = { ready = true; shown = false },
             contentDescription = "仓库所有者头像", modifier = Modifier.fillMaxSize())

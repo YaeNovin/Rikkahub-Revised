@@ -10,8 +10,8 @@
 | --- | --- |
 | 识别 | 助手正文中的 GitHub 仓库主页，最多转换六处，保留周围的列表、表格与行内格式。代码、徽章图片、用户消息和仓库子路径使用原有显示路径。 |
 | 显示 | Compose 卡片显示仓库名、简介、Star、Fork、主要语言、许可证与归档/派生状态，使用应用的富内容主题。当前没有 Primer 风格选项。 |
-| 加载 | 卡片进入可见区域停留 350ms、应用在前台且流式结束后刷新。导出读取本地缓存。 |
-| 缓存 | Room 最多 500 条，成功缓存 30 分钟，支持 ETag、旧数据和失败重试。所有卡片共享串行请求队列。 |
+| 加载 | 2026-11-28 起渲染仅读本地缓存，点击“加载/刷新仓库信息”才访问 API；滚动和缓存过期不自动刷新。详见[按需加载说明](citation-links-and-network-loading-20261128.md)。 |
+| 缓存 | Room 最多 500 条，成功数据 30 分钟内视为新鲜，过期仍可展示；支持 ETag 和主动刷新。所有卡片共享串行请求队列。 |
 | 鉴权与额度 | 独立 OkHttp 客户端访问公开 REST API。当前没有 GitHub Token 配置，另有每小时 50 次的本地预算及持久化服务端冷却。 |
 
 主要入口为 [GitHubRepositoryCard](../app/src/main/java/me/rerere/rikkahub/ui/components/richtext/GitHubRepositoryCard.kt)、[链接转换](../app/src/main/java/me/rerere/rikkahub/ui/components/richtext/GitHubRepositoryLinks.kt)与[仓库数据层](../app/src/main/java/me/rerere/rikkahub/data/github/GitHubRepository.kt)。已有完整规则见[卡片指南](github-repository-cards.md)。

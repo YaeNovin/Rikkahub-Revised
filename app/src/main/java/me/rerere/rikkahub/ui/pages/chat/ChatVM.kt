@@ -253,20 +253,17 @@ class ChatVM(
         .map { memories -> memories.filter { it.isVisibleInConversation(_conversationId.toString()) }.sortedByDescending { it.createdAt }.take(12) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val updateState = settingsStore.settingsFlow
-        .map { settings ->
-            !settings.init &&
-                settings.displaySetting.updateCheckDisabledUntilEpochMillis <= System.currentTimeMillis()
+    private val mutableUpdateState = MutableStateFlow<UiState<me.rerere.rikkahub.utils.UpdateInfo?>>(UiState.Idle)
+    val updateState = mutableUpdateState.asStateFlow()
+    private var updateCheckJob: kotlinx.coroutines.Job? = null
+
+    /** Entering a chat/drawer or resubscribing must never poll GitHub. */
+    fun checkForUpdates() {
+        if (updateCheckJob?.isActive == true) return
+        updateCheckJob = viewModelScope.launch {
+            updateChecker.checkUpdate().collect { mutableUpdateState.value = it }
         }
-        .distinctUntilChanged()
-        .flatMapLatest { enabled ->
-            if (enabled) updateChecker.checkUpdate() else flowOf(UiState.Success(null))
-        }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000),
-            UiState.Loading,
-        )
+    }
 
     // 网络搜索(每个助手独立)
     val enableWebSearch = settings.map {

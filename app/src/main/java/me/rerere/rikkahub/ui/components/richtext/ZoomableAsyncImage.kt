@@ -31,6 +31,8 @@ import coil3.request.CachePolicy
 import coil3.request.allowHardware
 import coil3.request.crossfade
 import coil3.request.placeholder
+import coil3.imageLoader
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.rerere.common.android.Logging
@@ -61,32 +63,44 @@ fun ZoomableAsyncImage(
     val placeholder = if(LocalDarkMode.current) R.drawable.placeholder_dark else R.drawable.placeholder
     val export = LocalExportContext.current
     val badge = isCompactBadgeImage(model, intrinsicSize)
+    val sourceBadge = isBadgeImage(model)
     val targetLink = safeImageLink(linkUrl)
+    val remote = safeImageLink(model) != null
+    var networkAllowed by remember(model) { mutableStateOf(!remote) }
     val showLinkActions = LocalLinkActionHandler.current
     var retry by remember(model) { mutableIntStateOf(0) }
     var loading by remember(model, retry) { mutableStateOf(true) }
     var failure by remember(model, retry) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val coilModel = remember(context, model, placeholder, export, respectIntrinsicSize, badge, retry) {
+    fun loadImage() {
+        if (loading) return
+        loading = true
+        scope.launch {
+            if (networkAllowed && remote) withContext(Dispatchers.IO) {
+                // A manual retry may follow a cached HTTP-200 HTML error. Invalidate that response once.
+                runCatching { context.imageLoader.diskCache?.remove(model.orEmpty()) }
+            }
+            networkAllowed = true
+            retry++
+        }
+    }
+    val coilModel = remember(context, model, placeholder, export, respectIntrinsicSize, sourceBadge, retry, networkAllowed) {
         ImageRequest.Builder(context)
             .data(model)
             .apply {
-                // A gateway can return an HTML error page with HTTP 200 and a long
-                // cache lifetime. A manual retry must fetch again, not decode it forever.
-                if (retry > 0) {
-                    memoryCachePolicy(CachePolicy.WRITE_ONLY)
-                    diskCachePolicy(CachePolicy.WRITE_ONLY)
-                }
-                if (!badge) placeholder(placeholder)
+                if (remote && (export || !networkAllowed)) fetcherFactory(CacheOnlyImageFetcher)
+                if (!sourceBadge) placeholder(placeholder)
                 // Preserve CSS pixel dimensions; drawing vectors at the final
                 // canvas scale also keeps high-density badge text crisp.
-                if (respectIntrinsicSize || badge) {
+                if (respectIntrinsicSize || sourceBadge) {
                     decoderFactory(IntrinsicSvgDecoderFactory)
                     memoryCacheKey("inline-css-image:v3:$model")
                 }
-                if (badge) size(coil3.size.Size.ORIGINAL)
+                if (sourceBadge) size(coil3.size.Size.ORIGINAL)
             }
             .crossfade(false)
+            // Plain rendering may use a disk/memory cache, but only an explicit gesture can fetch.
+            .networkCachePolicy(if (export || !networkAllowed) CachePolicy.DISABLED else CachePolicy.ENABLED)
             .allowHardware(!export)
             .build()
     }
@@ -104,7 +118,7 @@ fun ZoomableAsyncImage(
     val imageModifier = modifier.then(displaySizeModifier).clip(inlineImageShape(model, intrinsicSize))
         .then(if (badge && !displaySize.isUsableImageSize()) Modifier.widthIn(min = 48.dp, max = maxDisplayWidthDp.dp).heightIn(min = 20.dp, max = 28.dp) else Modifier)
         .combinedClickable(
-            onClick = { if (failure != null) retry++ else if (targetLink != null) context.openUrl(targetLink) else showImageViewer = true },
+            onClick = { if (failure != null) loadImage() else if (targetLink != null) context.openUrl(targetLink) else showImageViewer = true },
             onLongClick = {
                 if (targetLink != null && showLinkActions != null) showLinkActions(LinkTarget(targetLink, contentDescription.orEmpty()) { showImageViewer = true })
                 else showImageViewer = true
@@ -114,10 +128,11 @@ fun ZoomableAsyncImage(
         )
     if (failure != null) {
         Text(
-            text = listOfNotNull(contentDescription?.takeIf { it.isNotBlank() }, failure, "点击重试").joinToString(" · "),
+            text = listOfNotNull(contentDescription?.takeIf { it.isNotBlank() }, failure,
+                if (remote && !networkAllowed) "点击加载图片" else "点击重试").joinToString(" · "),
             // Do not squeeze an error + retry control into a 20dp badge or reuse its last successful size.
             modifier = modifier.widthIn(min = 48.dp, max = maxDisplayWidthDp.dp)
-                .combinedClickable(onClick = { retry++ }, onLongClick = { showImageViewer = true }, onClickLabel = "重新加载图片")
+                .combinedClickable(onClick = ::loadImage, onLongClick = { showImageViewer = true }, onClickLabel = "加载图片")
                 .padding(4.dp),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -141,11 +156,13 @@ fun ZoomableAsyncImage(
         },
         onError = { state ->
             loading = false
-            failure = inlineImageFailureReason(state.result.throwable)
-            val details = inlineImageFailureDetails(model, state.result.throwable)
-            scope.launch(Dispatchers.IO) {
-                Logging.logError(name = "聊天图片加载失败", summary = inlineImageFailureReason(state.result.throwable),
-                    details = details, tag = "INLINE_IMAGE")
+            failure = if (remote && !networkAllowed) "远程图片尚未加载" else inlineImageFailureReason(state.result.throwable)
+            if (!remote || networkAllowed) {
+                val details = inlineImageFailureDetails(model, state.result.throwable)
+                scope.launch(Dispatchers.IO) {
+                    Logging.logError(name = "聊天图片加载失败", summary = inlineImageFailureReason(state.result.throwable),
+                        details = details, tag = "INLINE_IMAGE")
+                }
             }
         },
     )

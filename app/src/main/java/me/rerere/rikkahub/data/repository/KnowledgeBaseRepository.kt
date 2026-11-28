@@ -118,6 +118,9 @@ class KnowledgeBaseRepository(
 
     suspend fun deleteDocument(id: String) = dao.deleteDocument(id)
 
+    suspend fun getCitationChunk(citation: UIMessageAnnotation.KnowledgeCitation): KnowledgeDocumentPreviewChunk? =
+        dao.getCitationChunk(citation.chunkId, citation.documentId, citation.knowledgeBaseId)
+
     suspend fun getDocumentPreview(documentId: String): KnowledgeDocumentPreview {
         val chunks = dao.getDocumentPreviewChunks(
             documentId = documentId,

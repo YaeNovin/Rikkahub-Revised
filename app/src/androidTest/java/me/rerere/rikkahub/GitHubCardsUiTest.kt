@@ -34,6 +34,7 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Path.Companion.toPath
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -70,6 +71,166 @@ class GitHubCardsUiTest {
         if (::host.isInitialized) InstrumentationRegistry.getInstrumentation().runOnMainSync { host.finish() }
     }
 
+    @Test fun citationSourcesShowLinksWithoutRepeatingGroundedAnswer() {
+        val source = me.rerere.ai.ui.UIMessageAnnotation.UrlCitation(
+            "Example source", "https://example.test/reference",
+            imageUrl = "https://example.test/tracker.png",
+            groundingSegments = listOf(me.rerere.ai.ui.UIMessageAnnotation.GroundingSegment("**This answer must not be repeated**")),
+        )
+        var opened: String? = null
+        compose.runOnUiThread { host.setContent {
+            CompositionLocalProvider(LocalSettings provides Settings(), LocalUriHandler provides object : UriHandler {
+                override fun openUri(uri: String) { opened = uri }
+            }) {
+                MaterialTheme(colorScheme = darkColorScheme()) {
+                    Surface { me.rerere.rikkahub.ui.components.message.CitationSources(listOf(source)) {} }
+                }
+            }
+        } }
+        compose.onNodeWithText("1. Example source").assertIsDisplayed()
+        compose.onAllNodesWithText("**This answer must not be repeated**").assertCountEquals(0)
+        captureInteractionFixture("web-source-links")
+        compose.onNodeWithTag("citation-source-link").performTouchInput { click(center.copy(x = center.x / 2)) }
+        compose.runOnIdle { assertEquals(source.url, opened) }
+    }
+
+    @Test fun knowledgeCitationOpensTheExactLocalChunkAndRejectsMismatchedDocument() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        val repository = me.rerere.rikkahub.data.repository.KnowledgeBaseRepository(database.knowledgeBaseDao(), database)
+        val citation = runBlocking {
+            val base = repository.createBase("Citation fixture")
+            repository.insertDocumentWithChunks(
+                me.rerere.rikkahub.data.db.entity.KnowledgeDocumentEntity("fixture-doc", base.id, "Manual", "file:///manual.pdf",
+                    "application/pdf", "fixture", status = "ready", createdAt = 0, updatedAt = 0),
+                listOf(me.rerere.rikkahub.data.db.entity.KnowledgeChunkEntity("fixture-chunk", "fixture-doc", base.id, 17,
+                    "Context before. Exact quoted source. Context after.", 8, 8, "Chapter 2", 420, 470)),
+            )
+            me.rerere.ai.ui.UIMessageAnnotation.KnowledgeCitation("fixture-chunk", base.id, "fixture-doc", "Manual",
+                "file:///manual.pdf", "Exact quoted source.", .9f, 8, 8, "Chapter 2")
+        }
+        try {
+            runBlocking {
+                assertNull(repository.getCitationChunk(citation.copy(documentId = "other-doc")))
+                assertNull(repository.getCitationChunk(citation.copy(knowledgeBaseId = "other-base")))
+            }
+            var selected by mutableStateOf(false)
+            compose.runOnUiThread { host.setContent {
+                CompositionLocalProvider(LocalSettings provides Settings()) {
+                    MaterialTheme(colorScheme = darkColorScheme()) {
+                        Surface { me.rerere.rikkahub.ui.components.message.CitationSources(listOf(citation)) { selected = true } }
+                        if (selected) me.rerere.rikkahub.ui.components.message.KnowledgeCitationSheet(citation, { selected = false }, repository)
+                    }
+                }
+            } }
+            compose.onAllNodesWithTag("knowledge-citation-source").assertCountEquals(0)
+            compose.onNodeWithTag("knowledge-citation-link").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("knowledge-citation-source").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("第 8 页 · Chapter 2 · 分块 18 · 文档字符 421–470").assertIsDisplayed()
+            compose.onNodeWithTag("knowledge-citation-source").assertTextEquals("Context before. Exact quoted source. Context after.")
+            captureInteractionFixture("knowledge-source-location")
+            compose.onNodeWithText("关闭").performClick()
+            runBlocking { repository.deleteDocument(citation.documentId) }
+            compose.onNodeWithTag("knowledge-citation-link").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("knowledge-citation-source").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("knowledge-citation-source").assertTextEquals(citation.excerpt)
+            compose.onNodeWithText("关闭").performClick()
+        } finally { database.close() }
+    }
+
+    @Test fun staleCardRemountAndThemeChangesReadCacheWithoutNetwork() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        val calls = AtomicInteger()
+        var now = 10_000_000L
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            calls.incrementAndGet()
+            val body = if (chain.request().url.encodedPath.endsWith("/languages")) """{"Kotlin":100}"""
+            else """{"full_name":"Owner/Repo","private":false,"description":"Cached description","language":"Kotlin","stargazers_count":123,"forks_count":7,"fork":false,"archived":false}"""
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
+                .body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        val repository = GitHubRepository(database.githubRepositoryCacheDao(), client) { now }
+        try {
+            runBlocking { repository.get("owner/repo") }
+            now += GitHubRepository.FRESH_TTL + 1
+            var visible by mutableStateOf(true)
+            var dark by mutableStateOf(false)
+            compose.runOnUiThread { host.setContent {
+                CompositionLocalProvider(LocalSettings provides Settings()) {
+                    MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+                        Surface { if (visible) Column { GitHubRepositoryCard("https://github.com/Owner/Repo", repository = repository) } }
+                    }
+                }
+            } }
+            repeat(4) {
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("Cached description").fetchSemanticsNodes().isNotEmpty() }
+                assertEquals("Rendering stale cache must not fetch", 1, calls.get())
+                compose.runOnIdle { visible = false; dark = !dark }
+                compose.waitForIdle()
+                compose.runOnIdle { visible = true }
+            }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("刷新仓库信息").fetchSemanticsNodes().isNotEmpty() }
+            captureInteractionFixture("github-stale-cache")
+            compose.onNodeWithText("刷新仓库信息").performClick()
+            compose.waitUntil(10_000) { calls.get() == 3 }
+            compose.waitForIdle()
+            assertEquals("Only explicit refresh fetches metadata and languages", 3, calls.get())
+        } finally { database.close() }
+    }
+
+    @Test fun remoteImagesWaitForExplicitLoadAndReuseTheDecodedCache() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val originalLoader = coil3.SingletonImageLoader.get(context)
+        val fixtureId = java.util.UUID.randomUUID().toString()
+        val fixtureUrl = "https://fixture.invalid/$fixtureId/image.png"
+        val calls = AtomicInteger()
+        val bitmap = Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888).apply { eraseColor(0xff4588ee.toInt()) }
+        val bytes = java.io.ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        bitmap.recycle()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            calls.incrementAndGet()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
+                .body(bytes.toResponseBody("image/png".toMediaType())).build()
+        }.build()
+        // The singleton disk cache may already contain an earlier run, and shutting
+        // down a fixture must not close the real application's shared disk cache.
+        val cacheDirectory = File(context.cacheDir, "citation-image-$fixtureId")
+        val loader = coil3.ImageLoader.Builder(context).diskCache {
+            coil3.disk.DiskCache.Builder().directory(cacheDirectory.absolutePath.toPath()).maxSizeBytes(1024L * 1024).build()
+        }.components {
+            add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { client }))
+        }.build()
+        try {
+            coil3.SingletonImageLoader.setUnsafe(loader)
+            var visible by mutableStateOf(true)
+            compose.runOnUiThread { host.setContent {
+                CompositionLocalProvider(LocalSettings provides Settings()) {
+                    MaterialTheme { Surface { if (visible) Column {
+                        me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage(fixtureUrl, "Remote fixture")
+                    } } }
+                }
+            } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("点击加载图片", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            assertEquals("An unclicked remote image must not fetch", 0, calls.get())
+            captureInteractionFixture("remote-image-awaiting-click")
+            compose.onNodeWithText("点击加载图片", substring = true).performClick()
+            compose.waitUntil(10_000) { calls.get() == 1 }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasStateDescription("图片已加载")).fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { visible = false }
+            compose.waitForIdle()
+            loader.memoryCache?.clear()
+            compose.runOnIdle { visible = true }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasStateDescription("图片已加载")).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitForIdle()
+            assertEquals("Reentry must reuse image cache", 1, calls.get())
+        } finally {
+            coil3.SingletonImageLoader.setUnsafe(originalLoader)
+            loader.shutdown()
+            cacheDirectory.deleteRecursively()
+        }
+    }
+
     @Test fun nativeAndClassicCardsSupportThemesTapAndThreeActionMenu() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
@@ -104,6 +265,9 @@ class GitHubCardsUiTest {
                     }
                 }
             } }
+            compose.onNodeWithText("加载仓库信息").assertIsDisplayed()
+            assertEquals("Rendering must not fetch repository metadata", 0, calls.get())
+            compose.onNodeWithText("加载仓库信息").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("Native card fixture with readable description").fetchSemanticsNodes().isNotEmpty() }
             compose.waitUntil(10_000) { runBlocking { repository.cached("owner/repo").data?.languageBreakdownComplete == true } }
             compose.onNodeWithText("Stars").assertIsDisplayed()
@@ -238,6 +402,19 @@ class GitHubCardsUiTest {
     private fun shell(command: String): String = android.os.ParcelFileDescriptor.AutoCloseInputStream(
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
     ).use { it.readBytes().toString(Charsets.UTF_8) }
+
+    private fun captureInteractionFixture(name: String) {
+        compose.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        // Compose can be idle while the ROM's activity transition is still animating.
+        instrumentation.waitForIdleSync()
+        Thread.sleep(500)
+        val image = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            val dir = File(instrumentation.targetContext.getExternalFilesDir(null), "citation-interaction-qa").apply { mkdirs() }
+            File(dir, "$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } finally { image.recycle() }
+    }
 
     private fun ownPhotos(): Set<Uri> {
         if (android.os.Build.VERSION.SDK_INT < 29) return emptySet()
