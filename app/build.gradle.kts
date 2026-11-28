@@ -11,7 +11,7 @@ import java.util.Properties
 // Test builds remain identifiable across installs without changing the release version.
 val buildTimestamp = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
     .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-val releaseVersionName = "2.4.8-revised.12"
+val releaseVersionName = "2.4.8-revised.13"
 val testVersionName = "$releaseVersionName-dev-$buildTimestamp"
 // Opt-in isolated target for device rendering benchmarks; never replaces an
 // existing user's debug/QA app or changes the normal release package IDs.
@@ -64,7 +64,7 @@ android {
         applicationId = "me.rerere.rikkahub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 188
+        versionCode = 189
         versionName = releaseVersionName
         buildConfigField("String", "SOURCE_REPOSITORY_URL", sourceRepositoryUrl.asBuildConfigString())
         buildConfigField("String", "SOURCE_LICENSE_URL", sourceLicenseUrl.asBuildConfigString())

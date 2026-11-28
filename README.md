@@ -32,6 +32,7 @@ Feature availability depends on the model, protocol, and preview surface. See th
 <details>
 <summary>📚 Release history and upstream baseline</summary>
 
+- [2.4.8-revised.13 release notes](docs/release-notes-2.4.8-revised.13.md) and [verification record](docs/release-verification-2.4.8-revised.13.md)
 - [2.4.8-revised.12 release notes](docs/release-notes-2.4.8-revised.12.md) and [verification record](docs/release-verification-2.4.8-revised.12.md)
 - [2.4.8-revised.11 release notes](docs/release-notes-2.4.8-revised.11.md) and [verification record](docs/release-verification-2.4.8-revised.11.md)
 - [2.4.8-revised.10 release notes](docs/release-notes-2.4.8-revised.10.md) and [verification record](docs/release-verification-2.4.8-revised.10.md)

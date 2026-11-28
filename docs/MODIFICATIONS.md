@@ -1,16 +1,36 @@
 # Rikkahub Revised Modification Notice
 
-Notice date: 2026-11-20
+Notice date: 2026-11-28
 
 This repository is a modified distribution of the upstream
 [RikkaHub project](https://github.com/rikkahub/rikkahub). It is based on the
 upstream `2.4.8` tag at commit
 `8824e0e841f2008b322ca8214a27a978e4b4abaa`. The first revised release line is
-`2.4.8-revised.1`; the current published release is `2.4.8-revised.11`.
+`2.4.8-revised.1`; the current published release is `2.4.8-revised.13`.
 
 This file describes the modified work as required for an auditable AGPL-3.0
 release. It does not claim authorship of unchanged upstream code. Release checks
 are maintained separately from user-facing release descriptions.
+
+## 2026-11-28 正式版 2.4.8-revised.13 / Release 2.4.8-revised.13
+
+版本码 189，沿用正式应用 ID 与签名。新增正文注音、古文竖排与校勘注、
+Gemini Responses 音视频附件，修复头像裁剪、引用来源与重复联网问题。
+发布 ARM64 APK 与校验文件；Desktop 和 Three.js 实验继续保留在本地。
+详见[中英更新说明](release-notes-2.4.8-revised.13.md)及[验证记录](release-verification-2.4.8-revised.13.md)。
+
+Version code 189 retains the existing release application ID and signing identity.
+This update adds inline academic annotations and Gemini Responses media input,
+and fixes avatar cropping, source citations and implicit network loads.
+The ARM64 APK and checksums exclude local Desktop and Three.js experiments.
+
+## 2026-11-21 正式版 2.4.8-revised.12 / Release 2.4.8-revised.12
+
+版本码 188。该次发布加入 GitHub Token 与原生卡片、记忆同步优化、语言学与音乐学渲染，
+并更新 MiniMax 国内入口；范围见[更新说明](release-notes-2.4.8-revised.12.md)与[验证记录](release-verification-2.4.8-revised.12.md)。
+
+Version code 188 added GitHub token/native-card support, memory synchronization,
+academic renderers and updated mainland MiniMax endpoints; its release records remain unchanged.
 
 ## 2026-11-20 正式版 2.4.8-revised.11 / Release 2.4.8-revised.11
 
