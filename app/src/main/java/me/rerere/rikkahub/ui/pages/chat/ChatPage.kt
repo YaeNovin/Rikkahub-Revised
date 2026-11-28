@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.ai.provider.parameterModelId
+import me.rerere.ai.provider.resolveMediaInputSupport
+import me.rerere.rikkahub.data.files.importChatMedia
+import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.ui.hooks.rememberAppResources
 
 import me.rerere.rikkahub.data.model.placeholderNames
@@ -1940,38 +1943,35 @@ private fun ChatFilesPickerSheet(
             }
         }
 
+    var importingMedia by remember { mutableStateOf(false) }
+    fun addMedia(uris: List<Uri>, audio: Boolean) {
+        if (uris.isEmpty() || importingMedia) return
+        importingMedia = true
+        scope.launch {
+            try {
+                val model = setting.findModelById(assistant.chatModelId ?: setting.chatModelId)
+                val support = resolveMediaInputSupport(model, model?.findProvider(setting.providers))
+                val parts = importChatMedia(context, filesManager, uris, audio, support, inputState.messageContent)
+                inputState.messageContent = inputState.messageContent + parts
+                dismissAll()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                toaster.show(error.message ?: context.getString(R.string.chat_input_media_import_failed), type = ToastType.Error)
+            } finally {
+                importingMedia = false
+            }
+        }
+    }
+
     val videoPickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
-            if (selectedUris.isNotEmpty()) {
-                scope.launch {
-                    inputState.addVideos(filesManager.createChatFilesByContents(selectedUris))
-                    dismissAll()
-                }
-            }
+            addMedia(selectedUris, audio = false)
         }
 
     val audioPickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { selectedUris ->
-            if (selectedUris.isNotEmpty()) {
-                scope.launch {
-                    val localFiles = filesManager.createChatFilesByContents(selectedUris)
-                    val midiFiles = mutableListOf<UIMessagePart.Document>()
-                    val audioFiles = mutableListOf<Uri>()
-                    localFiles.forEachIndexed { index, localFile ->
-                        val sourceUri = selectedUris.getOrNull(index) ?: return@forEachIndexed
-                        val fileName = filesManager.getFileNameFromUri(sourceUri) ?: "file"
-                        val mime = filesManager.getFileMimeType(sourceUri) ?: "audio/*"
-                        if (isMidiFileType(fileName, mime)) {
-                            midiFiles += UIMessagePart.Document(localFile.toString(), fileName, mime)
-                        } else {
-                            audioFiles += localFile
-                        }
-                    }
-                    inputState.addAudios(audioFiles)
-                    inputState.addFiles(midiFiles)
-                    dismissAll()
-                }
-            }
+            addMedia(selectedUris, audio = true)
         }
 
     val filePickerLauncher =

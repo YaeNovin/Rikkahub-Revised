@@ -3028,4 +3028,12 @@
   <string name="setting_advanced_appearance_gradient_renderer_agsl_unavailable">AGSL requires Android 13 or later. This device is fixed to Kotlin rendering.</string>
   <string name="setting_advanced_appearance_respect_reduced_motion">Follow system motion settings</string>
   <string name="setting_advanced_appearance_respect_reduced_motion_desc">Pause gradient movement when system animations are disabled or battery saver is active.</string>
+  <string name="setting_provider_responses_media">Gemini audio/video input (Responses)</string>
+  <string name="setting_provider_responses_media_auto">Auto</string>
+  <string name="setting_provider_responses_media_disabled">Off</string>
+  <string name="setting_provider_responses_media_extensions">Extensions</string>
+  <string name="setting_provider_responses_media_desc">Auto enables audio/video for Gemini chat models on OpenRouter. For other gateways, enable Extensions only when they support input_audio and input_video on Responses. Google and OpenAI official endpoints are excluded. Other formats require a separate adapter.</string>
+  <string name="chat_input_responses_media_hint">Send original audio/video files: up to 14 MiB combined and 20 MiB per complete request. Gateway support is required; no transcription, transcoding or frame extraction is performed.</string>
+  <string name="chat_input_media_import_failed">Unable to import media. Please select the file again.</string>
+  <string name="chat_input_responses_audio_formats">Audio formats: %1$s</string>
 </resources>

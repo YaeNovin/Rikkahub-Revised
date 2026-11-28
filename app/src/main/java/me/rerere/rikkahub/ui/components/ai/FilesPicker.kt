@@ -56,7 +56,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.resolveMediaInputSupport
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Codesandbox
@@ -74,8 +74,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.resolve
@@ -119,7 +119,9 @@ internal fun FilesPicker(
     onPickFile: () -> Unit,
 ) {
     val settings = LocalSettings.current
-    val provider = settings.getCurrentChatModel()?.findProvider(providers = settings.providers)
+    val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+    val provider = model?.findProvider(providers = settings.providers)
+    val mediaSupport = resolveMediaInputSupport(model, provider)
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
@@ -157,13 +159,28 @@ internal fun FilesPicker(
 
             ImagePickButton(onClick = onPickImage)
 
-            if (provider != null && provider is ProviderSetting.Google) {
+            if (mediaSupport.video) {
                 VideoPickButton(onClick = onPickVideo)
-
+            }
+            if (mediaSupport.audio) {
                 AudioPickButton(onClick = onPickAudio)
             }
 
             FilePickButton(onClick = onPickFile)
+        }
+
+        if (mediaSupport.responsesExtensions) {
+            Text(
+                stringResource(R.string.chat_input_responses_media_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                stringResource(R.string.chat_input_responses_audio_formats,
+                    mediaSupport.audioFormats.orEmpty().joinToString(" / ") { it.uppercase() }),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         HorizontalDivider(

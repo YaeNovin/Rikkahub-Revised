@@ -209,6 +209,8 @@ node scripts/verify-html-loading.cjs
 | `verify-pattern-preview.cjs` | `PatternPreviewTest`; real p5.js Canvas 2D, shared geometry, deterministic mandalas, roses/fractals, budgets, lifecycle, CSP and screenshot checks (Playwright + pngjs); see the [feature guide](../docs/procedural-patterns.md) |
 | `verify-decorative-effects.cjs` | `DecorativeEffectsTest`; particle pixels, layer reveal, native environment constraints, adaptive quality, path reuse, export freeze and lifecycle; see the [performance guide](../docs/decorative-effects-and-performance.md) |
 | `verify-geometry-appearance.cjs` | `GeometryAppearanceTest`; decorative-only backgrounds, actual alpha pixels, CDP pinch/pan/cancel, state retention and fullscreen layout; `geometry-gesture-helpers.cjs` provides shared touch input; see the [guide](../docs/geometry-background-and-gestures.md) |
+| `verify-three-spike.cjs` | Debug-only `ThreeSpikeTest`; shared-geometry p5/Three comparison, GPU PNG, fallback visibility, context recovery and disposal; [feasibility report](../docs/threejs-feasibility-spike.md) |
+| `verify-three-spike-device.cjs` | Isolated debug WebView CDP checks; pass the adb-forwarded port and a documented mode; `three-spike.init.gradle` keeps the test package separate from QA |
 | `AndroidLatexProbe.java` | Compile with app classes and convert to DEX before running on Android; see the [LaTeX notes](../docs/latex-composer-fixes.md) |
 | `katex-browser-global.cjs` | Build adapter sharing the page's KaTeX instance; required by the [bundled asset recipe](../docs/THIRD_PARTY_NOTICES.md) |
 

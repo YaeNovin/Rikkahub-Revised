@@ -2,6 +2,10 @@ package me.rerere.ai.provider.providers.openai
 
 import android.util.Log
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +31,8 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.resolveMediaInputSupport
+import me.rerere.ai.provider.RESPONSES_MEDIA_MAX_REQUEST_BYTES
 import me.rerere.ai.provider.withModernVendorOptions
 import me.rerere.ai.provider.openAIAuthentication
 import me.rerere.ai.provider.responsesUrl
@@ -77,6 +83,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody
 import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
@@ -94,7 +101,7 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): TextGenerationResult {
-        val requestBody = buildRequestBody(
+        val (requestBody, payload) = prepareRequest(
             providerSetting = providerSetting,
             messages = messages,
             params = params,
@@ -112,7 +119,7 @@ class ResponseAPI(
                 ),
             )
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(payload)
             .openAIAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
@@ -143,7 +150,7 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildRequestBody(
+        val (requestBody, payload) = prepareRequest(
             providerSetting = providerSetting,
             messages = messages,
             params = params,
@@ -161,7 +168,7 @@ class ResponseAPI(
                 ),
             )
             .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(payload)
             .openAIAuthentication(providerSetting.baseUrl, keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
@@ -237,11 +244,31 @@ class ResponseAPI(
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED)
 
+    private suspend fun prepareRequest(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        stream: Boolean,
+    ): Pair<JsonObject, RequestBody> = withContext(Dispatchers.IO) {
+        val context = currentCoroutineContext()
+        val body = buildRequestBody(providerSetting, messages, params, stream) { context.ensureActive() }
+        context.ensureActive()
+        val bytes = json.encodeToString(body).toByteArray(Charsets.UTF_8)
+        if (messages.any { message -> message.parts.any { it is UIMessagePart.Audio || it is UIMessagePart.Video } }) {
+            require(bytes.size <= RESPONSES_MEDIA_MAX_REQUEST_BYTES) {
+                "包含音视频的 Responses 请求超过 20 MiB（包括 Base64、文字及图片），请减少附件或上下文。"
+            }
+        }
+        context.ensureActive()
+        body to bytes.toRequestBody("application/json".toMediaType())
+    }
+
     internal fun buildRequestBody(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-        stream: Boolean
+        stream: Boolean,
+        checkCancelled: () -> Unit = {},
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
@@ -249,6 +276,9 @@ class ResponseAPI(
         require(!(isAlibabaModelStudioHost(host) && messages.any { message -> message.parts.any { it is UIMessagePart.Video || it is UIMessagePart.Audio } })) {
             "百炼 Responses API 暂不支持视频或音频输入，请切换为 Chat Completions。"
         }
+        val mediaParts = prepareResponsesMedia(
+            messages, resolveMediaInputSupport(params.model, providerSetting), checkCancelled,
+        )
         val modelSupport = resolveOpenAIModelParameterSupport(parameterModelId)
         val parameterFamily = params.model.inferParameterFamily() ?: ModelParameterFamily.OPENAI
         val grokSupport = resolveGrokModelParameterSupport(parameterModelId)
@@ -324,7 +354,7 @@ class ResponseAPI(
                         put("content", message.toText())
                     })
                 }
-                buildMessages(messages, params.deepSeekImageDetail()).forEach(::add)
+                buildMessages(messages, params.deepSeekImageDetail(), mediaParts).forEach(::add)
             })
 
             // reasoning
@@ -411,6 +441,7 @@ class ResponseAPI(
     internal fun buildMessages(
         messages: List<UIMessage>,
         deepSeekImageDetail: String? = null,
+        mediaParts: Map<UIMessagePart, JsonObject> = emptyMap(),
     ) = buildJsonArray {
         messages
             .filter { message ->
@@ -425,7 +456,7 @@ class ResponseAPI(
                 if (message.role == MessageRole.ASSISTANT) {
                     addAssistantItems(message, deepSeekImageDetail)
                 } else {
-                    addUserItems(message, deepSeekImageDetail)
+                    addUserItems(message, deepSeekImageDetail, mediaParts)
                 }
             }
     }
@@ -611,10 +642,14 @@ class ResponseAPI(
     private fun JsonArrayBuilder.addUserItems(
         message: UIMessage,
         deepSeekImageDetail: String?,
+        mediaParts: Map<UIMessagePart, JsonObject>,
     ) {
-        val contentParts = message.parts.filter { it is UIMessagePart.Text || it is UIMessagePart.Image }
+        val contentParts = message.parts.filter {
+            it is UIMessagePart.Text || it is UIMessagePart.Image ||
+                it is UIMessagePart.Audio || it is UIMessagePart.Video
+        }
         if (contentParts.isNotEmpty()) {
-            addContentItem(message.role, contentParts, deepSeekImageDetail)
+            addContentItem(message.role, contentParts, deepSeekImageDetail, mediaParts)
         }
     }
 
@@ -622,6 +657,7 @@ class ResponseAPI(
         role: MessageRole,
         parts: List<UIMessagePart>,
         deepSeekImageDetail: String?,
+        mediaParts: Map<UIMessagePart, JsonObject> = emptyMap(),
     ) {
         if (parts.isEmpty()) return
 
@@ -652,6 +688,12 @@ class ResponseAPI(
                                         put("type", "input_text")
                                         put("text", "Error: Failed to encode image to base64")
                                     }
+                                })
+                            }
+
+                            is UIMessagePart.Audio, is UIMessagePart.Video -> {
+                                add(requireNotNull(mediaParts[part]) {
+                                    "音视频附件未通过当前 Responses 端点校验，请检查供应商的 Gemini 音视频设置。"
                                 })
                             }
 
@@ -834,9 +876,7 @@ private fun isModelAllowTemperature(params: TextGenerationParams): Boolean {
 }
 
 private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
-    val gonnaSend = filter { it is UIMessagePart.Text || it is UIMessagePart.Image }.size
-    val texts = filter { it is UIMessagePart.Text }.size
-    return gonnaSend == texts && texts == 1
+    return size == 1 && first() is UIMessagePart.Text
 }
 
 internal data class ResponseProviderCapabilities(

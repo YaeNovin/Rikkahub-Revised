@@ -11,6 +11,8 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -49,6 +51,7 @@ class FilesManager(
         uri: Uri,
         displayName: String? = null,
         mimeType: String? = null,
+        maxBytes: Long? = null,
     ): ManagedFileEntity = withContext(Dispatchers.IO) {
         val resolvedName = displayName ?: getFileNameFromUri(uri) ?: "file"
         val resolvedMime = mimeType ?: getFileMimeType(uri) ?: "application/octet-stream"
@@ -56,7 +59,18 @@ class FilesManager(
         try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output ->
-                    input.copyTo(output, bufferSize = 256 * 1024)
+                    val buffer = ByteArray(256 * 1024)
+                    var count = 0L
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        count += read
+                        require(maxBytes == null || count <= maxBytes) {
+                            "本次音视频原文件合计超过 14 MiB，请缩短文件或减少附件。"
+                        }
+                        output.write(buffer, 0, read)
+                    }
                 }
             } ?: error("Failed to open input stream for $uri")
             check(target.isFile && target.length() > 0L) {

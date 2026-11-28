@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.ResponsesMediaMode
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.formatUserFacingError
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
@@ -284,6 +285,31 @@ private fun ProviderConfigureOpenAI(
                     toaster.show(message = responseAPIWarning, type = ToastType.Warning)
                 }
             }
+        )
+    }
+
+    if (provider.useResponseApi) {
+        Text(stringResource(R.string.setting_provider_responses_media), style = MaterialTheme.typography.titleSmall)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            ResponsesMediaMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = provider.responsesMediaMode == mode,
+                    onClick = { onEdit(provider.copy(responsesMediaMode = mode)) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ResponsesMediaMode.entries.size),
+                    label = {
+                        Text(stringResource(when (mode) {
+                            ResponsesMediaMode.AUTO -> R.string.setting_provider_responses_media_auto
+                            ResponsesMediaMode.DISABLED -> R.string.setting_provider_responses_media_disabled
+                            ResponsesMediaMode.GEMINI_EXTENSIONS -> R.string.setting_provider_responses_media_extensions
+                        }))
+                    },
+                )
+            }
+        }
+        Text(
+            stringResource(R.string.setting_provider_responses_media_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 

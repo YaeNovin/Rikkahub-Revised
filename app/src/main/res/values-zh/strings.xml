@@ -3030,4 +3030,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_advanced_appearance_gradient_renderer_agsl_unavailable">AGSL 需要 Android 13 或更高版本，当前设备固定使用 Kotlin 渲染。</string>
   <string name="setting_advanced_appearance_respect_reduced_motion">跟随系统动效设置</string>
   <string name="setting_advanced_appearance_respect_reduced_motion_desc">系统动画关闭或省电模式启用时暂停渐变移动。</string>
+  <string name="setting_provider_responses_media">Gemini 音视频输入（Responses）</string>
+  <string name="setting_provider_responses_media_auto">自动</string>
+  <string name="setting_provider_responses_media_disabled">关闭</string>
+  <string name="setting_provider_responses_media_extensions">兼容扩展</string>
+  <string name="setting_provider_responses_media_desc">自动模式对 OpenRouter 的 Gemini 聊天模型开放音视频。其他中转端须确认 Responses 支持 input_audio 和 input_video 后再启用兼容扩展。Google、OpenAI 官方端点不适用，其他文件格式需单独适配。</string>
+  <string name="chat_input_responses_media_hint">发送音视频原文件，合计最多 14 MiB，完整请求最多 20 MiB。需中转端支持，不进行转写、转码或抽帧。</string>
+  <string name="chat_input_media_import_failed">无法导入音视频，请重新选择文件。</string>
+  <string name="chat_input_responses_audio_formats">音频格式：%1$s</string>
 </resources>
