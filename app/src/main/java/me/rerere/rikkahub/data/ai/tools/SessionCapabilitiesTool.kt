@@ -154,7 +154,7 @@ fun createSessionCapabilitiesTool(
                             put("render_tool", RENDER_CONTENT_TOOL_NAME)
                             put("catalog_version", me.rerere.rikkahub.data.render.RendererCatalog.version)
                             put("linguistic_renderers", buildJsonObject {
-                                me.rerere.rikkahub.data.render.linguisticRendererIds.forEach { put(it, linguisticRendering.enabled(it)) }
+                                (me.rerere.rikkahub.data.render.linguisticRendererIds + "annotated_text").forEach { put(it, linguisticRendering.enabled(it)) }
                             })
                             put("music_renderers", buildJsonObject {
                                 put("abc", true); put("jianpu", true); put("musicxml", true); put("mei", meiRenderingEnabled)

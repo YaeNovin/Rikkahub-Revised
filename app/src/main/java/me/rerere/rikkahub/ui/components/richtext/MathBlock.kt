@@ -35,6 +35,11 @@ fun MathBlock(
     modifier: Modifier = Modifier,
     fontSize: TextUnit = TextUnit.Unspecified
 ) {
+    if (latex.contains("\\ce{") || latex.contains("\\pu{")) {
+        val element = org.jsoup.nodes.Element("span").addClass("math").attr("inline", "false").text(latex.trim().removeSurrounding("$$"))
+        AcademicProse(listOf(element), modifier)
+        return
+    }
     val proceededLatex = latex
     Box(
         modifier = modifier.padding(8.dp)

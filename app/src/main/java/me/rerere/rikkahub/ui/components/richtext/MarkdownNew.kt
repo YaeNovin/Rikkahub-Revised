@@ -340,6 +340,10 @@ private fun HtmlBlockElement(
     listLevel: Int = 0,
     hasNextBlock: Boolean = false,
 ) {
+    if (element.hasAttr(ACADEMIC_SOURCE) || element.hasClass("math")) {
+        AcademicProse(listOf(element), onClickCitation = onClickCitation)
+        return
+    }
     if (LocalGitHubCardsEnabled.current && element.gitHubCardName() != null) {
         GitHubRepositoryCard(me.rerere.rikkahub.data.github.GitHubRepositoryUrl.url(requireNotNull(element.gitHubCardName())), linkLabel = element.text())
         return
@@ -490,6 +494,10 @@ private fun HtmlParagraphContent(
     modifier: Modifier = Modifier,
 ) {
     val hasImages = element.select("img").isNotEmpty()
+    if (!hasImages && !element.containsGitHubCard() && hasAcademicProse(element)) {
+        AcademicProse(element.childNodes(), modifier, onClickCitation)
+        return
+    }
     if (LocalGitHubCardsEnabled.current && element.containsGitHubCard()) {
         HtmlInlineGroup(element.childNodes(), onClickCitation, modifier)
         return
@@ -920,6 +928,10 @@ private fun HtmlProgress(element: Element) {
  */
 @Composable
 internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit, modifier: Modifier = Modifier) {
+    if (nodes.any { it is Element && hasAcademicProse(it) } && nodes.none { it.containsInlineImage() || it.containsGitHubCard() }) {
+        AcademicProse(nodes, modifier, onClickCitation)
+        return
+    }
     if (LocalGitHubCardsEnabled.current && nodes.any { it.containsGitHubCard() }) {
         val runs = remember(nodes) { gitHubInlineRuns(nodes) }
         Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1000,6 +1012,10 @@ internal fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Uni
  */
 @Composable
 private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit) {
+    if (node is Element && hasAcademicProse(node) && !node.containsInlineImage()) {
+        AcademicProse(listOf(node), onClickCitation = onClickCitation)
+        return
+    }
     if (LocalGitHubCardsEnabled.current && node.containsGitHubCard()) {
         HtmlInlineGroup(listOf(node), onClickCitation)
         return

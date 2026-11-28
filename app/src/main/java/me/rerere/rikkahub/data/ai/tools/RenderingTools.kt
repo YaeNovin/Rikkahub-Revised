@@ -26,6 +26,9 @@ internal fun parseRenderRequest(input: JsonElement): RenderRequest {
     require(source.length <= renderer.maxChars) { "Source exceeds ${renderer.maxChars} characters; split the content" }
     if (isDeclarativeRenderer(renderer.id)) compileDeclarativeRenderSpec(renderer.id, source)
     if (renderer.id in linguisticRendererIds) compileLinguisticSpec(renderer.id, source)
+    if (renderer.id == "annotated_text") require(
+        me.rerere.rikkahub.ui.components.richtext.protectAcademicProse(source) != source
+    ) { "Provide complete ruby, ipa, vertical, app, choice, note or syntax-tree markup; call list_renderers for the subset" }
     if (renderer.id in setOf("musicxml", "mei")) me.rerere.rikkahub.data.render.ScoreDocuments.parseXml(source, renderer.id)
     val language = text("language") ?: "plaintext"
     require(language.length <= 64 && language.all { it.isLetterOrDigit() || it in "_+-.#" }) { "Invalid code language" }
@@ -49,7 +52,7 @@ internal fun createRenderingTools(linguistic: LinguisticRenderingSettings = Ling
                     runCatching { Json.parseToJsonElement(text.text).jsonObject["catalog_version"]?.jsonPrimitive?.intOrNull == RendererCatalog.version }.getOrDefault(false)
                 } }
             val refresh = if (stale) "The current renderer catalog version is ${RendererCatalog.version}. Older list_renderers results may omit supported renderers; query list_renderers again before claiming a renderer is unavailable. " else ""
-            refresh + (if (meiEnabled) "" else "MEI preview is disabled by the user; use readable plain text. ") + if (linguisticRendererIds.all(linguistic::enabled)) "" else "Current linguistic renderers: " + linguisticRendererIds.joinToString { "$it=${linguistic.enabled(it)}" } +
+            refresh + (if (meiEnabled) "" else "MEI preview is disabled by the user; use readable plain text. ") + if ((linguisticRendererIds + "annotated_text").all(linguistic::enabled)) "" else "Current linguistic renderers: " + (linguisticRendererIds + "annotated_text").joinToString { "$it=${linguistic.enabled(it)}" } +
                 ". Use list_renderers for input schemas before render_content; false means disabled by the user, use readable plain text instead."
         },
         execute = { input ->

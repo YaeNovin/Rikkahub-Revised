@@ -253,7 +253,12 @@ internal class MyWebChromeClient(private val state: WebViewState) : WebChromeCli
     }
 }
 
-internal class MyWebViewClient(private val state: WebViewState) : WebViewClient() {
+internal class MyWebViewClient(private val state: WebViewState, private val onNavigate: ((String) -> Unit)? = null) : WebViewClient() {
+    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+        val handler = onNavigate ?: return super.shouldOverrideUrlLoading(view, request)
+        if (request.isForMainFrame && request.hasGesture()) handler(request.url.toString())
+        return true
+    }
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
         WebViewLocalAssets.intercept(view.context.applicationContext, request.url) ?: super.shouldInterceptRequest(view, request)
 
@@ -329,9 +334,11 @@ fun WebView(
     onUpdated: (WebView) -> Unit = {},
     nativeZoomEnabled: Boolean = true,
     previewHeight: Dp? = null,
+    onNavigate: ((String) -> Unit)? = null,
 ) {
     val chrome = remember(state) { MyWebChromeClient(state) }
-    val client = remember(state) { MyWebViewClient(state) }
+    val navigation by rememberUpdatedState(onNavigate)
+    val client = remember(state, onNavigate != null) { MyWebViewClient(state, if (onNavigate != null) { { navigation?.invoke(it) } } else null) }
     val hostView = LocalView.current
     val linkActions by rememberUpdatedState(me.rerere.rikkahub.ui.components.richtext.LocalLinkActionHandler.current)
     val lifecycle = LocalLifecycleOwner.current.lifecycle

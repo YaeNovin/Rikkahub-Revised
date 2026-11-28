@@ -34,10 +34,10 @@ internal object RenderingToolUI : ToolUIRenderer {
             return
         }
         when (request.renderer.id) {
-            "markdown" -> MarkdownBlock(request.source, Modifier.fillMaxWidth())
+            "markdown", "annotated_text" -> MarkdownBlock(request.source, Modifier.fillMaxWidth())
             "latex" -> if (me.rerere.rikkahub.ui.context.LocalSettings.current.displaySetting.enableLatexRendering) {
-                LatexText(request.source, Modifier.horizontalScroll(rememberScrollState()),
-                    fontSize = MaterialTheme.typography.bodyLarge.fontSize, color = MaterialTheme.colorScheme.onSurface)
+                me.rerere.rikkahub.ui.components.richtext.MathBlock(request.source,
+                    fontSize = MaterialTheme.typography.bodyLarge.fontSize)
             } else HighlightCodeBlock(request.source, "latex", renderVisuals = false)
             else -> HighlightCodeBlock(request.source,
                 language = if (request.renderer.id == "code") request.language else request.renderer.id,

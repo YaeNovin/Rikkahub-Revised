@@ -22,6 +22,9 @@ private val LATEX_LAYOUT_COMMAND_REGEX = Regex("\\\\(?:(?:left|right|quad|qquad)
 internal fun normalizeMarkdownLatex(content: String): String {
     if ('\\' !in content) return content
     val protectedRanges = buildList {
+        addAll(proseLiteralRanges(content, protectMath = false))
+        Regex("""(?s)(?<!\\)\$\$.*?(?<!\\)\$\$|(?<![\\$])\$(?!\$)[^\r\n$]+(?<!\\)\$""")
+            .findAll(content).forEach { add(it.range) }
         MARKDOWN_FENCED_CODE_REGEX.findAll(content).forEach { add(it.range) }
         MARKDOWN_INLINE_CODE_REGEX.findAll(content).forEach { add(it.range) }
         MARKDOWN_INDENTED_CODE_REGEX.findAll(content).forEach { add(it.range) }
@@ -50,15 +53,66 @@ internal fun normalizeMarkdownLatex(content: String): String {
     return result.toString()
 }
 
-private fun normalizeLatexInMarkdownText(text: String): String {
-    var normalized = LATEX_DISPLAY_ENVIRONMENT_REGEX.replace(text) { match ->
-        "$$${match.value}$$"
+/** Preserve formulas before Markdown consumes TeX backslashes or tight delimiters. */
+internal fun protectMarkdownMath(content: String): String {
+    if ('$' !in content && !content.contains("\\ce{") && !content.contains("\\pu{")) return content
+    val ranges = proseLiteralRanges(content, protectMath = false)
+    val edits = mutableListOf<Triple<Int, Int, String>>()
+    var index = 0
+    var rangeIndex = 0
+    while (index < content.length) {
+        while (rangeIndex < ranges.size && ranges[rangeIndex].last < index) rangeIndex++
+        val opaque = ranges.getOrNull(rangeIndex)
+        if (opaque != null && index in opaque) { index = opaque.last + 1; continue }
+        if (content[index] == '$' && (index == 0 || content[index - 1] != '\\')) {
+            val block = content.startsWith("$$", index)
+            val marker = if (block) "$$" else "$"
+            val start = index + marker.length
+            var end = start
+            while (end < content.length && end - start <= 8000 && (block || content[end] != '\n')) {
+                if (content.startsWith(marker, end) && content.getOrNull(end - 1) != '\\') break
+                end++
+            }
+            if (end < content.length && end - start in 1..8000 && content.startsWith(marker, end) &&
+                (block || content.getOrNull(end + 1)?.isDigit() != true) &&
+                (block || !content.substring(start, end).all { it.isDigit() || it in " ,." })) {
+                val formula = content.substring(start, end)
+                if (ranges.none { it.first < end && it.last >= start }) {
+                    edits += Triple(index, end + marker.length, mathSourceSpan(formula, !block))
+                    index = end + marker.length; continue
+                }
+            }
+        } else if ((content.startsWith("\\ce{", index) || content.startsWith("\\pu{", index)) &&
+            (index == 0 || content[index - 1] != '\\')) {
+            var depth = 1
+            var end = index + 4
+            while (end < content.length && depth > 0 && end - index <= 8000) {
+                if (content[end] == '{') depth++ else if (content[end] == '}') depth--
+                end++
+            }
+            if (depth == 0 && ranges.none { it.first < end && it.last >= index }) {
+                edits += Triple(index, end, mathSourceSpan(content.substring(index, end), true))
+                index = end; continue
+            }
+        }
+        index++
     }
-    normalized = BLOCK_LATEX_DELIMITER_REGEX.replace(normalized) { match ->
+    return StringBuilder(content).apply { edits.asReversed().forEach { (start, end, value) -> replace(start, end, value) } }.toString()
+}
+
+private fun mathSourceSpan(formula: String, inline: Boolean): String =
+    academicSourceMarker("<span class=\"math\" inline=\"$inline\">${formula.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</span>", false)
+
+private fun normalizeLatexInMarkdownText(text: String): String {
+    var normalized = BLOCK_LATEX_DELIMITER_REGEX.replace(text) { match ->
         "$$${match.groupValues[1].trim()}$$"
     }
     normalized = INLINE_LATEX_DELIMITER_REGEX.replace(normalized) { match ->
         "$${match.groupValues[1].trim().replace(INLINE_LATEX_LINE_BREAK_REGEX, " ")}$"
+    }
+    val delimited = Regex("""(?s)\$\$.*?\$\$|\$[^\r\n$]+\$""").findAll(normalized).map { it.range }.toList()
+    normalized = LATEX_DISPLAY_ENVIRONMENT_REGEX.replace(normalized) { match ->
+        if (delimited.any { match.range.first in it }) match.value else "$$${match.value}$$"
     }
     return BARE_LATEX_LINE_REGEX.replace(normalized) { match ->
         "$$${match.groupValues[1].trim()}$$"

@@ -43,13 +43,17 @@ internal fun protectRawHtml(content: String): String {
     }
     val tree = MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(content)
     val typographyOffsets = plainTypographyTagOffsets(content)
+    val academicOffsets = Regex("""<(span|div) $ACADEMIC_SOURCE="[A-Za-z0-9+/=]+"></\1>""").findAll(content)
+        .flatMap { sequenceOf(it.range.first, it.range.last - it.groupValues[1].length - 2) }.toSet()
     val replacements = mutableListOf<Pair<IntRange, String>>()
     fun visit(node: ASTNode) {
         if (node.type == MarkdownElementTypes.CODE_SPAN || node.type == MarkdownElementTypes.CODE_FENCE ||
             node.type == MarkdownElementTypes.CODE_BLOCK) return
         if (node.type == MarkdownElementTypes.HTML_BLOCK || node.type == MarkdownTokenTypes.HTML_TAG) {
-            if (node.type == MarkdownTokenTypes.HTML_TAG && node.startOffset in typographyOffsets) return
+            if (node.type == MarkdownTokenTypes.HTML_TAG && node.startOffset in typographyOffsets + academicOffsets) return
             val source = content.substring(node.startOffset, node.endOffset)
+            if (node.type == MarkdownElementTypes.HTML_BLOCK &&
+                Regex("""<div $ACADEMIC_SOURCE="[A-Za-z0-9+/=]+"></div>\s*""").matches(source)) return
             // SVG is a separate typed renderer; its WebView input is sanitized as well.
             if (svgPlaceholder.containsMatchIn(source) && '<' !in svgPlaceholder.replace(source, "")) return
             val replacement = if (node.type == MarkdownElementTypes.HTML_BLOCK) {

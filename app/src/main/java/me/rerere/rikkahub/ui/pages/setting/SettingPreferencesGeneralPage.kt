@@ -97,7 +97,7 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                 val linguistic = displaySetting.linguisticRendering
                 CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
                     listOf("ipa" to "IPA 音标", "ruby_annotation" to "注音 / Ruby", "gloss" to "逐词 / 词素释义",
-                        "syntax_tree" to "句法树", "dependency" to "依存弧线").forEach { (id, title) ->
+                        "syntax_tree" to "句法树", "dependency" to "依存弧线", "annotated_text" to "文学竖排 / 校勘注").forEach { (id, title) ->
                         item(
                             headlineContent = { Text(title) },
                             supportingContent = { Text("语言学渲染；关闭后显示源码，模型也会获知此设置") },
@@ -108,7 +108,8 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                         "ruby_annotation" -> linguistic.copy(ruby = enabled)
                                         "gloss" -> linguistic.copy(gloss = enabled)
                                         "syntax_tree" -> linguistic.copy(syntaxTree = enabled)
-                                        else -> linguistic.copy(dependency = enabled)
+                                        "dependency" -> linguistic.copy(dependency = enabled)
+                                        else -> linguistic.copy(literary = enabled)
                                     }
                                     displaySetting = displaySetting.copy(linguisticRendering = updated)
                                     vm.updateDisplaySetting { current -> current.copy(linguisticRendering = updated) }

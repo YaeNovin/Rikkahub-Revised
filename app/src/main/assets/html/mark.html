@@ -7,6 +7,8 @@
 
     <!-- KaTeX for LaTeX math rendering -->
     <link rel="stylesheet" href="https://rikkahub.local/assets/html/renderers/katex.min.css">
+    <link rel="stylesheet" href="https://rikkahub.local/assets/html/renderers/academic-prose.css">
+    <style>:root{--fg:{{ON_BACKGROUND_COLOR}};--bg:{{BACKGROUND_COLOR}};--accent:{{PRIMARY_COLOR}};--panel:{{SURFACE_VARIANT_COLOR}}}</style>
 
     <!-- Highlight.js for syntax highlighting -->
     <link rel="stylesheet" href="https://rikkahub.local/assets/html/renderers/atom-one-dark.min.css">
@@ -211,6 +213,8 @@
     <script src="https://rikkahub.local/assets/html/renderers/markdown-it.min.js"></script>
     <script src="https://rikkahub.local/assets/html/renderers/katex.min.js"></script>
     <script src="https://rikkahub.local/assets/html/renderers/mhchem.min.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/linguistics-v1.js"></script>
+    <script src="https://rikkahub.local/assets/html/renderers/academic-prose.js"></script>
     <script src="https://rikkahub.local/assets/html/renderers/markdown-it-katex.js"></script>
     <script src="https://rikkahub.local/assets/html/renderers/markdown-it-task-lists.min.js"></script>
     <script src="https://rikkahub.local/assets/html/renderers/highlight.min.js"></script>
@@ -381,13 +385,8 @@
         // The markdown content to render (base64 encoded)
         const markdownBase64 = `{{MARKDOWN_BASE64}}`;
         let markdownContent = Base64.decode(markdownBase64);
-
-        // Convert \[ ... \] to $$ ... $$ for LaTeX block math
-        markdownContent = markdownContent.replace(/\\\[([\s\S]*?)\\\]/g, (match, content) => {
-            return '\n$$\n' + content.trim() + '\n$$\n';
-        });
-        // Convert \( ... \) to $ ... $ for LaTeX inline math
-        markdownContent = markdownContent.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+        // Kotlin protects notation outside code/URLs; only these sanitized fragments become DOM.
+        const academicFragments = JSON.parse({{ACADEMIC_FRAGMENTS_JSON}});
 
         // Render markdown with markdown-it
         async function renderMarkdown() {
@@ -395,6 +394,19 @@
                 // Process with markdown-it
                 const html = md.render(markdownContent);
                 document.getElementById('content').innerHTML = html;
+                const walker = document.createTreeWalker(document.getElementById('content'), NodeFilter.SHOW_TEXT);
+                const textNodes=[];while(walker.nextNode())textNodes.push(walker.currentNode);
+                for(const node of textNodes){
+                    if(node.parentElement.closest('code,pre'))continue;
+                    const tokens=Object.keys(academicFragments).filter(token=>node.textContent.includes(token));
+                    if(!tokens.length)continue;
+                    const pattern=new RegExp('('+tokens.join('|')+')','g'),fragment=document.createDocumentFragment();
+                    node.textContent.split(pattern).forEach(part=>{
+                        if(academicFragments[part]){const template=document.createElement('template');template.innerHTML=academicFragments[part];fragment.append(template.content);}
+                        else fragment.append(document.createTextNode(part));
+                    });node.replaceWith(fragment);
+                }
+                if(Object.keys(academicFragments).length)await window.rikkaTypesetAcademic(document.getElementById('content'));
 
                 // Render mermaid diagrams
                 const mermaidElements = document.querySelectorAll('.mermaid');

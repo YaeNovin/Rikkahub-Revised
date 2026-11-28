@@ -153,6 +153,11 @@ Audit missing string keys without modifying resource files:
 
 ## Renderer regressions and asset build
 
+`node scripts/verify-academic-prose.cjs` checks Kotlin-generated fixtures from
+`AcademicProseTest`: inline Ruby/IPA, vertical Japanese, literary apparatus,
+KaTeX/mhchem, disabled options, offline resources, and message web previews.
+Fixtures and screenshots stay in ignored `app/build/reports/academic-prose/`.
+
 Native Markdown table checks use the same isolated Debug build as citation QA:
 
 ```text

@@ -54,8 +54,9 @@ window.rikkaRenderLinguistics=async function(root,data){
  root.dataset.renderer=data.renderer;root.dataset.schemaVersion='1';root.lang=data.language||'';root.dir=data.dir||'auto';
  if(data.title)el('h2',data.title,null,root);if(data.id)el('p','('+data.id+')','meta',root);
  switch(data.renderer){
- case 'ipa':{const b=data.notation==='phonemic'?['/','/']:data.notation==='phonetic'?['[',']']:['',''];el('div',b[0]+data.text+b[1],'ipa',root).dir=data.dir||'auto';break;}
- case 'ruby_annotation':{const line=el('div',null,'ruby-line',root);data.segments.forEach(s=>{if(!s.reading){line.append(document.createTextNode(s.base));return;}const ruby=el('ruby',null,null,line);ruby.append(document.createTextNode(s.base));el('rp','(',null,ruby);el('rt',s.reading,null,ruby);el('rp',')',null,ruby);});break;}
+ case 'ipa':{el('div','/'+data.text.trim().replace(/^[[/]|[\]/]$/g,'')+'/','ipa',root).dir=data.dir||'auto';break;}
+ case 'ruby_annotation':{const vertical=data.writingMode&&data.writingMode!=='horizontal-tb',host=vertical?el('div',null,'vertical-scroll',root):root;
+ const line=el('div',null,'ruby-line'+(vertical?' '+data.writingMode:''),host);data.segments.forEach(s=>{if(!s.reading){line.append(document.createTextNode(s.base));return;}const ruby=el('ruby',null,null,line);ruby.style.rubyPosition=data.rubyPosition||'over';ruby.append(document.createTextNode(s.base));el('rp','(',null,ruby);el('rt',s.reading,null,ruby);el('rp',')',null,ruby);});break;}
  case 'gloss':{const list=el('div',null,'word-list',root);list.setAttribute('role','list');data.words.forEach((w,i)=>{const unit=el('div',null,'word',list);unit.setAttribute('role','listitem');unit.dataset.wordId=String(i+1);el('span',w.text,'original',unit);if(w.morphemes)el('span',w.morphemes,'morphemes',unit);el('span',w.gloss,'gloss',unit).dir='ltr';});break;}
  case 'syntax_tree':tree(root,data);break;
  case 'dependency':dependencies(root,data);break;

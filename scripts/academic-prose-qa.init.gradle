@@ -1,0 +1,19 @@
+// Isolated academic prose fixtures; never share data with QA or release installations.
+gradle.beforeProject { project ->
+    project.extensions.extraProperties.set('kotlin.compiler.execution.strategy', 'in-process')
+    project.tasks.withType(org.gradle.api.tasks.testing.Test).configureEach {
+        minHeapSize = '64m'
+        maxHeapSize = '256m'
+        maxParallelForks = 1
+    }
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                def debug = android.buildTypes.getByName('debug')
+                debug.applicationIdSuffix = '.revised.citationqa'
+                debug.versionNameSuffix = '-citationqa-debug'
+                debug.buildConfigField('String', 'VERSION_NAME', '"citationqa-debug"')
+            }
+        }
+    }
+}

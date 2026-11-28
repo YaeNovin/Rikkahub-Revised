@@ -125,14 +125,20 @@ class GitHubCardsUiTest {
             } }
             compose.onAllNodesWithTag("knowledge-citation-source").assertCountEquals(0)
             compose.onNodeWithTag("knowledge-citation-link").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("knowledge-citation-source").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("knowledge-citation-source").fetchSemanticsNodes().isNotEmpty()
+            }
             compose.onNodeWithText("第 8 页 · Chapter 2 · 分块 18 · 文档字符 421–470").assertIsDisplayed()
             compose.onNodeWithTag("knowledge-citation-source").assertTextEquals("Context before. Exact quoted source. Context after.")
             captureInteractionFixture("knowledge-source-location")
             compose.onNodeWithText("关闭").performClick()
             runBlocking { repository.deleteDocument(citation.documentId) }
             compose.onNodeWithTag("knowledge-citation-link").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("knowledge-citation-source").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("knowledge-citation-source").fetchSemanticsNodes().isNotEmpty()
+            }
             compose.onNodeWithTag("knowledge-citation-source").assertTextEquals(citation.excerpt)
             compose.onNodeWithText("关闭").performClick()
         } finally { database.close() }

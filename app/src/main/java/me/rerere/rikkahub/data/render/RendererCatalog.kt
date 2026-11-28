@@ -14,7 +14,7 @@ internal data class RendererSpec(
 )
 
 internal object RendererCatalog {
-    const val version = 9
+    const val version = 10
     private const val curveNotes = " Shared curve layer: {type:curve,formula:hypotrochoid|epitrochoid|lissajous|harmonic,radius:80}. " +
         "Default formula hypotrochoid. Trochoids: fixed integer 1..24 (default 7), rolling integer 1..12 (default 3), " +
         "pen 0..2 (default .7, distance/rolling radius); hypotrochoid requires fixed>rolling. " +
@@ -26,6 +26,10 @@ internal object RendererCatalog {
         "<=24000 curve vertices after symmetry copies. " +
         "Example layer: {\"type\":\"curve\",\"formula\":\"hypotrochoid\",\"fixed\":7,\"rolling\":3,\"pen\":0.7,\"radius\":80}."
     val entries = musicRendererSpecs + linguisticRendererSpecs + listOf(
+        RendererSpec("annotated_text", "Annotated literary / linguistic prose", "Controlled inline HTML and TEI critical-apparatus subset; no code fence",
+            """<vertical lang="ja"><ruby>古語<rt>こご</rt></ruby>の文。<app><lem>春</lem><rdg wit="#A">花</rdg><note>異文</note></app></vertical>""",
+            setOf("annotated_text", "literature", "critical_apparatus"), maxChars = 32768,
+            notes = "Use directly in Markdown prose or this tool, without fences. ruby/rt/rp, <ipa>Unicode transcription</ipa> displayed /…/, <vertical lang=ja> for vertical-rl, tcy for short upright numbers; <syntax-tree>schema-v1 tree JSON</syntax-tree> for explicit unfenced diagrams. TEI-inspired app/lem/rdg wit, choice/sic/corr/orig/reg, note n, lb, gap extent, supplied, unclear are a bounded subset, not a full TEI edition or automatic reading/transcription. Preserve archaic kana/iteration marks. No arbitrary CSS, author JS or remote resources. Click lemmas/notes to expand local apparatus. Ruby, IPA and tree settings remain independent; literary setting controls vertical text and apparatus."),
         RendererSpec("pattern", "p5.js decorative patterns", "Strict JSON preset layers; not p5 JavaScript", """{"title":"星瓣曼陀罗","seed":42,"layers":[{"type":"mandala","petals":12,"rings":4,"radius":86},{"type":"rose","numerator":5,"radius":32,"color":"#fbbf24"},{"type":"ring","radius":94}]}""", setOf("pattern", "generative_art", "p5_pattern", "p5-pattern"), maxChars = 32768,
             notes = "Entertainment decorative preset only; strict JSON, never p5 code. Top-level: title/name, background/backgroundColor, color/lineColor, palette/colors (1..12 hex colors), seed, glow (0..3 or {amount,color,spread,pulse}), animate, animation, layers (1..12; 24000-vertex budget). Animation modes: rotate|pulse|draw|sequence|flicker|orbit, with bounded duration/delay/stagger/easing/loop/amplitude/frequency/phase. Shared layer fields: type,radius (1..96),color/lineColor/colors,width (.25..5),opacity (.05..1),rotation,speed,symmetry (1..12),mirror,lineCap,lineJoin,animation. Types: mandala,rose,fractal plus sigil ring/circle/star/hexagram/polygon/ticks/rays/arc/dot/orbit; path/freeform accepts 2..256 bounded points, closed and solid fill. Mandala: petals 3..32, rings 1..6; rose uses numerator/denominator/phase; fractal variants koch|sierpinski|tree with bounded depth. Entertainment only, no educational algorithms or physics. Shared effects: stardust, trail, reveal; bounded and adaptive, no model-controlled hardware budget. No JavaScript, shaders, URLs, custom recursions or p5 sketches."),
         RendererSpec("math_plot", "JSXGraph math plot", "Strict JSON with mathematical expressions, not JavaScript", "{\"xRange\":[-8,8],\"yRange\":[-3,3],\"parameters\":[{\"name\":\"a\",\"min\":0,\"max\":3,\"value\":1}],\"curves\":[{\"expression\":\"a*sin(x)\",\"label\":\"a sin(x)\"}]}", setOf("math_plot", "math_plan", "math-plot", "jsxgraph"), maxChars = 32768,

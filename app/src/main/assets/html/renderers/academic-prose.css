@@ -1,0 +1,22 @@
+@font-face{font-family:RikkaIPA;src:url('fonts/DoulosSIL-Regular.woff2') format('woff2');font-display:block}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent;color:var(--fg);font-family:system-ui,sans-serif}
+#academic{line-height:1.9;overflow-wrap:anywhere;padding:3px 2px;min-height:24px}
+p,.prose-paragraph{margin:0 0 .5em}a,summary{color:var(--accent)}a{text-decoration:underline}code,kbd{font-family:monospace}
+.quote-accent{color:var(--quote,var(--accent));font-weight:600}.hex-swatch{display:inline-block;width:.85em;height:.85em;border:1px solid currentColor;margin-inline:.12em;vertical-align:-.08em}
+.ipa{font:1.08em RikkaIPA,serif;font-synthesis:none;unicode-bidi:isolate;white-space:pre-wrap}
+ruby{ruby-align:center;ruby-position:over;line-height:2.6}rt{font-size:.6em;line-height:1.1;color:var(--fg)}rp{display:none}
+.ruby-under{ruby-position:under}.ruby-inter{ruby-position:inter-character;display:inline-flex;align-items:center;vertical-align:middle;line-height:1.2}
+.ruby-inter rt{display:block;writing-mode:vertical-rl;text-orientation:upright;line-height:1.1;margin-inline-start:.15em}ruby[lang|=zh-Bopo] rt{font-size:.65em}
+.vertical-scroll{overflow-x:auto;overflow-y:hidden;max-width:100%;padding:.6em 0;direction:rtl;overscroll-behavior-x:contain}
+.vertical-rl,.vertical-lr{writing-mode:vertical-rl;text-orientation:mixed;direction:ltr;height:22em;max-height:520px;width:max-content;
+ white-space:pre-wrap;line-height:2.7;line-break:strict;word-break:normal;overflow-wrap:normal;font-feature-settings:'vert' 1,'vrt2' 1}
+.vertical-lr{writing-mode:vertical-lr}.vertical-rl ruby,.vertical-lr ruby{ruby-position:over}
+.vertical-rl .ruby-under,.vertical-lr .ruby-under{ruby-position:under}.tcy{text-combine-upright:all}
+.vertical-rl .ruby-inter,.vertical-lr .ruby-inter{display:ruby}.vertical-rl .ruby-inter rt,.vertical-lr .ruby-inter rt{display:ruby-text;writing-mode:inherit;text-orientation:mixed}
+.unclear{text-decoration:underline dotted}.apparatus{display:inline;white-space:normal}.apparatus>summary{display:inline;cursor:pointer;list-style:none}
+.apparatus>summary::-webkit-details-marker{display:none}.apparatus[open]{display:block;padding:.4em .6em;border-inline-start:3px solid var(--accent);background:var(--panel)}
+.apparatus[open]>summary{display:block}.reading{padding-block:.2em}.prose-math{white-space:normal}.display-math{display:block;overflow-x:auto;padding:.4em 0}
+.katex{font-size:1.1em}.katex-display{margin:.3em 0}.math-error{font-family:monospace;white-space:pre-wrap}
+.syntax-tree{overflow-x:auto}.ling-graph{color:var(--fg);font-family:RikkaIPA,system-ui,sans-serif}.ling-graph text{fill:currentColor}
+.ling-graph .edge{stroke:currentColor;fill:none;stroke-width:1.5}details pre{white-space:pre-wrap}
+.vertical-export-panel{position:relative;overflow:hidden;direction:ltr;margin-bottom:1em}

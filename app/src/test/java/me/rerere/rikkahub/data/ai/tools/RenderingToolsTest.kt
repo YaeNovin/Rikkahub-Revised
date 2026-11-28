@@ -12,6 +12,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RenderingToolsTest {
+    @Test fun `literary prose is discoverable bounded and respects its setting`() = runBlocking {
+        val tools = createRenderingTools()
+        val details = tools.first().query(buildJsonObject { put("renderer", "annotated_text") })
+        val entry = details["renderers"]!!.jsonArray.single().jsonObject
+        assertTrue(entry["notes"]!!.jsonPrimitive.content.contains("without fences"))
+        val source = "<app><lem>春</lem><rdg wit=\"#A\">花</rdg></app>"
+        val input = buildJsonObject { put("renderer", "annotated_text"); put("source", source) }
+        assertEquals("accepted", tools.last().query(input)["status"]!!.jsonPrimitive.content)
+        val disabled = createRenderingTools(me.rerere.rikkahub.data.render.LinguisticRenderingSettings(literary = false))
+        assertEquals("renderer_disabled", disabled.last().query(input)["code"]!!.jsonPrimitive.content)
+        assertEquals("error", tools.last().query(buildJsonObject { put("renderer", "annotated_text"); put("source", "<script>alert(1)</script>") })["status"]!!.jsonPrimitive.content)
+    }
     @Test fun `curve formulas are discovered on demand and validated through existing tools`() = runBlocking {
         val tools = createRenderingTools()
         val compact = tools.first().query().toString()

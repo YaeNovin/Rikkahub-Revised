@@ -288,7 +288,9 @@ fun ChatMessage(
                     openWebPreview { buildMarkdownPreviewHtml(
                         context = context,
                         markdown = textContent,
-                        colorScheme = colorScheme
+                        colorScheme = colorScheme,
+                        linguistic = settings.linguisticRendering,
+                        math = settings.enableLatexRendering,
                     ) }
                 }
             },

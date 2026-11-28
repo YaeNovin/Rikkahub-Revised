@@ -12,6 +12,7 @@ data class LinguisticRenderingSettings(
     val gloss: Boolean = true,
     val syntaxTree: Boolean = true,
     val dependency: Boolean = true,
+    val literary: Boolean = true,
 ) {
     fun enabled(id: String): Boolean = when (id) {
         "ipa" -> ipa
@@ -19,6 +20,7 @@ data class LinguisticRenderingSettings(
         "gloss" -> gloss
         "syntax_tree" -> syntaxTree
         "dependency" -> dependency
+        "annotated_text" -> literary
         else -> true
     }
 }
@@ -58,7 +60,9 @@ internal fun compileLinguisticSpec(renderer: String, source: String): JsonObject
             obj.text("notation", 16, false)?.let { require(it in setOf("phonemic", "phonetic", "plain")) { "Unknown IPA notation" } }
         }
         "ruby_annotation" -> {
-            obj.only(common + setOf("segments", "translation"))
+            obj.only(common + setOf("segments", "translation", "writingMode", "rubyPosition"))
+            obj.text("writingMode", 16, false)?.let { require(it in setOf("horizontal-tb", "vertical-rl", "vertical-lr")) { "Invalid writing mode" } }
+            obj.text("rubyPosition", 16, false)?.let { require(it in setOf("over", "under", "inter-character")) { "Invalid ruby position" } }
             obj.text("translation", 1200, false)
             obj.array("segments", 128).forEach { item ->
                 val segment = item as? JsonObject ?: error("Each ruby segment must be an object")

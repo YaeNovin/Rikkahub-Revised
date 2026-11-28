@@ -36,6 +36,7 @@
 - [Markdown 与 GFM 渲染覆盖](markdown-gfm-rendering-audit-20261120.md)
 - [聊天渲染现状与下一步计划](rendering-roadmap-20261120.md)
 - [分学科渲染扩展调研与路线](subject-rendering-roadmap-20261120.md)
+- [正文注音、古文竖排与校勘注](academic-prose-rendering.md)
 - [MiniMax 国内 API 域名更新](minimax-endpoint-update-20261121.md)
 - [GitHub 卡片、Token 方案与链接交互](github-cards-and-link-interactions-20261120.md)
 - [GitHub Token 与原生仓库卡片实现](github-token-native-cards-20261120.md)

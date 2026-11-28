@@ -10,14 +10,14 @@ internal fun preprocessMarkdownContent(
     content: String,
     renderMode: MarkdownRenderMode,
 ): String {
-    val rawSvgProtected = protectRawSvg(content)
+    val rawSvgProtected = protectRawSvg(protectAcademicProse(protectProseLiteralHtml(content)))
     val sourceProtected = if (renderMode == MarkdownRenderMode.USER_MESSAGE) {
         preserveUserMessageSource(rawSvgProtected)
     } else {
         rawSvgProtected
     }
     val safeSource = if (renderMode == MarkdownRenderMode.USER_MESSAGE) sourceProtected else protectRawHtml(sourceProtected)
-    return normalizeMarkdownLatex(normalizeMarkdownCitations(normalizeMarkdownProseLinks(safeSource)))
+    return decorateInlineIpa(normalizeMarkdownCitations(normalizeMarkdownProseLinks(protectMarkdownMath(normalizeMarkdownLatex(safeSource)))))
 }
 
 /**
@@ -77,7 +77,7 @@ private data class SourceSignal(
 )
 
 private fun sourceSignal(line: String): SourceSignal {
-    if (line.isBlank() || line.contains(RAW_SVG_ATTRIBUTE)) return SourceSignal(0, false)
+    if (line.isBlank() || line.contains(RAW_SVG_ATTRIBUTE) || line.contains(ACADEMIC_SOURCE)) return SourceSignal(0, false)
     val trimmed = line.trim()
     if (trimmed.isEmpty()) return SourceSignal(0, false)
 

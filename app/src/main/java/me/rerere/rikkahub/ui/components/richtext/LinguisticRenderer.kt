@@ -25,7 +25,8 @@ internal fun buildLinguisticRendererHtml(id: String, code: String, colors: Color
         *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:transparent;color:var(--fg);font-family:system-ui,sans-serif;font-size:16px}
         #renderer{padding:12px;overflow:auto;min-height:100%;line-height:1.65;zoom:$textScale}h2{font-size:1.05em;margin:0 0 12px;overflow-wrap:anywhere}
         .ipa{font-family:RikkaIPA,serif;font-size:1.5em;font-weight:400;line-height:2;white-space:pre-wrap;overflow-wrap:anywhere;padding:.2em .1em;font-synthesis:none}
-        .ruby-line{font-size:1.3em;line-height:2.8;overflow-wrap:anywhere}ruby{ruby-position:over;ruby-align:center}rt{font-size:.55em;color:var(--fg)}
+        .ruby-line{font-size:1.3em;line-height:2.8;overflow-wrap:anywhere}ruby{ruby-position:over;ruby-align:center}rt{font-size:.6em;color:var(--fg)}
+        .vertical-scroll{overflow:auto;direction:rtl}.vertical-rl,.vertical-lr{writing-mode:vertical-rl;text-orientation:mixed;direction:ltr;height:22em;max-height:520px;width:max-content;line-break:strict;font-feature-settings:'vert' 1,'vrt2' 1;white-space:pre-wrap}.vertical-lr{writing-mode:vertical-lr}
         .word-list{display:flex;flex-wrap:wrap;gap:16px 22px;align-items:start}.word{display:flex;flex-direction:column;flex:none;max-width:none;white-space:nowrap;unicode-bidi:isolate}
         .word>span{display:block;line-height:1.9;font-family:RikkaIPA,system-ui,sans-serif}.word .gloss{color:var(--fg)}
         .translation{margin:14px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}.meta,.legend{font-size:.85em;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}

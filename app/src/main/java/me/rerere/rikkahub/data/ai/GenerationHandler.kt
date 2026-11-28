@@ -698,6 +698,7 @@ class GenerationHandler(
                     "$id=${settings.displaySetting.linguisticRendering.enabled(id)}"
                 })
                 append(". For enabled formats use list_renderers then render_content when available. Dedicated fenced blocks also work. Disabled formats must use readable plain text. These are display tools, not automatic linguistic analysis or audio synthesis.")
+                append(" Inline pronunciation needs no fences: use <ruby>base<rt>reading</rt></ruby> or <ipa>transcription</ipa> (shown /…/). Use \\(…\\) or dollar delimiters for math and \\ce{…} for chemical notation. Literary vertical/apparatus enabled=${settings.displaySetting.linguisticRendering.literary}; query annotated_text for its restricted tags and unfenced syntax-tree format. Preserve original archaic kana and symbols; do not invent readings.")
                 appendLine()
                 append(searchAvailability(assistant, model, provider).let {
                     it.copy(external = it.external && tools.any { tool -> tool.name == "search_web" }).prompt()
