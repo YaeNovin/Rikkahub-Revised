@@ -86,7 +86,7 @@ def missing_doc_links(path: Path, text: str) -> list[str]:
         lexical = Path(os.path.abspath(path.parent / target))
         local_only = lexical.is_relative_to(ROOT) and (private_reason(lexical.relative_to(ROOT).as_posix())
                                                       or is_local_experiment(lexical.relative_to(ROOT).as_posix()))
-        if target and (not resolved.exists() or local_only):
+        if target and (not resolved.is_relative_to(ROOT.resolve()) or not resolved.exists() or local_only):
             missing.append(destination)
     return sorted(set(missing))
 

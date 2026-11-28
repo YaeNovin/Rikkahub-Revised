@@ -37,6 +37,9 @@ class PublishInventoryTest(unittest.TestCase):
     def test_build_links_remain_private_even_if_the_local_build_exists(self):
         self.assertEqual(["../build/reports"], missing_doc_links(ROOT / "docs/README.md", "[private](../build/reports)"))
 
+    def test_existing_neighboring_directories_are_not_publishable_document_links(self):
+        self.assertEqual(["../../"], missing_doc_links(ROOT / "docs/README.md", "[local workspace](../../)"))
+
     def test_local_links_are_checked_but_example_code_and_web_links_are_skipped(self):
         path = ROOT / "docs" / "README.md"
         source = '[ok](../LICENSE) [missing](does-not-exist.md) [web](https://example.test)\n```text\n[example](example.md)\n```'

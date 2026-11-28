@@ -1,6 +1,6 @@
 # 文档索引
 
-更新：2026-11-21。当前正式版为 `2.4.8-revised.12`，见[发行说明](release-notes-2.4.8-revised.12.md)和[验证记录](release-verification-2.4.8-revised.12.md)。后续审阅和未完成事项见 [开发状态与文档范围](development-status.md)。
+更新：2026-11-28。当前正式版为 `2.4.8-revised.12`，见[发行说明](release-notes-2.4.8-revised.12.md)和[验证记录](release-verification-2.4.8-revised.12.md)。后续审阅和未完成事项见 [开发状态与文档范围](development-status.md)。
 
 本次源码整合、换行规则及旧文档/图片删除范围见[同步与清理记录](source-sync-20261119.md)。
 
@@ -14,9 +14,9 @@
 | 图形与 WebView | [WebView](webview-rendering.md)、[HTML 策略](rendering-tools-and-html-policy.md)、[数学与法阵](math-plot-and-sigil.md)、[程序化纹样](procedural-patterns.md)、[特效与性能](decorative-effects-and-performance.md)、[几何与手势](geometry-background-and-gestures.md) |
 | 外观 | [文字配色](text-color-modes.md)、[液态玻璃](liquid-glass.md)、[背景与输入栏](background-composer-fixes.md)、[云母与聊天控件](mica-background-and-floating-chat-controls.md)、[高亮配色](highlight-original-palette-and-comments.md) |
 | 模型与搜索 | [模型名称识别](model-name-and-dark-text.md)、[模型协议](model-protocol-adaptation-20261118.md)、[供应商参数](official-provider-audit-20261118.md)、[自定义搜索](custom-search-service.md)、[Gemini 工具与豆包密钥](gemini-assistant-tools-and-doubao-keys.md) |
-| 图片与视频 | [图片参数](lingke-image26-shared-parameters.md)、[图片 API 和决策模型](image-api-decision-model-and-prompt-fixes.md)、[视频配置](video-provider-setup.md) |
+| 图片与视频 | [图片参数](lingke-image26-shared-parameters.md)、[图片 API 和决策模型](image-api-decision-model-and-prompt-fixes.md)、[视频配置](video-provider-setup.md)、[Gemini Responses 音视频附件](gemini-responses-media.md) |
 | 语音、工具与世界书 | [语音](speech-services.md)、[ask_user](ask-user-upgrade.md)、[终端](chat-terminal-preview.md)、[世界书](worldbook-guide.md)、[兼容边界](worldbook-compatibility-audit.md) |
-| 日志 | [日志设计](logging-reliability.md)、[日志重构](logging-refactor-and-response-identity-20261117.md)、[系统日志展示](system-log-presentation-20261117.md) |
+| 日志 | [日志设计](logging-reliability.md)、[日志重构](logging-refactor-and-response-identity-20261117.md)、[系统日志展示](system-log-presentation-20261117.md)、[引用链接与按需网络加载](citation-links-and-network-loading-20261128.md) |
 | Web 前端 | [功能边界](webui-remaining-sync-audit-2026-10-06.md)、[独立设置与图片](webui-independent-settings-images-2026-10-09.md)、[供应商向导](webui-provider-wizard-custom-js-2026-10-09.md) |
 
 ## 带日期的审阅与后续事项
@@ -41,6 +41,8 @@
 - [GitHub Token 与原生仓库卡片实现](github-token-native-cards-20261120.md)
 - [GitHub OG 风格卡片与导出](github-social-preview-20261120.md)
 - [总体审阅](module-review-and-roadmap-20261115.md)
+- [长期演进审阅](long-term-evolution-review-20261122.md)
+- [长期功能与服务候选](long-term-feature-and-service-catalog-20261122.md)
 
 ## 发行、归属与历史
 
